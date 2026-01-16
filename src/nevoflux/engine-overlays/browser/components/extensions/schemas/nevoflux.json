@@ -115,7 +115,7 @@
       {
         "name": "getVersion",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Get API version",
         "parameters": [],
         "returns": { "type": "string" }
@@ -123,7 +123,7 @@
       {
         "name": "getText",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Get element text content",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -134,7 +134,7 @@
       {
         "name": "getHtml",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Get element innerHTML",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -145,7 +145,7 @@
       {
         "name": "getValue",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Get form element value",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -156,7 +156,7 @@
       {
         "name": "getUrl",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Get current page URL",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true }
@@ -166,7 +166,7 @@
       {
         "name": "getTitle",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Get page title",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true }
@@ -176,7 +176,7 @@
       {
         "name": "snapshot",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Get accessibility tree snapshot",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -187,7 +187,7 @@
       {
         "name": "screenshot",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Take page screenshot",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -198,7 +198,7 @@
       {
         "name": "isVisible",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Check if element is visible",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -209,7 +209,7 @@
       {
         "name": "exists",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Check if element exists",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -220,7 +220,7 @@
       {
         "name": "click",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Click element",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -232,7 +232,7 @@
       {
         "name": "type",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Type text into element",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -245,7 +245,7 @@
       {
         "name": "fill",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Fill form field",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -257,7 +257,7 @@
       {
         "name": "open",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Navigate to URL",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -269,7 +269,7 @@
       {
         "name": "reload",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Reload page",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -280,7 +280,7 @@
       {
         "name": "back",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Go back in history",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true }
@@ -290,7 +290,7 @@
       {
         "name": "forward",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Go forward in history",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true }
@@ -300,7 +300,7 @@
       {
         "name": "waitForSelector",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Wait for element",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
@@ -312,7 +312,7 @@
       {
         "name": "waitForTimeout",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Wait for specified time",
         "parameters": [
           { "name": "ms", "type": "integer" }
@@ -322,7 +322,7 @@
       {
         "name": "filterSensitive",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Filter sensitive information from text",
         "parameters": [
           { "name": "text", "type": "string" },
@@ -333,7 +333,7 @@
       {
         "name": "getPrivacyConfig",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Get privacy configuration",
         "parameters": [],
         "returns": { "$ref": "PrivacyConfig" }
@@ -341,7 +341,7 @@
       {
         "name": "setPrivacyConfig",
         "type": "function",
-        "async": true,
+        "async": "promise",
         "description": "Update privacy configuration",
         "parameters": [
           { "name": "config", "$ref": "PrivacyConfig" }
