@@ -1,0 +1,354 @@
+[
+  {
+    "namespace": "nevoflux",
+    "description": "NevoFlux browser automation and data extraction API",
+    "types": [
+      {
+        "id": "ApiResult",
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "error": { "$ref": "ApiError", "optional": true }
+        }
+      },
+      {
+        "id": "ApiError",
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer" },
+          "message": { "type": "string" },
+          "recoverable": { "type": "boolean" },
+          "suggestion": { "type": "string", "optional": true }
+        }
+      },
+      {
+        "id": "SnapshotOptions",
+        "type": "object",
+        "properties": {
+          "interactive": { "type": "boolean", "optional": true },
+          "compact": { "type": "boolean", "optional": true },
+          "depth": { "type": "integer", "optional": true },
+          "root": { "type": "string", "optional": true }
+        }
+      },
+      {
+        "id": "SnapshotResult",
+        "type": "object",
+        "properties": {
+          "tree": { "type": "string" },
+          "refs": { "type": "object" }
+        }
+      },
+      {
+        "id": "ScreenshotOptions",
+        "type": "object",
+        "properties": {
+          "fullPage": { "type": "boolean", "optional": true },
+          "type": { "type": "string", "enum": ["png", "jpeg"], "optional": true },
+          "quality": { "type": "integer", "optional": true }
+        }
+      },
+      {
+        "id": "ScreenshotResult",
+        "type": "object",
+        "properties": {
+          "image": { "type": "string" },
+          "mimeType": { "type": "string" },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" }
+        }
+      },
+      {
+        "id": "ClickOptions",
+        "type": "object",
+        "properties": {
+          "button": { "type": "string", "enum": ["left", "right", "middle"], "optional": true },
+          "clickCount": { "type": "integer", "optional": true },
+          "delay": { "type": "integer", "optional": true },
+          "force": { "type": "boolean", "optional": true }
+        }
+      },
+      {
+        "id": "TypeOptions",
+        "type": "object",
+        "properties": {
+          "delay": { "type": "integer", "optional": true }
+        }
+      },
+      {
+        "id": "WaitOptions",
+        "type": "object",
+        "properties": {
+          "timeout": { "type": "integer", "optional": true },
+          "state": { "type": "string", "enum": ["visible", "hidden", "attached", "detached"], "optional": true }
+        }
+      },
+      {
+        "id": "NavigationOptions",
+        "type": "object",
+        "properties": {
+          "timeout": { "type": "integer", "optional": true },
+          "waitUntil": { "type": "string", "enum": ["load", "domcontentloaded", "networkidle"], "optional": true }
+        }
+      },
+      {
+        "id": "FilterResult",
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "filteredCount": { "type": "integer" },
+          "filtered": { "type": "boolean" }
+        }
+      },
+      {
+        "id": "PrivacyConfig",
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "filters": { "type": "object" },
+          "mode": { "type": "string" },
+          "scope": { "type": "string" }
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "getVersion",
+        "type": "function",
+        "async": true,
+        "description": "Get API version",
+        "parameters": [],
+        "returns": { "type": "string" }
+      },
+      {
+        "name": "getText",
+        "type": "function",
+        "async": true,
+        "description": "Get element text content",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string", "optional": true }
+        ],
+        "returns": { "type": "string" }
+      },
+      {
+        "name": "getHtml",
+        "type": "function",
+        "async": true,
+        "description": "Get element innerHTML",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string", "optional": true }
+        ],
+        "returns": { "type": "string" }
+      },
+      {
+        "name": "getValue",
+        "type": "function",
+        "async": true,
+        "description": "Get form element value",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" }
+        ],
+        "returns": { "type": "string" }
+      },
+      {
+        "name": "getUrl",
+        "type": "function",
+        "async": true,
+        "description": "Get current page URL",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "type": "string" }
+      },
+      {
+        "name": "getTitle",
+        "type": "function",
+        "async": true,
+        "description": "Get page title",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "type": "string" }
+      },
+      {
+        "name": "snapshot",
+        "type": "function",
+        "async": true,
+        "description": "Get accessibility tree snapshot",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "options", "$ref": "SnapshotOptions", "optional": true }
+        ],
+        "returns": { "$ref": "SnapshotResult" }
+      },
+      {
+        "name": "screenshot",
+        "type": "function",
+        "async": true,
+        "description": "Take page screenshot",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "options", "$ref": "ScreenshotOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ScreenshotResult" }
+      },
+      {
+        "name": "isVisible",
+        "type": "function",
+        "async": true,
+        "description": "Check if element is visible",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" }
+        ],
+        "returns": { "type": "boolean" }
+      },
+      {
+        "name": "exists",
+        "type": "function",
+        "async": true,
+        "description": "Check if element exists",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" }
+        ],
+        "returns": { "type": "boolean" }
+      },
+      {
+        "name": "click",
+        "type": "function",
+        "async": true,
+        "description": "Click element",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" },
+          { "name": "options", "$ref": "ClickOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "type",
+        "type": "function",
+        "async": true,
+        "description": "Type text into element",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" },
+          { "name": "text", "type": "string" },
+          { "name": "options", "$ref": "TypeOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "fill",
+        "type": "function",
+        "async": true,
+        "description": "Fill form field",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" },
+          { "name": "text", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "open",
+        "type": "function",
+        "async": true,
+        "description": "Navigate to URL",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "url", "type": "string" },
+          { "name": "options", "$ref": "NavigationOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "reload",
+        "type": "function",
+        "async": true,
+        "description": "Reload page",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "options", "$ref": "NavigationOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "back",
+        "type": "function",
+        "async": true,
+        "description": "Go back in history",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "forward",
+        "type": "function",
+        "async": true,
+        "description": "Go forward in history",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "waitForSelector",
+        "type": "function",
+        "async": true,
+        "description": "Wait for element",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" },
+          { "name": "options", "$ref": "WaitOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "waitForTimeout",
+        "type": "function",
+        "async": true,
+        "description": "Wait for specified time",
+        "parameters": [
+          { "name": "ms", "type": "integer" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "filterSensitive",
+        "type": "function",
+        "async": true,
+        "description": "Filter sensitive information from text",
+        "parameters": [
+          { "name": "text", "type": "string" },
+          { "name": "options", "type": "object", "optional": true }
+        ],
+        "returns": { "$ref": "FilterResult" }
+      },
+      {
+        "name": "getPrivacyConfig",
+        "type": "function",
+        "async": true,
+        "description": "Get privacy configuration",
+        "parameters": [],
+        "returns": { "$ref": "PrivacyConfig" }
+      },
+      {
+        "name": "setPrivacyConfig",
+        "type": "function",
+        "async": true,
+        "description": "Update privacy configuration",
+        "parameters": [
+          { "name": "config", "$ref": "PrivacyConfig" }
+        ],
+        "returns": { "$ref": "PrivacyConfig" }
+      }
+    ],
+    "permissions": ["nevoflux"]
+  }
+]
