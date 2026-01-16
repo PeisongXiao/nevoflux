@@ -1,0 +1,11 @@
+{
+  "name": "nevoflux-api-schema",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "generate": "node generate.js"
+  },
+  "dependencies": {
+    "handlebars": "^4.7.8"
+  }
+}
