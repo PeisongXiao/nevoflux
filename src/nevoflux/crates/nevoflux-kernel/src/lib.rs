@@ -2,9 +2,9 @@
 //!
 //! Provides privacy filtering and data processing for browser.nevoflux.* API
 
-use std::sync::RwLock;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::RwLock;
 
 // ========== Error Types ==========
 
@@ -61,9 +61,8 @@ pub struct FilteredItem {
 
 // ========== Global State ==========
 
-static PRIVACY_CONFIG: Lazy<RwLock<PrivacyConfig>> = Lazy::new(|| {
-    RwLock::new(PrivacyConfig::default())
-});
+static PRIVACY_CONFIG: Lazy<RwLock<PrivacyConfig>> =
+    Lazy::new(|| RwLock::new(PrivacyConfig::default()));
 
 // ========== UniFFI Exported Functions ==========
 
@@ -123,7 +122,9 @@ pub fn filter_sensitive(
                 position: mat.start() as u32,
             });
         }
-        result_text = phone_regex.replace_all(&result_text, "[手机号已隐藏]").to_string();
+        result_text = phone_regex
+            .replace_all(&result_text, "[手机号已隐藏]")
+            .to_string();
     }
 
     // ID card filter (Chinese)
@@ -135,7 +136,9 @@ pub fn filter_sensitive(
                 position: mat.start() as u32,
             });
         }
-        result_text = id_regex.replace_all(&result_text, "[身份证已隐藏]").to_string();
+        result_text = id_regex
+            .replace_all(&result_text, "[身份证已隐藏]")
+            .to_string();
     }
 
     // Email filter
@@ -147,7 +150,9 @@ pub fn filter_sensitive(
                 position: mat.start() as u32,
             });
         }
-        result_text = email_regex.replace_all(&result_text, "[邮箱已隐藏]").to_string();
+        result_text = email_regex
+            .replace_all(&result_text, "[邮箱已隐藏]")
+            .to_string();
     }
 
     // Bank card filter
@@ -163,14 +168,17 @@ pub fn filter_sensitive(
                 });
             }
         }
-        result_text = bank_regex.replace_all(&result_text, |caps: &regex::Captures| {
-            let matched = caps.get(0).unwrap().as_str();
-            if matched.starts_with("62") || matched.starts_with("4") || matched.starts_with("5") {
-                "[银行卡已隐藏]".to_string()
-            } else {
-                matched.to_string()
-            }
-        }).to_string();
+        result_text = bank_regex
+            .replace_all(&result_text, |caps: &regex::Captures| {
+                let matched = caps.get(0).unwrap().as_str();
+                if matched.starts_with("62") || matched.starts_with("4") || matched.starts_with("5")
+                {
+                    "[银行卡已隐藏]".to_string()
+                } else {
+                    matched.to_string()
+                }
+            })
+            .to_string();
     }
 
     FilterResult {
@@ -199,7 +207,10 @@ mod tests {
     fn test_filter_phone() {
         let result = filter_sensitive(
             "我的电话是13812345678".to_string(),
-            true, false, false, false
+            true,
+            false,
+            false,
+            false,
         );
         assert_eq!(result.text, "我的电话是[手机号已隐藏]");
         assert_eq!(result.filtered_count, 1);
@@ -209,7 +220,10 @@ mod tests {
     fn test_filter_email() {
         let result = filter_sensitive(
             "邮箱: test@example.com".to_string(),
-            false, false, true, false
+            false,
+            false,
+            true,
+            false,
         );
         assert_eq!(result.text, "邮箱: [邮箱已隐藏]");
         assert_eq!(result.filtered_count, 1);
