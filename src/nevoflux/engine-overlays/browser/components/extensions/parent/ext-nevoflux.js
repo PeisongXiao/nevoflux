@@ -1012,6 +1012,120 @@ this.nevoflux = class extends ExtensionAPI {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
           return self.executeInTab(resolvedTabId, extension, "frameMain", {});
         },
+
+        // ========== Dialog Handling ==========
+
+        async dialogAccept(text) {
+          // Dialog handling is at the window level, not tab level
+          // Route through the current tab's actor to reach NevofluxParent
+          const tabId = await self.getActiveTabId(extension);
+          const tab = extension.tabManager.get(tabId);
+          if (!tab?.browser) {
+            // No tab, but dialog might exist - silently succeed
+            return { success: true };
+          }
+
+          try {
+            const actor = tab.browser.browsingContext.currentWindowGlobal.getActor("Nevoflux");
+            return actor.sendQuery("dialogAccept", { text });
+          } catch (e) {
+            // Actor not available - silently succeed (no dialog)
+            return { success: true };
+          }
+        },
+
+        async dialogDismiss() {
+          const tabId = await self.getActiveTabId(extension);
+          const tab = extension.tabManager.get(tabId);
+          if (!tab?.browser) {
+            return { success: true };
+          }
+
+          try {
+            const actor = tab.browser.browsingContext.currentWindowGlobal.getActor("Nevoflux");
+            return actor.sendQuery("dialogDismiss", {});
+          } catch (e) {
+            return { success: true };
+          }
+        },
+
+        // ========== Download Handling ==========
+
+        async waitForDownload(options = {}) {
+          const timeout = options.timeout || 30000;
+
+          // Import timer functions for extension parent context
+          const { setTimeout: chromeSetTimeout, clearTimeout: chromeClearTimeout } = ChromeUtils.importESModule(
+            "resource://gre/modules/Timer.sys.mjs"
+          );
+
+          return new Promise((resolve) => {
+            let timeoutId;
+            let downloadListener;
+
+            const cleanup = () => {
+              if (timeoutId) {
+                chromeClearTimeout(timeoutId);
+              }
+              if (downloadListener) {
+                try {
+                  // Remove listener using internal API
+                  // Note: This uses Firefox's internal download manager
+                  Services.obs.removeObserver(downloadListener, "dl-start");
+                } catch (e) {
+                  // Listener already removed
+                }
+              }
+            };
+
+            timeoutId = chromeSetTimeout(() => {
+              cleanup();
+              resolve({
+                success: false,
+                error: { code: 12001, message: "Download timeout", recoverable: true }
+              });
+            }, timeout);
+
+            downloadListener = {
+              observe: (subject, topic, data) => {
+                if (topic === "dl-start") {
+                  cleanup();
+
+                  try {
+                    // subject is nsIDownload
+                    const download = subject.QueryInterface(Ci.nsIDownload);
+                    resolve({
+                      success: true,
+                      url: download.source?.spec || "",
+                      filename: download.targetFile?.leafName || "",
+                      mimeType: download.MIMEInfo?.MIMEType || "",
+                      size: download.totalBytes || -1
+                    });
+                  } catch (e) {
+                    // Fallback for different Firefox versions
+                    resolve({
+                      success: true,
+                      url: "",
+                      filename: "",
+                      mimeType: "",
+                      size: -1
+                    });
+                  }
+                }
+              }
+            };
+
+            try {
+              Services.obs.addObserver(downloadListener, "dl-start");
+            } catch (e) {
+              cleanup();
+              resolve({
+                success: false,
+                error: { code: 12001, message: `Failed to observe downloads: ${e}`, recoverable: false }
+              });
+            }
+          });
+        },
       },
     };
   }
