@@ -281,6 +281,35 @@
           "type": { "type": "string", "optional": true },
           "error": { "$ref": "ApiError", "optional": true }
         }
+      },
+      {
+        "id": "FrameInfo",
+        "type": "object",
+        "properties": {
+          "selector": { "type": "string" },
+          "url": { "type": "string" },
+          "name": { "type": "string" },
+          "visible": { "type": "boolean" }
+        }
+      },
+      {
+        "id": "DownloadResult",
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "url": { "type": "string", "optional": true },
+          "filename": { "type": "string", "optional": true },
+          "mimeType": { "type": "string", "optional": true },
+          "size": { "type": "integer", "optional": true },
+          "error": { "$ref": "ApiError", "optional": true }
+        }
+      },
+      {
+        "id": "DownloadOptions",
+        "type": "object",
+        "properties": {
+          "timeout": { "type": "integer", "optional": true }
+        }
       }
     ],
     "functions": [
@@ -965,6 +994,65 @@
           { "name": "handle", "type": "string" }
         ],
         "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "listFrames",
+        "type": "function",
+        "async": "promise",
+        "description": "List all iframes in current document",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "type": "array", "items": { "$ref": "FrameInfo" } }
+      },
+      {
+        "name": "switchFrame",
+        "type": "function",
+        "async": "promise",
+        "description": "Switch to specified iframe",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "frameMain",
+        "type": "function",
+        "async": "promise",
+        "description": "Return to top-level main document",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "dialogAccept",
+        "type": "function",
+        "async": "promise",
+        "description": "Accept current native dialog (alert/confirm/prompt)",
+        "parameters": [
+          { "name": "text", "type": "string", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "dialogDismiss",
+        "type": "function",
+        "async": "promise",
+        "description": "Dismiss current native dialog",
+        "parameters": [],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "waitForDownload",
+        "type": "function",
+        "async": "promise",
+        "description": "Wait for a download to start",
+        "parameters": [
+          { "name": "options", "$ref": "DownloadOptions", "optional": true }
+        ],
+        "returns": { "$ref": "DownloadResult" }
       }
     ]
   }
