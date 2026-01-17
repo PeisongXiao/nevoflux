@@ -124,16 +124,20 @@ Built on [Zen Browser](https://zen-browser.app/), which is based on Firefox:
 git clone https://github.com/user/nevoflux.git
 cd nevoflux
 
-# Install dependencies (requires Node.js, npm)
+# Install dependencies (requires Node.js 18+, npm, Python 3)
 npm install
 
-# Bootstrap Zen Browser dependencies
+# Download and bootstrap Zen Browser dependencies
+npm run download
 npm run bootstrap
 
-# Build
+# Import patches and overlays to src/zen/
+npm run import
+
+# Build the browser (this takes a while on first run)
 npm run build
 
-# Run
+# Run the browser
 npm run start
 ```
 
@@ -292,20 +296,81 @@ nevoflux is an open-source project, and we welcome contributions from the commun
 ### Development Setup
 
 ```bash
-# Prerequisites: Node.js 18+, npm, Python 3
+# Prerequisites: Node.js 18+, npm, Python 3, Rust (for native agent)
 
 # Clone and setup
 git clone https://github.com/user/nevoflux.git
 cd nevoflux
 npm install
+npm run download
 npm run bootstrap
 
-# Run in development mode
-npm run dev
+# Apply patches and overlays to src/zen/
+npm run import
+
+# Run the browser
+npm run start
 
 # Run tests
 npm run test
 ```
+
+### Development Workflow
+
+nevoflux uses a **patch-based system** for customizing Zen Browser. The `src/zen/` directory contains the upstream Zen code, and customizations are stored as patches in `src/nevoflux/`.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  npm run import                                             │
+│      ↓                                                      │
+│  Develop & Test (src/zen/ has patches + overlays applied)   │
+│      ↓                                                      │
+│  git commit                                                 │
+│      ↓                                                      │
+│  [pre-commit] Auto-revert src/zen/                          │
+│      ↓                                                      │
+│  Commit succeeds                                            │
+│      ↓                                                      │
+│  [post-commit] Auto-restore src/zen/                        │
+│      ↓                                                      │
+│  Continue development                                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key points:**
+- **Never commit changes directly to `src/zen/`** — all customizations go through patches
+- Git hooks automatically handle `src/zen/` cleanup and restoration
+- After first `npm run import`, you can develop and commit freely
+
+### Modifying Zen Browser Code
+
+If you need to modify Zen Browser code:
+
+```bash
+# 1. Make changes in src/zen/
+# 2. Test your changes
+# 3. Export as patches
+./scripts/export-nevoflux-patches.sh
+
+# 4. Revert src/zen/ (or just commit - hooks will auto-revert)
+./scripts/revert-zen-changes.sh
+
+# 5. Commit the patches
+git add src/nevoflux/patches/
+git commit -m "patch(feature): description"
+```
+
+### Build Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run import` | Apply patches and overlays to src/zen/ |
+| `npm run build` | Full browser build |
+| `npm run build:ui` | UI-only rebuild (faster) |
+| `npm run start` | Launch the browser |
+| `npm run reload-ext` | Reload extension (packages + clears caches) |
+| `npm run test` | Run tests |
+| `npm run lint` | Run ESLint/Prettier |
 
 ---
 
