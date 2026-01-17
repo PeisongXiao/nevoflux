@@ -1,7 +1,7 @@
 /**
  * NevoFlux Browser API Types
  * Version: 1.0.0
- * Generated: 2026-01-16T14:30:55.421Z
+ * Generated: 2026-01-16T15:36:51.856Z
  *
  * DO NOT EDIT - This file is auto-generated from nevoflux-api.json
  */

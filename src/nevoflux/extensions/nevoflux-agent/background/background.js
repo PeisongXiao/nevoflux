@@ -296,7 +296,8 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case MessageTypes.INJECT_CONTENT_SIDEBAR:
       injectContentSidebar(message.payload?.tab_id || null);
-      break;
+      sendResponse({ success: true });
+      return;
 
     // =============================================
     // Content Sidebar -> Chat Sidebar (upstream)
@@ -369,7 +370,12 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     default:
       console.warn("[NevoFlux] Unknown message type:", msgType);
+      sendResponse({ success: false, error: "Unknown message type" });
+      return;
   }
+
+  // Default response for messages that don't explicitly respond
+  sendResponse({ success: true });
 });
 
 /**

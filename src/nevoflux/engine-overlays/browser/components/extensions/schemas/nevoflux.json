@@ -348,7 +348,6 @@
         ],
         "returns": { "$ref": "PrivacyConfig" }
       }
-    ],
-    "permissions": ["nevoflux"]
+    ]
   }
 ]

@@ -116,19 +116,28 @@ this.nevoflux = class extends ExtensionAPI {
             return { success: false, error: { code: 3001, message: "Tab not found", recoverable: false } };
           }
 
-          const { timeout = 30000, waitUntil = "load" } = options;
-
           try {
-            const loadPromise = self.waitForLoad(tab.browser, waitUntil, timeout);
+            // Use fixupURI for simpler URL handling
+            const uri = Services.io.newURI(url);
+            const principal = Services.scriptSecurityManager.getSystemPrincipal();
 
-            tab.browser.loadURI(Services.io.newURI(url), {
-              triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+            tab.browser.loadURI(uri, {
+              triggeringPrincipal: principal,
             });
 
-            await loadPromise;
-            return { success: true };
+            return { success: true, url: uri.spec };
           } catch (e) {
-            return { success: false, error: { code: 2001, message: e.message, recoverable: true } };
+            // Fallback: try using the tabs API
+            try {
+              const tabsApi = extension.apiManager.getAPI("tabs", extension, "addon_parent");
+              if (tabsApi?.tabs?.update) {
+                await tabsApi.tabs.update(resolvedTabId, { url });
+                return { success: true, url };
+              }
+            } catch (fallbackError) {
+              // Ignore fallback error
+            }
+            return { success: false, error: { code: 2001, message: String(e), recoverable: true } };
           }
         },
 
@@ -141,13 +150,10 @@ this.nevoflux = class extends ExtensionAPI {
           }
 
           try {
-            const { timeout = 30000, waitUntil = "load" } = options;
-            const loadPromise = self.waitForLoad(tab.browser, waitUntil, timeout);
             tab.browser.reload();
-            await loadPromise;
             return { success: true };
           } catch (e) {
-            return { success: false, error: { code: 2001, message: e.message, recoverable: true } };
+            return { success: false, error: { code: 2001, message: String(e), recoverable: true } };
           }
         },
 
@@ -189,7 +195,11 @@ this.nevoflux = class extends ExtensionAPI {
         },
 
         async waitForTimeout(ms) {
-          await new Promise(resolve => setTimeout(resolve, ms));
+          // In extension parent context, use lazy getter for ChromeUtils
+          const { setTimeout: chromeSetTimeout } = ChromeUtils.importESModule(
+            "resource://gre/modules/Timer.sys.mjs"
+          );
+          await new Promise(resolve => chromeSetTimeout(resolve, ms));
           return { success: true };
         },
 
@@ -218,9 +228,13 @@ this.nevoflux = class extends ExtensionAPI {
 
   // ========== Helper Methods ==========
 
-  async getActiveTabId(extension) {
-    const tabs = await extension.tabManager.query({ active: true, currentWindow: true });
-    return tabs[0]?.id;
+  getActiveTabId(extension) {
+    // tabTracker is a global from ext-browser.js
+    const activeTab = tabTracker?.activeTab;
+    if (!activeTab) {
+      return null;
+    }
+    return tabTracker.getId(activeTab);
   }
 
   async executeInTab(tabId, extension, action, params) {
@@ -238,8 +252,13 @@ this.nevoflux = class extends ExtensionAPI {
   }
 
   waitForLoad(browser, waitUntil, timeout) {
+    // Import timer functions for extension parent context
+    const { setTimeout: chromeSetTimeout, clearTimeout: chromeClearTimeout } = ChromeUtils.importESModule(
+      "resource://gre/modules/Timer.sys.mjs"
+    );
+
     return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
+      const timeoutId = chromeSetTimeout(() => {
         cleanup();
         reject(new Error("Navigation timeout"));
       }, timeout);
@@ -258,7 +277,7 @@ this.nevoflux = class extends ExtensionAPI {
       };
 
       const cleanup = () => {
-        clearTimeout(timeoutId);
+        chromeClearTimeout(timeoutId);
         try {
           browser.removeProgressListener(listener);
         } catch (e) {
@@ -275,18 +294,21 @@ this.nevoflux = class extends ExtensionAPI {
     let result = text;
     let filteredCount = 0;
 
-    if (config.phone !== false) {
-      const phoneRegex = /1[3-9]\d{9}/g;
-      const matches = result.match(phoneRegex) || [];
-      filteredCount += matches.length;
-      result = result.replace(phoneRegex, "[PHONE_REDACTED]");
-    }
-
+    // IMPORTANT: Process ID card BEFORE phone to avoid partial matches
+    // ID card is 18 digits, phone is 11 digits - phone regex can match inside ID card
     if (config.idCard !== false) {
       const idRegex = /\d{17}[\dXx]/g;
       const matches = result.match(idRegex) || [];
       filteredCount += matches.length;
       result = result.replace(idRegex, "[ID_REDACTED]");
+    }
+
+    if (config.phone !== false) {
+      // Use word boundary-like check to avoid matching inside other numbers
+      const phoneRegex = /(?<!\d)1[3-9]\d{9}(?!\d)/g;
+      const matches = result.match(phoneRegex) || [];
+      filteredCount += matches.length;
+      result = result.replace(phoneRegex, "[PHONE_REDACTED]");
     }
 
     if (config.email !== false) {

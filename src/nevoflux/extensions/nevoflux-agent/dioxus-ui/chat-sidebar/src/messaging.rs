@@ -151,11 +151,12 @@ fn handle_incoming_message_sync(
         ExtensionMessage::TabContextUpdate(ctx) => {
             tracing::info!("Tab context updated: tab_id={}, url={}", ctx.tab_id, ctx.url);
 
-            // Auto-inject Content Sidebar when tab context updates
-            let tab_id = ctx.tab_id;
-            spawn(async move {
-                inject_content_sidebar(tab_id).await;
-            });
+            // Note: Auto-inject disabled temporarily to avoid WASM panic
+            // TODO: Fix JsFuture error handling before re-enabling
+            // let tab_id = ctx.tab_id;
+            // spawn(async move {
+            //     inject_content_sidebar(tab_id).await;
+            // });
 
             tab_context.set(TabContext::from(ctx));
         }

@@ -25,3 +25,6 @@ locales/firefox-l10n/
 
 CLAUDE.md
 .claude
+docs/plans/
+*.plan
+*_plan.md
