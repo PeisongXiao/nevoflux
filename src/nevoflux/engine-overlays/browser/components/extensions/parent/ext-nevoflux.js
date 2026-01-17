@@ -519,6 +519,138 @@ this.nevoflux = class extends ExtensionAPI {
           }
           return privacyConfig;
         },
+
+        // ========== Cookie Management ==========
+
+        async getCookies(filter = {}) {
+          try {
+            const cookieManager = Services.cookies;
+            const cookies = [];
+
+            for (const cookie of cookieManager.cookies) {
+              if (filter.name && cookie.name !== filter.name) continue;
+              if (filter.domain && !cookie.host.endsWith(filter.domain)) continue;
+              if (filter.url) {
+                const url = new URL(filter.url);
+                if (!cookie.host.endsWith(url.hostname)) continue;
+              }
+
+              cookies.push({
+                name: cookie.name,
+                value: cookie.value,
+                domain: cookie.host,
+                path: cookie.path,
+                secure: cookie.isSecure,
+                httpOnly: cookie.isHttpOnly,
+                sameSite: ["none", "lax", "strict"][cookie.sameSite] || "none",
+                expirationDate: cookie.expiry,
+                session: cookie.isSession
+              });
+            }
+
+            return cookies;
+          } catch (e) {
+            return [];
+          }
+        },
+
+        async setCookie(cookie) {
+          try {
+            const { url, name, value, domain, path = "/", secure = false, httpOnly = false, sameSite = "lax", expirationDate } = cookie;
+
+            const parsedUrl = new URL(url);
+            const cookieDomain = domain || parsedUrl.hostname;
+            const sameSiteMap = { "none": 0, "lax": 1, "strict": 2 };
+
+            Services.cookies.add(
+              cookieDomain,
+              path,
+              name,
+              value,
+              secure,
+              httpOnly,
+              !expirationDate,  // isSession
+              expirationDate || Math.floor(Date.now() / 1000) + 86400 * 365,
+              {},  // originAttributes
+              sameSiteMap[sameSite] || 1,
+              Ci.nsICookie.SCHEME_HTTPS
+            );
+
+            return { success: true };
+          } catch (e) {
+            return { success: false, error: { code: 7001, message: String(e), recoverable: false } };
+          }
+        },
+
+        async deleteCookies(filter = {}) {
+          try {
+            const cookiesToDelete = await this.getCookies(filter);
+
+            for (const cookie of cookiesToDelete) {
+              Services.cookies.remove(cookie.domain, cookie.name, cookie.path, {});
+            }
+
+            return { success: true };
+          } catch (e) {
+            return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+          }
+        },
+
+        async clearCookies(domain) {
+          try {
+            if (domain) {
+              const filter = { domain };
+              return this.deleteCookies(filter);
+            } else {
+              Services.cookies.removeAll();
+              return { success: true };
+            }
+          } catch (e) {
+            return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+          }
+        },
+
+        // ========== Storage Management ==========
+
+        async getLocalStorage(tabId, key) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "getLocalStorage", { key });
+        },
+
+        async setLocalStorage(tabId, key, value) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "setLocalStorage", { key, value });
+        },
+
+        async removeLocalStorage(tabId, key) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "removeLocalStorage", { key });
+        },
+
+        async clearLocalStorage(tabId) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "clearLocalStorage", {});
+        },
+
+        async getSessionStorage(tabId, key) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "getSessionStorage", { key });
+        },
+
+        async setSessionStorage(tabId, key, value) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "setSessionStorage", { key, value });
+        },
+
+        async removeSessionStorage(tabId, key) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "removeSessionStorage", { key });
+        },
+
+        async clearSessionStorage(tabId) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "clearSessionStorage", {});
+        },
       },
     };
   }

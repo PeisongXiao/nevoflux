@@ -45,6 +45,14 @@ export class NevofluxChild extends JSWindowActorChild {
       drag: () => this.drag(safeParams),
       focus: () => this.focus(safeParams),
       clear: () => this.clear(safeParams),
+      getLocalStorage: () => this.getLocalStorage(safeParams),
+      setLocalStorage: () => this.setLocalStorage(safeParams),
+      removeLocalStorage: () => this.removeLocalStorage(safeParams),
+      clearLocalStorage: () => this.clearLocalStorage(safeParams),
+      getSessionStorage: () => this.getSessionStorage(safeParams),
+      setSessionStorage: () => this.setSessionStorage(safeParams),
+      removeSessionStorage: () => this.removeSessionStorage(safeParams),
+      clearSessionStorage: () => this.clearSessionStorage(safeParams),
     };
 
     const handler = handlers[action];
@@ -765,5 +773,157 @@ export class NevofluxChild extends JSWindowActorChild {
     }
 
     return path.join(" > ");
+  }
+
+  // ========== Storage ==========
+
+  getLocalStorage({ key }) {
+    const win = this.contentWindow;
+    if (!win) {
+      return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    try {
+      if (key) {
+        const value = win.localStorage.getItem(key);
+        try {
+          return JSON.parse(value);
+        } catch {
+          return value;
+        }
+      } else {
+        const result = {};
+        for (let i = 0; i < win.localStorage.length; i++) {
+          const k = win.localStorage.key(i);
+          const v = win.localStorage.getItem(k);
+          try {
+            result[k] = JSON.parse(v);
+          } catch {
+            result[k] = v;
+          }
+        }
+        return result;
+      }
+    } catch (e) {
+      return { success: false, error: { code: 7004, message: String(e), recoverable: false } };
+    }
+  }
+
+  setLocalStorage({ key, value }) {
+    const win = this.contentWindow;
+    if (!win) {
+      return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    try {
+      const serialized = typeof value === "string" ? value : JSON.stringify(value);
+      win.localStorage.setItem(key, serialized);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 7003, message: String(e), recoverable: false } };
+    }
+  }
+
+  removeLocalStorage({ key }) {
+    const win = this.contentWindow;
+    if (!win) {
+      return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    try {
+      win.localStorage.removeItem(key);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+    }
+  }
+
+  clearLocalStorage() {
+    const win = this.contentWindow;
+    if (!win) {
+      return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    try {
+      win.localStorage.clear();
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+    }
+  }
+
+  getSessionStorage({ key }) {
+    const win = this.contentWindow;
+    if (!win) {
+      return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    try {
+      if (key) {
+        const value = win.sessionStorage.getItem(key);
+        try {
+          return JSON.parse(value);
+        } catch {
+          return value;
+        }
+      } else {
+        const result = {};
+        for (let i = 0; i < win.sessionStorage.length; i++) {
+          const k = win.sessionStorage.key(i);
+          const v = win.sessionStorage.getItem(k);
+          try {
+            result[k] = JSON.parse(v);
+          } catch {
+            result[k] = v;
+          }
+        }
+        return result;
+      }
+    } catch (e) {
+      return { success: false, error: { code: 7004, message: String(e), recoverable: false } };
+    }
+  }
+
+  setSessionStorage({ key, value }) {
+    const win = this.contentWindow;
+    if (!win) {
+      return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    try {
+      const serialized = typeof value === "string" ? value : JSON.stringify(value);
+      win.sessionStorage.setItem(key, serialized);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 7003, message: String(e), recoverable: false } };
+    }
+  }
+
+  removeSessionStorage({ key }) {
+    const win = this.contentWindow;
+    if (!win) {
+      return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    try {
+      win.sessionStorage.removeItem(key);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+    }
+  }
+
+  clearSessionStorage() {
+    const win = this.contentWindow;
+    if (!win) {
+      return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    try {
+      win.sessionStorage.clear();
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+    }
   }
 }
