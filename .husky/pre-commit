@@ -1,1 +1,45 @@
+#!/bin/sh
+
+# Check for uncommitted changes in src/zen/
+# These changes must be exported as patches before committing
+
+# Get staged files in src/zen/
+ZEN_STAGED=$(git diff --cached --name-only | grep "^src/zen/" || true)
+
+# Get unstaged changes in src/zen/
+ZEN_UNSTAGED=$(git diff --name-only | grep "^src/zen/" || true)
+
+# Combine both
+ZEN_CHANGES="${ZEN_STAGED}${ZEN_UNSTAGED}"
+
+if [ -n "$ZEN_CHANGES" ]; then
+    echo ""
+    echo "============================================================"
+    echo "  ERROR: Detected changes in src/zen/"
+    echo "============================================================"
+    echo ""
+    echo "You have modifications in src/zen/ that must be exported as"
+    echo "patches before committing. Direct commits to src/zen/ are not"
+    echo "allowed - all changes must go through the patch system."
+    echo ""
+    echo "Changed files:"
+    echo "$ZEN_CHANGES" | sed 's/^/  - /'
+    echo ""
+    echo "Please run the following commands:"
+    echo ""
+    echo "  1. Export patches:"
+    echo "     ./scripts/export-nevoflux-patches.sh"
+    echo ""
+    echo "  2. Revert src/zen/ to original state:"
+    echo "     ./scripts/revert-zen-changes.sh"
+    echo ""
+    echo "  3. Stage the patches and commit:"
+    echo "     git add src/nevoflux/patches/"
+    echo "     git commit"
+    echo ""
+    echo "============================================================"
+    exit 1
+fi
+
+# Run lint-staged if no src/zen/ issues
 npx lint-staged
