@@ -7,6 +7,11 @@
 // API version for compatibility checking
 const API_VERSION = "1.0.0";
 
+// Helper to escape regex special characters for safe pattern construction
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Default privacy config
 const DEFAULT_PRIVACY_CONFIG = {
   enabled: true,
@@ -218,15 +223,23 @@ this.nevoflux = class extends ExtensionAPI {
               win.window.gBrowser.selectedTab = tab;
             }
 
+            // Guard against tabTracker being unavailable
+            if (!tabTracker) {
+              return { success: false, error: { code: 6001, message: "Tab tracker unavailable", recoverable: false } };
+            }
+
             const tabId = tabTracker.getId(tab);
             return {
-              id: tabId,
-              url: url || "about:newtab",
-              title: "",
-              active,
-              index: tab._tPos,
-              windowId: win.id,
-              status: "loading",
+              success: true,
+              tab: {
+                id: tabId,
+                url: url || "about:newtab",
+                title: "",
+                active,
+                index: tab._tPos,
+                windowId: win.id,
+                status: "loading",
+              },
             };
           } catch (e) {
             return { success: false, error: { code: 6001, message: String(e), recoverable: false } };
@@ -311,12 +324,16 @@ this.nevoflux = class extends ExtensionAPI {
             if (filter.active !== undefined && tab.active !== filter.active) return false;
             if (filter.windowId !== undefined && tab.windowId !== filter.windowId) return false;
             if (filter.url) {
-              const pattern = filter.url.replace(/\*/g, ".*");
+              // Escape regex special chars first, then convert wildcards to regex
+              const escaped = escapeRegExp(filter.url);
+              const pattern = escaped.replace(/\\\*/g, ".*");
               const regex = new RegExp(`^${pattern}$`);
               if (!regex.test(tab.url)) return false;
             }
             if (filter.title) {
-              const pattern = filter.title.replace(/\*/g, ".*");
+              // Escape regex special chars first, then convert wildcards to regex
+              const escaped = escapeRegExp(filter.title);
+              const pattern = escaped.replace(/\\\*/g, ".*");
               const regex = new RegExp(`^${pattern}$`, "i");
               if (!regex.test(tab.title)) return false;
             }
