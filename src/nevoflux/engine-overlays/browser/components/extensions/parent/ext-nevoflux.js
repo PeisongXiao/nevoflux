@@ -31,10 +31,13 @@ const DEFAULT_PRIVACY_CONFIG = {
 let privacyConfig = { ...DEFAULT_PRIVACY_CONFIG };
 
 // Network capture state
-const networkCaptures = new Map();  // handle -> { options, requests }
+const networkCaptures = new Map();  // handle -> { options, requests, createdAt }
 const networkIntercepts = new Map(); // handle -> { options, listener }
 let captureCounter = 0;
 let interceptCounter = 0;
+
+// Maximum age for captures before auto-cleanup (5 minutes)
+const CAPTURE_MAX_AGE_MS = 300000;
 
 this.nevoflux = class extends ExtensionAPI {
   getAPI(context) {
@@ -690,7 +693,8 @@ this.nevoflux = class extends ExtensionAPI {
           const captureData = {
             options,
             requests: [],
-            listener: null
+            listener: null,
+            createdAt: Date.now()
           };
 
           const { urlPattern, resourceTypes, recordBody = false } = options;
@@ -727,9 +731,17 @@ this.nevoflux = class extends ExtensionAPI {
         },
 
         async stopCapture(handle) {
+          // Auto-cleanup old captures first
+          const now = Date.now();
+          for (const [h, data] of networkCaptures) {
+            if (now - data.createdAt > CAPTURE_MAX_AGE_MS) {
+              networkCaptures.delete(h);
+            }
+          }
+
           const captureData = networkCaptures.get(handle);
           if (!captureData) {
-            return [];
+            return { success: false, error: { code: 8001, message: "Capture not found", recoverable: false } };
           }
 
           const requests = [...captureData.requests];
@@ -738,9 +750,17 @@ this.nevoflux = class extends ExtensionAPI {
         },
 
         async getCaptures(handle) {
+          // Auto-cleanup old captures first
+          const now = Date.now();
+          for (const [h, data] of networkCaptures) {
+            if (now - data.createdAt > CAPTURE_MAX_AGE_MS) {
+              networkCaptures.delete(h);
+            }
+          }
+
           const captureData = networkCaptures.get(handle);
           if (!captureData) {
-            return [];
+            return { success: false, error: { code: 8001, message: "Capture not found", recoverable: false } };
           }
           return [...captureData.requests];
         },
@@ -779,6 +799,11 @@ this.nevoflux = class extends ExtensionAPI {
           // Create a capture, wait for matching request, then clean up
           const handle = await this.startCapture({ urlPattern });
 
+          // Import timer functions once, outside the loop
+          const { setTimeout: chromeSetTimeout } = ChromeUtils.importESModule(
+            "resource://gre/modules/Timer.sys.mjs"
+          );
+
           const startTime = Date.now();
           while (Date.now() - startTime < timeout) {
             const requests = await this.getCaptures(handle);
@@ -787,9 +812,6 @@ this.nevoflux = class extends ExtensionAPI {
               return requests[0];
             }
             await new Promise(resolve => {
-              const { setTimeout: chromeSetTimeout } = ChromeUtils.importESModule(
-                "resource://gre/modules/Timer.sys.mjs"
-              );
               chromeSetTimeout(resolve, 100);
             });
           }
@@ -799,7 +821,11 @@ this.nevoflux = class extends ExtensionAPI {
         },
 
         async waitForResponse(urlPattern, timeout = 30000) {
-          // Similar to waitForRequest but would wait for response
+          // PLACEHOLDER: This method currently returns request data, NOT actual response data.
+          // A full implementation would require hooking into webRequest.onCompleted or
+          // webRequest.onResponseStarted to capture response headers, status codes, and body.
+          // For now, it delegates to waitForRequest as a temporary workaround.
+          // TODO: Implement proper response capture with status, headers, and body data.
           return this.waitForRequest(urlPattern, timeout);
         },
       },
