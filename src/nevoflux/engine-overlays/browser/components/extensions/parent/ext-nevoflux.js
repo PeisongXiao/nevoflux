@@ -995,6 +995,23 @@ this.nevoflux = class extends ExtensionAPI {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
           return self.executeInTab(resolvedTabId, extension, "removeScript", { handle });
         },
+
+        // ========== Frame Management ==========
+
+        async listFrames(tabId) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "listFrames", {});
+        },
+
+        async switchFrame(tabId, selector) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "switchFrame", { selector });
+        },
+
+        async frameMain(tabId) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "frameMain", {});
+        },
       },
     };
   }
