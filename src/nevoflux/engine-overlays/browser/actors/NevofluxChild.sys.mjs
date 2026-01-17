@@ -944,10 +944,17 @@ export class NevofluxChild extends JSWindowActorChild {
 
   // ========== JavaScript Execution ==========
 
-  evalScript({ script, returnValue = true, timeout = 30000 }) {
+  // Note: Timeout is not implemented for eval. Implementing true timeout for synchronous
+  // eval is complex and would require running in a Worker or using async patterns.
+  // The script executes synchronously in the page context.
+  evalScript({ script, returnValue = true }) {
     const win = this.contentWindow;
     if (!win) {
       return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    if (!script || typeof script !== "string") {
+      return { success: false, error: { code: 9002, message: "Missing or invalid required parameter: script", recoverable: false } };
     }
 
     try {
@@ -1002,10 +1009,15 @@ export class NevofluxChild extends JSWindowActorChild {
       return { success: false, error: { code: 5001, message: "No document available", recoverable: false } };
     }
 
+    if (!script || typeof script !== "string") {
+      return { success: false, error: { code: 9002, message: "Missing or invalid required parameter: script", recoverable: false } };
+    }
+
     try {
       const scriptEl = doc.createElement("script");
       scriptEl.textContent = script;
-      scriptEl.id = `nevoflux_script_${Date.now()}`;
+      // Use timestamp + random suffix to ensure unique handles
+      scriptEl.id = `nevoflux_script_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
       if (runAt === "document_start") {
         doc.documentElement.prepend(scriptEl);

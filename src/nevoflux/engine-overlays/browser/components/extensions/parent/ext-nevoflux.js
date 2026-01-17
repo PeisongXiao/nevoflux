@@ -832,6 +832,9 @@ this.nevoflux = class extends ExtensionAPI {
         // ========== JavaScript Execution ==========
 
         async eval(tabId, script, options = {}) {
+          if (!script || typeof script !== "string") {
+            return { success: false, error: { code: 9002, message: "Missing or invalid required parameter: script", recoverable: false } };
+          }
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
           return self.executeInTab(resolvedTabId, extension, "eval", { script, ...options });
         },
