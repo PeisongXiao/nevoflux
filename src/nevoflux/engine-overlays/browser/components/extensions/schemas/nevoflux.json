@@ -239,7 +239,18 @@
           "resourceType": { "type": "string" },
           "headers": { "type": "object" },
           "status": { "type": "integer", "optional": true },
-          "timestamp": { "type": "number" }
+          "timestamp": { "type": "number" },
+          "requestBody": { "type": "string", "optional": true },
+          "responseBody": { "type": "string", "optional": true }
+        }
+      },
+      {
+        "id": "MockResponse",
+        "type": "object",
+        "properties": {
+          "status": { "type": "integer", "optional": true },
+          "headers": { "type": "object", "optional": true },
+          "body": { "type": "string", "optional": true }
         }
       },
       {
@@ -249,7 +260,7 @@
           "urlPattern": { "type": "string" },
           "resourceTypes": { "type": "array", "items": { "type": "string" }, "optional": true },
           "handler": { "type": "string", "enum": ["block", "mock", "modify"] },
-          "mockResponse": { "type": "object", "optional": true },
+          "mockResponse": { "$ref": "MockResponse", "optional": true },
           "modifyHeaders": { "type": "object", "optional": true }
         }
       },
@@ -555,7 +566,7 @@
         "async": "promise",
         "description": "Activate (focus) a browser tab",
         "parameters": [
-          { "name": "tabId", "type": "integer" }
+          { "name": "tabId", "type": "integer", "optional": true }
         ],
         "returns": { "$ref": "ApiResult" }
       },
@@ -663,7 +674,7 @@
         "description": "Scroll using mouse wheel",
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
-          { "name": "options", "$ref": "WheelOptions" }
+          { "name": "options", "$ref": "WheelOptions", "optional": true }
         ],
         "returns": { "$ref": "ApiResult" }
       },
@@ -740,7 +751,7 @@
         "async": "promise",
         "description": "Delete cookies matching filter criteria",
         "parameters": [
-          { "name": "filter", "$ref": "CookieFilter" }
+          { "name": "filter", "$ref": "CookieFilter", "optional": true }
         ],
         "returns": { "$ref": "ApiResult" }
       },
