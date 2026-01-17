@@ -109,6 +109,167 @@
           "mode": { "type": "string" },
           "scope": { "type": "string" }
         }
+      },
+      {
+        "id": "TabInfo",
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "url": { "type": "string" },
+          "title": { "type": "string" },
+          "active": { "type": "boolean" },
+          "index": { "type": "integer" },
+          "windowId": { "type": "integer" },
+          "status": { "type": "string" }
+        }
+      },
+      {
+        "id": "TabCreateOptions",
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "optional": true },
+          "active": { "type": "boolean", "optional": true },
+          "windowId": { "type": "integer", "optional": true },
+          "index": { "type": "integer", "optional": true }
+        }
+      },
+      {
+        "id": "TabQueryFilter",
+        "type": "object",
+        "properties": {
+          "active": { "type": "boolean", "optional": true },
+          "url": { "type": "string", "optional": true },
+          "title": { "type": "string", "optional": true },
+          "windowId": { "type": "integer", "optional": true }
+        }
+      },
+      {
+        "id": "WindowCreateOptions",
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "optional": true },
+          "incognito": { "type": "boolean", "optional": true },
+          "width": { "type": "integer", "optional": true },
+          "height": { "type": "integer", "optional": true }
+        }
+      },
+      {
+        "id": "KeyPressOptions",
+        "type": "object",
+        "properties": {
+          "modifiers": { "type": "array", "items": { "type": "string" }, "optional": true },
+          "delay": { "type": "integer", "optional": true }
+        }
+      },
+      {
+        "id": "MouseButtonOptions",
+        "type": "object",
+        "properties": {
+          "button": { "type": "string", "enum": ["left", "right", "middle"], "optional": true }
+        }
+      },
+      {
+        "id": "WheelOptions",
+        "type": "object",
+        "properties": {
+          "deltaX": { "type": "integer", "optional": true },
+          "deltaY": { "type": "integer", "optional": true }
+        }
+      },
+      {
+        "id": "DragOptions",
+        "type": "object",
+        "properties": {
+          "steps": { "type": "integer", "optional": true }
+        }
+      },
+      {
+        "id": "Cookie",
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "string" },
+          "domain": { "type": "string" },
+          "path": { "type": "string" },
+          "secure": { "type": "boolean" },
+          "httpOnly": { "type": "boolean" },
+          "sameSite": { "type": "string" },
+          "expirationDate": { "type": "number", "optional": true }
+        }
+      },
+      {
+        "id": "CookieSetOptions",
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "name": { "type": "string" },
+          "value": { "type": "string" },
+          "domain": { "type": "string", "optional": true },
+          "path": { "type": "string", "optional": true },
+          "secure": { "type": "boolean", "optional": true },
+          "httpOnly": { "type": "boolean", "optional": true },
+          "sameSite": { "type": "string", "optional": true },
+          "expirationDate": { "type": "number", "optional": true }
+        }
+      },
+      {
+        "id": "CookieFilter",
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "optional": true },
+          "name": { "type": "string", "optional": true },
+          "domain": { "type": "string", "optional": true }
+        }
+      },
+      {
+        "id": "CaptureOptions",
+        "type": "object",
+        "properties": {
+          "urlPattern": { "type": "string", "optional": true },
+          "resourceTypes": { "type": "array", "items": { "type": "string" }, "optional": true },
+          "recordBody": { "type": "boolean", "optional": true }
+        }
+      },
+      {
+        "id": "CapturedRequest",
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "method": { "type": "string" },
+          "resourceType": { "type": "string" },
+          "headers": { "type": "object" },
+          "status": { "type": "integer", "optional": true },
+          "timestamp": { "type": "number" }
+        }
+      },
+      {
+        "id": "InterceptOptions",
+        "type": "object",
+        "properties": {
+          "urlPattern": { "type": "string" },
+          "resourceTypes": { "type": "array", "items": { "type": "string" }, "optional": true },
+          "handler": { "type": "string", "enum": ["block", "mock", "modify"] },
+          "mockResponse": { "type": "object", "optional": true },
+          "modifyHeaders": { "type": "object", "optional": true }
+        }
+      },
+      {
+        "id": "EvalOptions",
+        "type": "object",
+        "properties": {
+          "returnValue": { "type": "boolean", "optional": true },
+          "timeout": { "type": "integer", "optional": true }
+        }
+      },
+      {
+        "id": "EvalResult",
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "value": { "type": "any", "optional": true },
+          "type": { "type": "string", "optional": true },
+          "error": { "$ref": "ApiError", "optional": true }
+        }
       }
     ],
     "functions": [
@@ -347,6 +508,452 @@
           { "name": "config", "$ref": "PrivacyConfig" }
         ],
         "returns": { "$ref": "PrivacyConfig" }
+      },
+      {
+        "name": "createTab",
+        "type": "function",
+        "async": "promise",
+        "description": "Create a new browser tab",
+        "parameters": [
+          { "name": "options", "$ref": "TabCreateOptions", "optional": true }
+        ],
+        "returns": { "$ref": "TabInfo" }
+      },
+      {
+        "name": "closeTab",
+        "type": "function",
+        "async": "promise",
+        "description": "Close a browser tab",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "getTab",
+        "type": "function",
+        "async": "promise",
+        "description": "Get information about a tab",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "TabInfo" }
+      },
+      {
+        "name": "queryTabs",
+        "type": "function",
+        "async": "promise",
+        "description": "Query tabs matching filter criteria",
+        "parameters": [
+          { "name": "filter", "$ref": "TabQueryFilter", "optional": true }
+        ],
+        "returns": { "type": "array", "items": { "$ref": "TabInfo" } }
+      },
+      {
+        "name": "activateTab",
+        "type": "function",
+        "async": "promise",
+        "description": "Activate (focus) a browser tab",
+        "parameters": [
+          { "name": "tabId", "type": "integer" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "listTabs",
+        "type": "function",
+        "async": "promise",
+        "description": "List all open tabs",
+        "parameters": [],
+        "returns": { "type": "array", "items": { "$ref": "TabInfo" } }
+      },
+      {
+        "name": "createWindow",
+        "type": "function",
+        "async": "promise",
+        "description": "Create a new browser window",
+        "parameters": [
+          { "name": "options", "$ref": "WindowCreateOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "closeWindow",
+        "type": "function",
+        "async": "promise",
+        "description": "Close a browser window",
+        "parameters": [
+          { "name": "windowId", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "keyPress",
+        "type": "function",
+        "async": "promise",
+        "description": "Press a keyboard key (keydown + keyup)",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "key", "type": "string" },
+          { "name": "options", "$ref": "KeyPressOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "keyDown",
+        "type": "function",
+        "async": "promise",
+        "description": "Press down a keyboard key",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "key", "type": "string" },
+          { "name": "options", "$ref": "KeyPressOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "keyUp",
+        "type": "function",
+        "async": "promise",
+        "description": "Release a keyboard key",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "key", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "mouseMove",
+        "type": "function",
+        "async": "promise",
+        "description": "Move mouse to coordinates",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "x", "type": "number" },
+          { "name": "y", "type": "number" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "mouseDown",
+        "type": "function",
+        "async": "promise",
+        "description": "Press down a mouse button",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "options", "$ref": "MouseButtonOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "mouseUp",
+        "type": "function",
+        "async": "promise",
+        "description": "Release a mouse button",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "options", "$ref": "MouseButtonOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "wheel",
+        "type": "function",
+        "async": "promise",
+        "description": "Scroll using mouse wheel",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "options", "$ref": "WheelOptions" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "drag",
+        "type": "function",
+        "async": "promise",
+        "description": "Drag element from one location to another",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "fromSelector", "type": "string" },
+          { "name": "toSelector", "type": "string" },
+          { "name": "options", "$ref": "DragOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "dblclick",
+        "type": "function",
+        "async": "promise",
+        "description": "Double-click on an element",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" },
+          { "name": "options", "$ref": "ClickOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "focus",
+        "type": "function",
+        "async": "promise",
+        "description": "Focus on an element",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "clear",
+        "type": "function",
+        "async": "promise",
+        "description": "Clear the value of an input element",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "selector", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "getCookies",
+        "type": "function",
+        "async": "promise",
+        "description": "Get cookies matching filter criteria",
+        "parameters": [
+          { "name": "filter", "$ref": "CookieFilter", "optional": true }
+        ],
+        "returns": { "type": "array", "items": { "$ref": "Cookie" } }
+      },
+      {
+        "name": "setCookie",
+        "type": "function",
+        "async": "promise",
+        "description": "Set a cookie",
+        "parameters": [
+          { "name": "cookie", "$ref": "CookieSetOptions" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "deleteCookies",
+        "type": "function",
+        "async": "promise",
+        "description": "Delete cookies matching filter criteria",
+        "parameters": [
+          { "name": "filter", "$ref": "CookieFilter" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "clearCookies",
+        "type": "function",
+        "async": "promise",
+        "description": "Clear all cookies for a domain",
+        "parameters": [
+          { "name": "domain", "type": "string", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "getLocalStorage",
+        "type": "function",
+        "async": "promise",
+        "description": "Get localStorage value(s)",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "key", "type": "string", "optional": true }
+        ],
+        "returns": { "type": "any" }
+      },
+      {
+        "name": "setLocalStorage",
+        "type": "function",
+        "async": "promise",
+        "description": "Set a localStorage value",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "key", "type": "string" },
+          { "name": "value", "type": "any" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "removeLocalStorage",
+        "type": "function",
+        "async": "promise",
+        "description": "Remove a localStorage item",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "key", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "clearLocalStorage",
+        "type": "function",
+        "async": "promise",
+        "description": "Clear all localStorage",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "getSessionStorage",
+        "type": "function",
+        "async": "promise",
+        "description": "Get sessionStorage value(s)",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "key", "type": "string", "optional": true }
+        ],
+        "returns": { "type": "any" }
+      },
+      {
+        "name": "setSessionStorage",
+        "type": "function",
+        "async": "promise",
+        "description": "Set a sessionStorage value",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "key", "type": "string" },
+          { "name": "value", "type": "any" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "removeSessionStorage",
+        "type": "function",
+        "async": "promise",
+        "description": "Remove a sessionStorage item",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "key", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "clearSessionStorage",
+        "type": "function",
+        "async": "promise",
+        "description": "Clear all sessionStorage",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "startCapture",
+        "type": "function",
+        "async": "promise",
+        "description": "Start capturing network requests",
+        "parameters": [
+          { "name": "options", "$ref": "CaptureOptions", "optional": true }
+        ],
+        "returns": { "type": "string" }
+      },
+      {
+        "name": "stopCapture",
+        "type": "function",
+        "async": "promise",
+        "description": "Stop capturing network requests and return captured data",
+        "parameters": [
+          { "name": "handle", "type": "string" }
+        ],
+        "returns": { "type": "array", "items": { "$ref": "CapturedRequest" } }
+      },
+      {
+        "name": "getCaptures",
+        "type": "function",
+        "async": "promise",
+        "description": "Get captured network requests without stopping",
+        "parameters": [
+          { "name": "handle", "type": "string" }
+        ],
+        "returns": { "type": "array", "items": { "$ref": "CapturedRequest" } }
+      },
+      {
+        "name": "intercept",
+        "type": "function",
+        "async": "promise",
+        "description": "Set up request interception",
+        "parameters": [
+          { "name": "options", "$ref": "InterceptOptions" }
+        ],
+        "returns": { "type": "string" }
+      },
+      {
+        "name": "removeIntercept",
+        "type": "function",
+        "async": "promise",
+        "description": "Remove a request interception rule",
+        "parameters": [
+          { "name": "handle", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "clearIntercepts",
+        "type": "function",
+        "async": "promise",
+        "description": "Remove all request interception rules",
+        "parameters": [],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "waitForRequest",
+        "type": "function",
+        "async": "promise",
+        "description": "Wait for a network request matching pattern",
+        "parameters": [
+          { "name": "urlPattern", "type": "string" },
+          { "name": "timeout", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "CapturedRequest" }
+      },
+      {
+        "name": "waitForResponse",
+        "type": "function",
+        "async": "promise",
+        "description": "Wait for a network response matching pattern",
+        "parameters": [
+          { "name": "urlPattern", "type": "string" },
+          { "name": "timeout", "type": "integer", "optional": true }
+        ],
+        "returns": { "$ref": "CapturedRequest" }
+      },
+      {
+        "name": "eval",
+        "type": "function",
+        "async": "promise",
+        "description": "Evaluate JavaScript in page context",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "script", "type": "string" },
+          { "name": "options", "$ref": "EvalOptions", "optional": true }
+        ],
+        "returns": { "$ref": "EvalResult" }
+      },
+      {
+        "name": "addScript",
+        "type": "function",
+        "async": "promise",
+        "description": "Add a script to be executed on page load",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "script", "type": "string" }
+        ],
+        "returns": { "type": "string" }
+      },
+      {
+        "name": "removeScript",
+        "type": "function",
+        "async": "promise",
+        "description": "Remove a previously added script",
+        "parameters": [
+          { "name": "handle", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
       }
     ]
   }
