@@ -828,6 +828,23 @@ this.nevoflux = class extends ExtensionAPI {
           // TODO: Implement proper response capture with status, headers, and body data.
           return this.waitForRequest(urlPattern, timeout);
         },
+
+        // ========== JavaScript Execution ==========
+
+        async eval(tabId, script, options = {}) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "eval", { script, ...options });
+        },
+
+        async addScript(tabId, script, options = {}) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "addScript", { script, ...options });
+        },
+
+        async removeScript(tabId, handle) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "removeScript", { handle });
+        },
       },
     };
   }

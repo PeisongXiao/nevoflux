@@ -53,6 +53,9 @@ export class NevofluxChild extends JSWindowActorChild {
       setSessionStorage: () => this.setSessionStorage(safeParams),
       removeSessionStorage: () => this.removeSessionStorage(safeParams),
       clearSessionStorage: () => this.clearSessionStorage(safeParams),
+      eval: () => this.evalScript(safeParams),
+      addScript: () => this.addScript(safeParams),
+      removeScript: () => this.removeScript(safeParams),
     };
 
     const handler = handlers[action];
@@ -936,6 +939,105 @@ export class NevofluxChild extends JSWindowActorChild {
       return { success: true };
     } catch (e) {
       return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+    }
+  }
+
+  // ========== JavaScript Execution ==========
+
+  evalScript({ script, returnValue = true, timeout = 30000 }) {
+    const win = this.contentWindow;
+    if (!win) {
+      return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
+    }
+
+    try {
+      // Execute in page context
+      const result = win.eval(script);
+
+      if (!returnValue) {
+        return { success: true };
+      }
+
+      // Serialize result
+      let serialized;
+      let type = typeof result;
+
+      try {
+        if (result === undefined) {
+          serialized = undefined;
+          type = "undefined";
+        } else if (result === null) {
+          serialized = null;
+          type = "null";
+        } else {
+          serialized = JSON.parse(JSON.stringify(result));
+        }
+      } catch {
+        // Can't serialize, return string representation
+        serialized = String(result);
+        type = "string";
+      }
+
+      return {
+        success: true,
+        value: serialized,
+        type
+      };
+    } catch (e) {
+      return {
+        success: false,
+        error: {
+          code: 9001,
+          message: e.message,
+          recoverable: false
+        }
+      };
+    }
+  }
+
+  addScript({ script, runAt = "document_idle" }) {
+    const doc = this.doc;
+    const win = this.contentWindow;
+    if (!doc || !win) {
+      return { success: false, error: { code: 5001, message: "No document available", recoverable: false } };
+    }
+
+    try {
+      const scriptEl = doc.createElement("script");
+      scriptEl.textContent = script;
+      scriptEl.id = `nevoflux_script_${Date.now()}`;
+
+      if (runAt === "document_start") {
+        doc.documentElement.prepend(scriptEl);
+      } else {
+        doc.body.appendChild(scriptEl);
+      }
+
+      return { success: true, handle: scriptEl.id };
+    } catch (e) {
+      return { success: false, error: { code: 9001, message: String(e), recoverable: false } };
+    }
+  }
+
+  removeScript({ handle }) {
+    const doc = this.doc;
+    if (!doc) {
+      return { success: false, error: { code: 5001, message: "No document available", recoverable: false } };
+    }
+
+    if (!handle) {
+      return { success: false, error: { code: 9002, message: "Missing required parameter: handle", recoverable: false } };
+    }
+
+    try {
+      const scriptEl = doc.getElementById(handle);
+      if (scriptEl) {
+        scriptEl.remove();
+        return { success: true };
+      }
+      return { success: false, error: { code: 9003, message: "Script not found", recoverable: false } };
+    } catch (e) {
+      return { success: false, error: { code: 9001, message: String(e), recoverable: false } };
     }
   }
 }
