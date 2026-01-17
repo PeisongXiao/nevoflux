@@ -207,37 +207,122 @@ this.nevoflux = class extends ExtensionAPI {
           try {
             const { url, active = true, windowId, index } = options;
 
-            // Get target window - use specified windowId or fall back to top window
-            let win;
+            // Get target window - use Services.wm for reliable window access
+            let nativeWindow;
+            let windowWrapper;
+
             if (windowId !== undefined) {
-              const wrapper = extension.windowManager.get(windowId, extension.context);
-              if (!wrapper) {
-                return { success: false, error: { code: 5001, message: "Window not found", recoverable: false } };
+              // Try to get window by ID through windowManager
+              try {
+                windowWrapper = extension.windowManager.get(windowId, extension.context);
+                if (windowWrapper) {
+                  nativeWindow = windowWrapper.window;
+                }
+              } catch (e) {
+                // Fall through to use most recent window
               }
-              win = wrapper;
-            } else {
-              win = extension.windowManager.getWrapper(extension.windowManager.topWindow);
             }
 
-            const tab = win.window.gBrowser.addTab(url || "about:newtab", {
-              triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-            });
+            // Fallback: get most recent browser window directly
+            if (!nativeWindow) {
+              nativeWindow = Services.wm.getMostRecentWindow("navigator:browser");
+            }
+
+            // Validate window
+            if (!nativeWindow) {
+              return { success: false, error: { code: 5002, message: "No browser window found", recoverable: false } };
+            }
+
+            // Validate gBrowser
+            if (!nativeWindow.gBrowser) {
+              return { success: false, error: { code: 5003, message: "Window has no gBrowser", recoverable: false } };
+            }
+
+            // Create the tab
+            let tab;
+            try {
+              tab = nativeWindow.gBrowser.addTab(url || "about:newtab", {
+                triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+              });
+            } catch (e) {
+              return { success: false, error: { code: 6002, message: `Failed to add tab: ${e}`, recoverable: false } };
+            }
+
+            if (!tab) {
+              return { success: false, error: { code: 6003, message: "addTab returned null", recoverable: false } };
+            }
+
+            // Move tab to the active workspace using Zen's workspace management
+            // This is required for the tab to appear in Zen's sidebar
+            // Simply setting the attribute is not enough - we must use moveTabToWorkspace
+            // which inserts the tab into the correct DOM container
+            try {
+              const gZenWorkspaces = nativeWindow.gZenWorkspaces;
+              if (gZenWorkspaces && gZenWorkspaces.activeWorkspace) {
+                gZenWorkspaces.moveTabToWorkspace(tab, gZenWorkspaces.activeWorkspace);
+              }
+            } catch {
+              // Fallback: at least set the attribute if moveTabToWorkspace fails
+              try {
+                const gZenWorkspaces = nativeWindow.gZenWorkspaces;
+                if (gZenWorkspaces && gZenWorkspaces.activeWorkspace) {
+                  tab.setAttribute("zen-workspace-id", gZenWorkspaces.activeWorkspace);
+                }
+              } catch {
+                // Ignore if gZenWorkspaces is not available
+              }
+            }
 
             // Move tab to specified index if provided
             if (index !== undefined) {
-              win.window.gBrowser.moveTabTo(tab, index);
+              try {
+                nativeWindow.gBrowser.moveTabTo(tab, index);
+              } catch (e) {
+                // Ignore move errors
+              }
             }
 
             if (active) {
-              win.window.gBrowser.selectedTab = tab;
+              try {
+                nativeWindow.gBrowser.selectedTab = tab;
+              } catch (e) {
+                // Ignore activation errors
+              }
             }
 
-            // Guard against tabTracker being unavailable
-            if (!tabTracker) {
-              return { success: false, error: { code: 6001, message: "Tab tracker unavailable", recoverable: false } };
+            // Get tab ID
+            let tabId;
+            try {
+              if (!tabTracker) {
+                return { success: false, error: { code: 6004, message: "Tab tracker unavailable", recoverable: false } };
+              }
+              tabId = tabTracker.getId(tab);
+            } catch (e) {
+              return { success: false, error: { code: 6005, message: `Failed to get tab ID: ${e}`, recoverable: false } };
             }
 
-            const tabId = tabTracker.getId(tab);
+            // Get windowId - use wrapper if available, otherwise get from docShell
+            let resolvedWindowId = null;
+            if (windowWrapper) {
+              resolvedWindowId = windowWrapper.id;
+            } else {
+              try {
+                resolvedWindowId = nativeWindow.docShell?.outerWindowID || null;
+              } catch (e) {
+                // Ignore
+              }
+            }
+
+            // Defensive check for tab position - the tab object should still be valid
+            let tabPosition = 0;
+            try {
+              if (tab && typeof tab._tPos === "number") {
+                tabPosition = tab._tPos;
+              }
+            } catch (e) {
+              // Tab might be in invalid state, use default
+            }
+
             return {
               success: true,
               tab: {
@@ -245,32 +330,94 @@ this.nevoflux = class extends ExtensionAPI {
                 url: url || "about:newtab",
                 title: "",
                 active,
-                index: tab._tPos,
-                windowId: win.id,
+                index: tabPosition,
+                windowId: resolvedWindowId,
                 status: "loading",
               },
             };
           } catch (e) {
-            return { success: false, error: { code: 6001, message: String(e), recoverable: false } };
+            // Catch-all for any unexpected errors
+            return { success: false, error: { code: 6000, message: `Unexpected error in createTab: ${e}`, recoverable: false } };
           }
         },
 
         async closeTab(tabId) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          const tab = extension.tabManager.get(resolvedTabId);
 
-          if (!tab) {
+          // Get the native tab directly from tabTracker for most accurate reference
+          let nativeTab;
+          try {
+            nativeTab = tabTracker.getTab(resolvedTabId);
+          } catch (e) {
+            // Fallback to tabManager
+            const tab = extension.tabManager.get(resolvedTabId);
+            nativeTab = tab?.nativeTab;
+          }
+
+          if (!nativeTab) {
             return { success: false, error: { code: 3001, message: "Tab not found", recoverable: false } };
           }
 
-          try {
-            const nativeTab = tab.nativeTab;
-            const win = nativeTab.ownerGlobal;
-            win.gBrowser.removeTab(nativeTab);
-            return { success: true };
-          } catch (e) {
-            return { success: false, error: { code: 6002, message: String(e), recoverable: false } };
+          const win = nativeTab.ownerGlobal;
+          if (!win || !win.gBrowser) {
+            return { success: false, error: { code: 6007, message: "Tab's window is no longer available", recoverable: false } };
           }
+
+          const gBrowser = win.gBrowser;
+
+          // Ensure tab has zen-workspace-id for Zen compatibility
+          if (!nativeTab.hasAttribute("zen-workspace-id")) {
+            try {
+              const gZenWorkspaces = win.gZenWorkspaces;
+              if (gZenWorkspaces && gZenWorkspaces.activeWorkspace) {
+                nativeTab.setAttribute("zen-workspace-id", gZenWorkspaces.activeWorkspace);
+              }
+            } catch (e) {
+              // Ignore
+            }
+          }
+
+          // Use a Promise with setTimeout to defer the removal
+          // This helps avoid race conditions with Zen's workspace event handlers
+          return new Promise((resolve) => {
+            // Defer removal to next event loop tick
+            win.setTimeout(() => {
+              let internalError = null;
+              try {
+                // Set bypass flag immediately before removeTab
+                // This bypasses Zen's handleTabBeforeClose logic which handles
+                // workspace tab management (e.g., creating empty tab when last tab closes)
+                if (win.gZenWorkspaces) {
+                  win.gZenWorkspaces._removedByStartupPage = true;
+                }
+
+                gBrowser.removeTab(nativeTab, {
+                  animate: false,
+                  skipPermitUnload: true,
+                  closeWindowWithLastTab: false,
+                });
+              } catch (e) {
+                // Capture the error but don't resolve yet - check if tab was actually closed
+                internalError = e;
+              } finally {
+                // Reset bypass flag so user's manual tab closes still work normally
+                if (win.gZenWorkspaces) {
+                  win.gZenWorkspaces._removedByStartupPage = false;
+                }
+              }
+
+              // Check if tab was actually closed, regardless of internal errors
+              // Zen's event handlers may throw errors but the tab can still be successfully closed
+              const tabActuallyClosed = nativeTab.closing || !nativeTab.parentNode || !gBrowser.tabs.includes(nativeTab);
+              if (tabActuallyClosed) {
+                resolve({ success: true });
+              } else if (internalError) {
+                resolve({ success: false, error: { code: 6002, message: `closeTab error: ${internalError.message || internalError}`, recoverable: false } });
+              } else {
+                resolve({ success: false, error: { code: 6008, message: "Tab was not closed", recoverable: false } });
+              }
+            }, 0);
+          });
         },
 
         _getTabInfo(tab, tabId) {

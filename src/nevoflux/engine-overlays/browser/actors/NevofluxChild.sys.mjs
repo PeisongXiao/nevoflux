@@ -386,6 +386,35 @@ export class NevofluxChild extends JSWindowActorChild {
 
   // ========== Keyboard Control ==========
 
+  // Helper to get windowUtils - try multiple access paths
+  _getWindowUtils() {
+    // Try browsingContext first (preferred in JSWindowActorChild)
+    try {
+      const utils = this.browsingContext?.window?.windowUtils;
+      if (utils) {
+        return utils;
+      }
+    } catch (e) { /* ignore */ }
+
+    // Fallback to contentWindow
+    try {
+      const utils = this.contentWindow?.windowUtils;
+      if (utils) {
+        return utils;
+      }
+    } catch (e) { /* ignore */ }
+
+    // Fallback to document.defaultView
+    try {
+      const utils = this.document?.defaultView?.windowUtils;
+      if (utils) {
+        return utils;
+      }
+    } catch (e) { /* ignore */ }
+
+    return null;
+  }
+
   async keyPress({ key, modifiers = [], delay = 0 }) {
     const win = this.document?.defaultView || this.contentWindow;
     if (!win) {
@@ -393,9 +422,15 @@ export class NevofluxChild extends JSWindowActorChild {
     }
 
     try {
-      const domUtils = win.windowUtils;
-      if (!domUtils || typeof domUtils.sendKeyEvent !== "function") {
+      const domUtils = this._getWindowUtils();
+      if (!domUtils) {
         return { success: false, error: { code: 5001, message: "windowUtils not available", recoverable: false } };
+      }
+
+      // Check if sendKeyEvent is available
+      if (typeof domUtils.sendKeyEvent !== "function") {
+        // Fallback: use DOM KeyboardEvent dispatch
+        return this._keyPressFallback(key, modifiers, delay);
       }
 
       let modifierFlags = 0;
@@ -430,9 +465,10 @@ export class NevofluxChild extends JSWindowActorChild {
     }
 
     try {
-      const domUtils = win.windowUtils;
+      const domUtils = this._getWindowUtils();
       if (!domUtils || typeof domUtils.sendKeyEvent !== "function") {
-        return { success: false, error: { code: 5001, message: "windowUtils not available", recoverable: false } };
+        // Fallback to DOM events
+        return this._keyDownFallback(key, modifiers);
       }
 
       let modifierFlags = 0;
@@ -458,9 +494,10 @@ export class NevofluxChild extends JSWindowActorChild {
     }
 
     try {
-      const domUtils = win.windowUtils;
+      const domUtils = this._getWindowUtils();
       if (!domUtils || typeof domUtils.sendKeyEvent !== "function") {
-        return { success: false, error: { code: 5001, message: "windowUtils not available", recoverable: false } };
+        // Fallback to DOM events
+        return this._keyUpFallback(key, modifiers);
       }
 
       let modifierFlags = 0;
@@ -473,6 +510,105 @@ export class NevofluxChild extends JSWindowActorChild {
       const charCode = key.length === 1 ? key.charCodeAt(0) : 0;
 
       domUtils.sendKeyEvent("keyup", keyCode, charCode, modifierFlags);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+    }
+  }
+
+  // Fallback keyboard implementation using DOM events (when sendKeyEvent is not available)
+  async _keyPressFallback(key, modifiers = [], delay = 0) {
+    const win = this.document?.defaultView || this.contentWindow;
+    const doc = this.doc;
+    if (!win || !doc) {
+      return { success: false, error: { code: 5001, message: "No window/document available", recoverable: false } };
+    }
+
+    try {
+      const target = doc.activeElement || doc.body;
+      const keyCode = this._getKeyCode(key);
+
+      const eventInit = {
+        key: key,
+        code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+        keyCode: keyCode,
+        which: keyCode,
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: modifiers.includes("ctrl"),
+        altKey: modifiers.includes("alt"),
+        shiftKey: modifiers.includes("shift"),
+        metaKey: modifiers.includes("meta"),
+      };
+
+      target.dispatchEvent(new win.KeyboardEvent("keydown", eventInit));
+      if (delay > 0) await this.sleep(delay);
+      target.dispatchEvent(new win.KeyboardEvent("keypress", eventInit));
+      if (delay > 0) await this.sleep(delay);
+      target.dispatchEvent(new win.KeyboardEvent("keyup", eventInit));
+
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+    }
+  }
+
+  // Fallback keyDown using DOM events
+  _keyDownFallback(key, modifiers = []) {
+    const win = this.document?.defaultView || this.contentWindow;
+    const doc = this.doc;
+    if (!win || !doc) {
+      return { success: false, error: { code: 5001, message: "No window/document available", recoverable: false } };
+    }
+
+    try {
+      const target = doc.activeElement || doc.body;
+      const keyCode = this._getKeyCode(key);
+
+      target.dispatchEvent(new win.KeyboardEvent("keydown", {
+        key: key,
+        code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+        keyCode: keyCode,
+        which: keyCode,
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: modifiers.includes("ctrl"),
+        altKey: modifiers.includes("alt"),
+        shiftKey: modifiers.includes("shift"),
+        metaKey: modifiers.includes("meta"),
+      }));
+
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+    }
+  }
+
+  // Fallback keyUp using DOM events
+  _keyUpFallback(key, modifiers = []) {
+    const win = this.document?.defaultView || this.contentWindow;
+    const doc = this.doc;
+    if (!win || !doc) {
+      return { success: false, error: { code: 5001, message: "No window/document available", recoverable: false } };
+    }
+
+    try {
+      const target = doc.activeElement || doc.body;
+      const keyCode = this._getKeyCode(key);
+
+      target.dispatchEvent(new win.KeyboardEvent("keyup", {
+        key: key,
+        code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+        keyCode: keyCode,
+        which: keyCode,
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: modifiers.includes("ctrl"),
+        altKey: modifiers.includes("alt"),
+        shiftKey: modifiers.includes("shift"),
+        metaKey: modifiers.includes("meta"),
+      }));
+
       return { success: true };
     } catch (e) {
       return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
@@ -500,7 +636,7 @@ export class NevofluxChild extends JSWindowActorChild {
     }
 
     try {
-      const domUtils = win.windowUtils;
+      const domUtils = this._getWindowUtils();
       if (domUtils && typeof domUtils.sendMouseEvent === "function") {
         domUtils.sendMouseEvent("mousemove", x, y, 0, 0, 0);
       }
@@ -518,7 +654,7 @@ export class NevofluxChild extends JSWindowActorChild {
 
     try {
       const buttonCode = { left: 0, middle: 1, right: 2 }[button] || 0;
-      const domUtils = win.windowUtils;
+      const domUtils = this._getWindowUtils();
       if (domUtils && typeof domUtils.sendMouseEvent === "function") {
         const posX = x !== undefined ? x : win.innerWidth / 2;
         const posY = y !== undefined ? y : win.innerHeight / 2;
@@ -538,7 +674,7 @@ export class NevofluxChild extends JSWindowActorChild {
 
     try {
       const buttonCode = { left: 0, middle: 1, right: 2 }[button] || 0;
-      const domUtils = win.windowUtils;
+      const domUtils = this._getWindowUtils();
       if (domUtils && typeof domUtils.sendMouseEvent === "function") {
         const posX = x !== undefined ? x : win.innerWidth / 2;
         const posY = y !== undefined ? y : win.innerHeight / 2;
@@ -557,11 +693,12 @@ export class NevofluxChild extends JSWindowActorChild {
     }
 
     try {
-      const domUtils = win.windowUtils;
+      const domUtils = this._getWindowUtils();
       if (domUtils && typeof domUtils.sendWheelEvent === "function") {
         const x = win.innerWidth / 2;
         const y = win.innerHeight / 2;
-        domUtils.sendWheelEvent(x, y, deltaX, deltaY, 0, 0, 0, 0, 0);
+        // sendWheelEvent(x, y, deltaX, deltaY, deltaZ, deltaMode, modifiers, lineOrPageDeltaX, lineOrPageDeltaY, options)
+        domUtils.sendWheelEvent(x, y, deltaX, deltaY, 0, 0, 0, 0, 0, 0);
       }
       return { success: true };
     } catch (e) {

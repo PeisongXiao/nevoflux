@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>NevoFlux P1 E2E Test Page</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+    h1 { color: #333; }
+    h2 { color: #666; margin-top: 30px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+    .section { margin: 20px 0; padding: 15px; background: #f9f9f9; border-radius: 8px; }
+    .form-group { margin: 10px 0; }
+    label { display: block; margin-bottom: 4px; font-weight: 500; }
+    input, textarea, select { padding: 8px; width: 100%; max-width: 300px; border: 1px solid #ccc; border-radius: 4px; }
+    button { padding: 10px 20px; margin: 5px; cursor: pointer; border: none; border-radius: 4px; }
+    .btn-primary { background: #007bff; color: white; }
+    .btn-secondary { background: #6c757d; color: white; }
+    .btn-danger { background: #dc3545; color: white; }
+    #output { margin-top: 20px; padding: 15px; background: #e9ecef; border-radius: 4px; min-height: 100px; }
+    .hidden { display: none !important; }
+    .draggable { width: 100px; height: 50px; background: #28a745; color: white; display: flex; align-items: center; justify-content: center; cursor: grab; margin: 5px; border-radius: 4px; }
+    .drop-zone { width: 200px; height: 100px; border: 2px dashed #ccc; display: flex; align-items: center; justify-content: center; margin: 5px; border-radius: 4px; }
+    .drop-zone.active { border-color: #007bff; background: #f0f8ff; }
+    #scroll-container { height: 200px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; }
+    .scroll-item { padding: 20px; margin: 5px 0; background: #f0f0f0; }
+    #key-display { font-family: monospace; padding: 10px; background: #333; color: #0f0; min-height: 50px; }
+    #mouse-display { font-family: monospace; padding: 10px; background: #333; color: #0f0; }
+    .cookie-list { font-family: monospace; font-size: 12px; }
+    #storage-display { font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>NevoFlux P1 E2E Test Page</h1>
+  <p>Use this page to test all P1 Browser Use API methods.</p>
+
+  <!-- Form Interaction Tests -->
+  <h2>1. Form Interaction</h2>
+  <div class="section">
+    <div class="form-group">
+      <label for="text-input">Text Input (type/fill):</label>
+      <input type="text" id="text-input" placeholder="Type here...">
+    </div>
+    <div class="form-group">
+      <label for="email-input">Email Input:</label>
+      <input type="email" id="email-input" placeholder="email@example.com">
+    </div>
+    <div class="form-group">
+      <label for="password-input">Password Input:</label>
+      <input type="password" id="password-input" placeholder="Password">
+    </div>
+    <div class="form-group">
+      <label for="textarea-input">Textarea:</label>
+      <textarea id="textarea-input" rows="3" placeholder="Multi-line text..."></textarea>
+    </div>
+    <div class="form-group">
+      <label for="select-input">Select:</label>
+      <select id="select-input">
+        <option value="">Choose...</option>
+        <option value="opt1">Option 1</option>
+        <option value="opt2">Option 2</option>
+        <option value="opt3">Option 3</option>
+      </select>
+    </div>
+    <button id="submit-form" class="btn-primary">Submit Form</button>
+    <button id="clear-form" class="btn-secondary">Clear Form</button>
+  </div>
+
+  <!-- Click Tests -->
+  <h2>2. Click & Double Click</h2>
+  <div class="section">
+    <button id="click-counter" class="btn-primary">Click Count: 0</button>
+    <button id="dblclick-test" class="btn-secondary">Double Click Me</button>
+    <button id="right-click-test" class="btn-danger" oncontextmenu="return false;">Right Click Me</button>
+    <div id="click-output"></div>
+  </div>
+
+  <!-- Visibility Tests -->
+  <h2>3. Visibility & State</h2>
+  <div class="section">
+    <button id="toggle-visibility" class="btn-primary">Toggle Hidden Element</button>
+    <div id="hidden-element" class="hidden" style="padding: 10px; background: #ffc107; margin-top: 10px;">
+      I am now visible!
+    </div>
+    <p>Element with ID "hidden-element" is <span id="visibility-status">hidden</span></p>
+  </div>
+
+  <!-- Keyboard Tests -->
+  <h2>4. Keyboard Events</h2>
+  <div class="section">
+    <input type="text" id="keyboard-input" placeholder="Press keys here...">
+    <div id="key-display">Last key: none</div>
+    <p>Try: Enter, Tab, Escape, Arrow keys, Ctrl+A, Shift+letter</p>
+  </div>
+
+  <!-- Mouse Tests -->
+  <h2>5. Mouse Events</h2>
+  <div class="section">
+    <div id="mouse-area" style="width: 300px; height: 150px; background: #e9ecef; border: 1px solid #ccc; position: relative;">
+      <p style="text-align: center; padding-top: 60px;">Move mouse here</p>
+    </div>
+    <div id="mouse-display">Position: (0, 0) | Button: none</div>
+  </div>
+
+  <!-- Drag & Drop Tests -->
+  <h2>6. Drag & Drop</h2>
+  <div class="section" style="display: flex; gap: 20px;">
+    <div id="drag-source" class="draggable" draggable="true">Drag Me</div>
+    <div id="drop-target" class="drop-zone">Drop Here</div>
+  </div>
+
+  <!-- Scroll Tests -->
+  <h2>7. Scroll (Wheel)</h2>
+  <div class="section">
+    <div id="scroll-container">
+      <div class="scroll-item">Item 1 - Scroll down to see more</div>
+      <div class="scroll-item">Item 2</div>
+      <div class="scroll-item">Item 3</div>
+      <div class="scroll-item">Item 4</div>
+      <div class="scroll-item">Item 5</div>
+      <div class="scroll-item">Item 6</div>
+      <div class="scroll-item">Item 7</div>
+      <div class="scroll-item">Item 8</div>
+      <div class="scroll-item">Item 9</div>
+      <div class="scroll-item" id="scroll-bottom">Item 10 - Bottom</div>
+    </div>
+    <p>Scroll position: <span id="scroll-position">0</span>px</p>
+  </div>
+
+  <!-- Storage Tests -->
+  <h2>8. LocalStorage & SessionStorage</h2>
+  <div class="section">
+    <div class="form-group">
+      <label for="storage-key">Key:</label>
+      <input type="text" id="storage-key" value="testKey">
+    </div>
+    <div class="form-group">
+      <label for="storage-value">Value:</label>
+      <input type="text" id="storage-value" value="testValue">
+    </div>
+    <button id="set-local" class="btn-primary">Set LocalStorage</button>
+    <button id="get-local" class="btn-secondary">Get LocalStorage</button>
+    <button id="clear-local" class="btn-danger">Clear LocalStorage</button>
+    <br><br>
+    <button id="set-session" class="btn-primary">Set SessionStorage</button>
+    <button id="get-session" class="btn-secondary">Get SessionStorage</button>
+    <button id="clear-session" class="btn-danger">Clear SessionStorage</button>
+    <div id="storage-display"></div>
+  </div>
+
+  <!-- Cookie Tests -->
+  <h2>9. Cookies</h2>
+  <div class="section">
+    <p>Current cookies:</p>
+    <div id="cookie-display" class="cookie-list"></div>
+    <button id="refresh-cookies" class="btn-secondary">Refresh Cookie List</button>
+  </div>
+
+  <!-- JavaScript Execution Tests -->
+  <h2>10. JavaScript Execution</h2>
+  <div class="section">
+    <p>Test eval(), addScript(), removeScript()</p>
+    <div id="js-output"></div>
+    <p>Global variable: <span id="global-var-display">undefined</span></p>
+  </div>
+
+  <!-- Wait Tests -->
+  <h2>11. Wait & Dynamic Content</h2>
+  <div class="section">
+    <button id="load-delayed" class="btn-primary">Load Delayed Content (2s)</button>
+    <div id="delayed-content"></div>
+  </div>
+
+  <!-- Output Panel -->
+  <h2>Output / Log</h2>
+  <div id="output">Ready for testing...</div>
+
+  <script>
+    // Utility: Log to output
+    function log(msg) {
+      const output = document.getElementById('output');
+      const time = new Date().toLocaleTimeString();
+      output.innerHTML = `[${time}] ${msg}<br>` + output.innerHTML;
+    }
+
+    // 1. Form Interaction
+    document.getElementById('submit-form').addEventListener('click', () => {
+      const text = document.getElementById('text-input').value;
+      const email = document.getElementById('email-input').value;
+      log(`Form submitted: text="${text}", email="${email}"`);
+    });
+
+    document.getElementById('clear-form').addEventListener('click', () => {
+      document.getElementById('text-input').value = '';
+      document.getElementById('email-input').value = '';
+      document.getElementById('password-input').value = '';
+      document.getElementById('textarea-input').value = '';
+      document.getElementById('select-input').value = '';
+      log('Form cleared');
+    });
+
+    // 2. Click tests
+    let clickCount = 0;
+    document.getElementById('click-counter').addEventListener('click', () => {
+      clickCount++;
+      document.getElementById('click-counter').textContent = `Click Count: ${clickCount}`;
+      log(`Click count: ${clickCount}`);
+    });
+
+    document.getElementById('dblclick-test').addEventListener('dblclick', () => {
+      log('Double click detected!');
+      document.getElementById('click-output').textContent = 'Double click success!';
+    });
+
+    document.getElementById('right-click-test').addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      log('Right click detected!');
+      document.getElementById('click-output').textContent = 'Right click success!';
+    });
+
+    // 3. Visibility
+    document.getElementById('toggle-visibility').addEventListener('click', () => {
+      const el = document.getElementById('hidden-element');
+      el.classList.toggle('hidden');
+      const isHidden = el.classList.contains('hidden');
+      document.getElementById('visibility-status').textContent = isHidden ? 'hidden' : 'visible';
+      log(`Element is now ${isHidden ? 'hidden' : 'visible'}`);
+    });
+
+    // 4. Keyboard
+    document.getElementById('keyboard-input').addEventListener('keydown', (e) => {
+      const modifiers = [];
+      if (e.ctrlKey) modifiers.push('Ctrl');
+      if (e.altKey) modifiers.push('Alt');
+      if (e.shiftKey) modifiers.push('Shift');
+      if (e.metaKey) modifiers.push('Meta');
+      const modStr = modifiers.length > 0 ? modifiers.join('+') + '+' : '';
+      document.getElementById('key-display').textContent = `Last key: ${modStr}${e.key} (code: ${e.keyCode})`;
+      log(`Key pressed: ${modStr}${e.key}`);
+    });
+
+    // 5. Mouse
+    const mouseArea = document.getElementById('mouse-area');
+    mouseArea.addEventListener('mousemove', (e) => {
+      const rect = mouseArea.getBoundingClientRect();
+      const x = Math.round(e.clientX - rect.left);
+      const y = Math.round(e.clientY - rect.top);
+      document.getElementById('mouse-display').textContent = `Position: (${x}, ${y}) | Button: none`;
+    });
+
+    mouseArea.addEventListener('mousedown', (e) => {
+      const buttons = ['left', 'middle', 'right'];
+      log(`Mouse down: ${buttons[e.button]} at (${e.clientX}, ${e.clientY})`);
+    });
+
+    mouseArea.addEventListener('mouseup', (e) => {
+      const buttons = ['left', 'middle', 'right'];
+      log(`Mouse up: ${buttons[e.button]} at (${e.clientX}, ${e.clientY})`);
+    });
+
+    // 6. Drag & Drop
+    const dragSource = document.getElementById('drag-source');
+    const dropTarget = document.getElementById('drop-target');
+
+    dragSource.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', 'drag-data');
+      log('Drag started');
+    });
+
+    dropTarget.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropTarget.classList.add('active');
+    });
+
+    dropTarget.addEventListener('dragleave', () => {
+      dropTarget.classList.remove('active');
+    });
+
+    dropTarget.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropTarget.classList.remove('active');
+      dropTarget.textContent = 'Dropped!';
+      dropTarget.style.background = '#28a745';
+      dropTarget.style.color = 'white';
+      log('Drop success!');
+    });
+
+    // 7. Scroll
+    const scrollContainer = document.getElementById('scroll-container');
+    scrollContainer.addEventListener('scroll', () => {
+      document.getElementById('scroll-position').textContent = scrollContainer.scrollTop;
+    });
+
+    // 8. Storage
+    document.getElementById('set-local').addEventListener('click', () => {
+      const key = document.getElementById('storage-key').value;
+      const value = document.getElementById('storage-value').value;
+      localStorage.setItem(key, value);
+      log(`LocalStorage set: ${key} = ${value}`);
+    });
+
+    document.getElementById('get-local').addEventListener('click', () => {
+      const key = document.getElementById('storage-key').value;
+      const value = localStorage.getItem(key);
+      document.getElementById('storage-display').textContent = `LocalStorage[${key}] = ${value}`;
+      log(`LocalStorage get: ${key} = ${value}`);
+    });
+
+    document.getElementById('clear-local').addEventListener('click', () => {
+      localStorage.clear();
+      document.getElementById('storage-display').textContent = 'LocalStorage cleared';
+      log('LocalStorage cleared');
+    });
+
+    document.getElementById('set-session').addEventListener('click', () => {
+      const key = document.getElementById('storage-key').value;
+      const value = document.getElementById('storage-value').value;
+      sessionStorage.setItem(key, value);
+      log(`SessionStorage set: ${key} = ${value}`);
+    });
+
+    document.getElementById('get-session').addEventListener('click', () => {
+      const key = document.getElementById('storage-key').value;
+      const value = sessionStorage.getItem(key);
+      document.getElementById('storage-display').textContent = `SessionStorage[${key}] = ${value}`;
+      log(`SessionStorage get: ${key} = ${value}`);
+    });
+
+    document.getElementById('clear-session').addEventListener('click', () => {
+      sessionStorage.clear();
+      document.getElementById('storage-display').textContent = 'SessionStorage cleared';
+      log('SessionStorage cleared');
+    });
+
+    // 9. Cookies
+    function refreshCookies() {
+      document.getElementById('cookie-display').textContent = document.cookie || '(no cookies)';
+    }
+    document.getElementById('refresh-cookies').addEventListener('click', refreshCookies);
+    refreshCookies();
+
+    // 10. JS Execution - expose for testing
+    window.testFunction = function(msg) {
+      document.getElementById('js-output').textContent = 'Executed: ' + msg;
+      return 'Result: ' + msg;
+    };
+
+    window.testGlobalVar = undefined;
+    setInterval(() => {
+      document.getElementById('global-var-display').textContent = String(window.testGlobalVar);
+    }, 500);
+
+    // 11. Delayed content
+    document.getElementById('load-delayed').addEventListener('click', () => {
+      document.getElementById('delayed-content').innerHTML = '<p>Loading...</p>';
+      setTimeout(() => {
+        document.getElementById('delayed-content').innerHTML = '<p id="delayed-element" style="color: green;">Delayed content loaded!</p>';
+        log('Delayed content appeared');
+      }, 2000);
+    });
+
+    log('Test page loaded');
+  </script>
+</body>
+</html>
