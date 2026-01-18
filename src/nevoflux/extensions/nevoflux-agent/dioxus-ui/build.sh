@@ -4,8 +4,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 # NevoFlux Dioxus UI Build Script
-# Builds both Chat Sidebar and Content Sidebar WASM components
-# and copies them to the extension's wasm directory
+# Builds Chat Sidebar WASM component and copies it to the extension's wasm directory
 
 set -e
 
@@ -69,30 +68,11 @@ build_chat_sidebar() {
     log_info "Chat Sidebar built and copied to $DEST"
 }
 
-# Build Content Sidebar
-build_content_sidebar() {
-    log_info "Building Content Sidebar..."
-    cd "$SCRIPT_DIR/content-sidebar"
-    trunk build --release
-
-    # Copy to extension wasm directory
-    local DEST="$WASM_DIR/content-sidebar"
-    mkdir -p "$DEST"
-    cp -r "$SCRIPT_DIR/dist/content-sidebar/"* "$DEST/"
-
-    # Fix CSP by extracting inline scripts
-    log_info "Fixing CSP for Content Sidebar..."
-    DIST_DIR="$DEST" "$SCRIPT_DIR/scripts/fix-csp.sh" "$DEST"
-
-    log_info "Content Sidebar built and copied to $DEST"
-}
-
 # Clean build artifacts
 clean() {
     log_info "Cleaning build artifacts..."
     rm -rf "$SCRIPT_DIR/dist"
     rm -rf "$WASM_DIR/chat-sidebar"
-    rm -rf "$WASM_DIR/content-sidebar"
     rm -rf "$SCRIPT_DIR/target"
     log_info "Clean complete"
 }
@@ -104,9 +84,8 @@ show_help() {
     echo "Usage: $0 [command]"
     echo ""
     echo "Commands:"
-    echo "  build     Build both Chat and Content sidebars (default)"
-    echo "  chat      Build only Chat Sidebar"
-    echo "  content   Build only Content Sidebar"
+    echo "  build     Build Chat Sidebar (default)"
+    echo "  chat      Build Chat Sidebar"
     echo "  clean     Remove all build artifacts"
     echo "  help      Show this help message"
 }
@@ -116,19 +95,10 @@ main() {
     local cmd="${1:-build}"
 
     case "$cmd" in
-        build)
+        build|chat)
             check_prerequisites
             build_chat_sidebar
-            build_content_sidebar
-            log_info "All builds complete!"
-            ;;
-        chat)
-            check_prerequisites
-            build_chat_sidebar
-            ;;
-        content)
-            check_prerequisites
-            build_content_sidebar
+            log_info "Build complete!"
             ;;
         clean)
             clean

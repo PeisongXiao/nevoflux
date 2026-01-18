@@ -43,15 +43,6 @@
         "<all_urls>"
       ],
       "js": [
-        "content/content-bootstrap.js"
-      ],
-      "run_at": "document_start"
-    },
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
         "content/content.js"
       ],
       "run_at": "document_idle"
@@ -69,13 +60,6 @@
         "mac": "Command+Shift+A"
       },
       "description": "Toggle NevoFlux Agent sidebar"
-    },
-    "inject_content_sidebar": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+Y",
-        "mac": "Command+Shift+Y"
-      },
-      "description": "Inject Content Sidebar into current page"
     }
   },
   "web_accessible_resources": [
@@ -86,11 +70,6 @@
         "wasm/chat-sidebar/*.css",
         "wasm/chat-sidebar/index.html",
         "wasm/chat-sidebar/snippets/**/*.js",
-        "wasm/content-sidebar/*.wasm",
-        "wasm/content-sidebar/*.js",
-        "wasm/content-sidebar/*.css",
-        "wasm/content-sidebar/snippets/**/*.js",
-        "content/content-sidebar-loader.js",
         "utils/*.js"
       ],
       "matches": ["<all_urls>"]
