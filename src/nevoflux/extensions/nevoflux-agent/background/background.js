@@ -11,196 +11,544 @@ console.log("[NevoFlux] Background script starting...");
  * NevoFlux Agent Background Script
  * Manages communication between:
  * - Chat Sidebar (Dioxus WASM) <-> Native Messaging Host (Rust)
- * - Chat Sidebar <-> Content Sidebar (Dioxus WASM in Shadow DOM)
  *
- * Protocol Version: 3.1 (Computer Use support)
+ * Protocol Version: 4.0 (4-channel architecture)
+ *
+ * Channels:
+ * - Input (Sidebar -> Agent): User messages, commands, authorization responses
+ * - Output (Agent -> Sidebar): Responses, status updates, permission requests
+ * - MCP (Bidirectional): Browser Use MCP requests/responses
+ * - PageLLM (Bidirectional): Page-mode LLM calls
  */
 
-// Native messaging port to Rust agent
-let nativePort = null;
-let portListeners = null;
+// =============================================================================
+// Channel Names (Native Messaging Application IDs)
+// =============================================================================
 
-// Track Content Sidebar injection status per tab
-const contentSidebarStatus = new Map();
-
-// Track pending tool calls waiting for results
-const pendingToolCalls = new Map();
-
-// Message type constants matching shared-protocol
-const MessageTypes = {
-  // Chat Sidebar -> Native Agent
-  CHAT_MESSAGE: "chat_message",
-  STOP_GENERATION: "stop_generation",
-  UI_ACTION: "ui_action",
-  REQUEST_TAB_CONTEXT: "request_tab_context",
-
-  // Native Agent -> Chat Sidebar
-  STREAM_CHUNK: "stream_chunk",
-  STREAM_END: "stream_end",
-  AGENT_ERROR: "agent_error",
-  TAB_CONTEXT_UPDATE: "tab_context_update",
-  CONNECTION_STATUS: "connection_status",
-
-  // Chat Sidebar -> Content Sidebar (via Background)
-  DISPLAY_CONTENT: "display_content",
-  CLEAR_CONTENT: "clear_content",
-  HIGHLIGHT_ELEMENT: "highlight_element",
-  CLEAR_HIGHLIGHT: "clear_highlight",
-
-  // Content Sidebar -> Chat Sidebar (via Background)
-  CONTENT_URL_REPORT: "content_url_report",
-  CONTENT_ELEMENT_CLICK: "content_element_click",
-  CONTENT_SIDEBAR_READY: "content_sidebar_ready",
-
-  // Page Context (Computer Use)
-  REQUEST_PAGE_CONTEXT: "request_page_context",
-  PAGE_CONTEXT_RESPONSE: "page_context_response",
-
-  // Tool Execution (Computer Use)
-  TOOL_CALL: "tool_call",
-  TOOL_RESULT: "tool_result",
-  AGENT_STATE_UPDATE: "agent_state_update",
-
-  // System
-  PING: "ping",
-  PONG: "pong",
-  INJECT_CONTENT_SIDEBAR: "inject_content_sidebar",
-  CONTENT_SIDEBAR_INJECTED: "content_sidebar_injected",
+const CHANNEL_NAMES = {
+  INPUT: "com.nevoflux.agent.input",
+  OUTPUT: "com.nevoflux.agent.output",
+  MCP: "com.nevoflux.agent.mcp",
+  PAGELLM: "com.nevoflux.agent.pagellm",
 };
 
-// Tools that are executed by Background Script (not Content Sidebar)
-const BACKGROUND_TOOLS = ["screenshot", "navigate"];
+// =============================================================================
+// Message Type Constants
+// =============================================================================
+
+const MessageTypes = {
+  // Input Channel: Sidebar -> Agent
+  CHAT_MESSAGE: "chat_message",
+  SKILL_COMMAND: "skill_command",
+  STOP_GENERATION: "stop_generation",
+  PERMISSION_RESPONSE: "permission_response",
+  PLUGIN_COMMAND: "plugin_command",
+  SYSTEM_COMMAND: "system_command",
+
+  // Output Channel: Agent -> Sidebar
+  STREAM_CHUNK: "stream_chunk",
+  STREAM_END: "stream_end",
+  CONTENT_BLOCK: "content_block",
+  PERMISSION_REQUEST: "permission_request",
+  AGENT_STATE: "agent_state",
+  ERROR: "error",
+  ACCOUNT_STATUS: "account_status",
+  SYSTEM_RESPONSE: "system_response",
+
+  // MCP Channel: Bidirectional
+  MCP_REQUEST: "mcp_request",
+  MCP_RESPONSE: "mcp_response",
+
+  // PageLLM Channel: Bidirectional
+  PAGE_LLM_REQUEST: "page_llm_request",
+  PAGE_LLM_CHUNK: "page_llm_chunk",
+  PAGE_LLM_DONE: "page_llm_done",
+  PAGE_LLM_ERROR: "page_llm_error",
+
+  // System messages
+  PING: "ping",
+  PONG: "pong",
+  CONNECTION_STATUS: "connection_status",
+
+  // Legacy types (backwards compatibility)
+  AGENT_ERROR: "agent_error",
+  TAB_CONTEXT_UPDATE: "tab_context_update",
+  REQUEST_TAB_CONTEXT: "request_tab_context",
+  UI_ACTION: "ui_action",
+};
+
+// Message types that should be sent to Input channel
+const INPUT_CHANNEL_TYPES = new Set([
+  MessageTypes.CHAT_MESSAGE,
+  MessageTypes.SKILL_COMMAND,
+  MessageTypes.STOP_GENERATION,
+  MessageTypes.PERMISSION_RESPONSE,
+  MessageTypes.PLUGIN_COMMAND,
+  MessageTypes.SYSTEM_COMMAND,
+]);
+
+// Message types that should be sent to MCP channel
+const MCP_CHANNEL_TYPES = new Set([
+  MessageTypes.MCP_REQUEST,
+  MessageTypes.MCP_RESPONSE,
+]);
+
+// Message types that should be sent to PageLLM channel
+const PAGELLM_CHANNEL_TYPES = new Set([
+  MessageTypes.PAGE_LLM_REQUEST,
+  MessageTypes.PAGE_LLM_CHUNK,
+  MessageTypes.PAGE_LLM_DONE,
+  MessageTypes.PAGE_LLM_ERROR,
+]);
+
+// =============================================================================
+// Reconnection Configuration
+// =============================================================================
+
+const RECONNECT_CONFIG = {
+  initialDelay: 1000, // 1 second
+  maxDelay: 30000, // 30 seconds
+  multiplier: 2,
+};
+
+// =============================================================================
+// Channel Manager Class
+// =============================================================================
 
 /**
- * Ensure native messaging connection is established (lazy connection)
- * @returns {Port|null} Native messaging port
+ * Manages a single native messaging channel with reconnection support
  */
-function ensureNativeConnection() {
-  if (!nativePort) {
-    connectNativeMessaging();
-  }
-  return nativePort;
-}
-
-/**
- * Initialize native messaging connection
- */
-function connectNativeMessaging() {
-  if (nativePort) {
-    console.log("[NevoFlux] Native messaging already connected");
-    return;
+class NativeChannel {
+  constructor(name, displayName, onMessage, onStatusChange) {
+    this.name = name;
+    this.displayName = displayName;
+    this.onMessage = onMessage;
+    this.onStatusChange = onStatusChange;
+    this.port = null;
+    this.listeners = null;
+    this.reconnectAttempts = 0;
+    this.reconnectTimer = null;
+    this.isIntentionalDisconnect = false;
   }
 
-  console.log("[NevoFlux] Attempting to connect to native agent...");
-
-  try {
-    console.log("[NevoFlux] Calling browser.runtime.connectNative('com.nevoflux.agent')...");
-    nativePort = browser.runtime.connectNative("com.nevoflux.agent");
-    console.log("[NevoFlux] connectNative returned, port:", nativePort);
-
-    portListeners = {
-      onMessage: (message) => {
-        console.log("[NevoFlux] Received from native:", message);
-        handleNativeMessage(message);
-      },
-      onDisconnect: (port) => {
-        const errorMsg = port.error ? port.error.message || String(port.error) : "null";
-        console.error("[NevoFlux] Native messaging disconnected:", errorMsg);
-        console.error("[NevoFlux] Port error object:", port.error);
-        console.error("[NevoFlux] Last error:", browser.runtime.lastError);
-        nativePort = null;
-        portListeners = null;
-
-        // Notify sidebar of disconnection
-        broadcastToSidebar({
-          type: MessageTypes.CONNECTION_STATUS,
-          payload: { connected: false, error: errorMsg }
-        });
-      }
-    };
-
-    console.log("[NevoFlux] Adding message and disconnect listeners...");
-    nativePort.onMessage.addListener(portListeners.onMessage);
-    nativePort.onDisconnect.addListener(portListeners.onDisconnect);
-
-    // Send initial ping to native agent to verify connection
-    const pingMessage = {
-      type: "ping",
-      payload: { timestamp: Date.now() }
-    };
-    console.log("[NevoFlux] Sending initial ping to native agent:", JSON.stringify(pingMessage));
-
-    try {
-      nativePort.postMessage(pingMessage);
-      console.log("[NevoFlux] Initial ping sent successfully");
-    } catch (postError) {
-      console.error("[NevoFlux] Failed to send initial ping:", postError);
+  /**
+   * Connect to the native messaging host
+   */
+  connect() {
+    if (this.port) {
+      console.log(`[NevoFlux] ${this.displayName} channel already connected`);
+      return true;
     }
 
-    // Notify sidebar of connection
-    broadcastToSidebar({
-      type: MessageTypes.CONNECTION_STATUS,
-      payload: { connected: true }
-    });
+    console.log(`[NevoFlux] Connecting ${this.displayName} channel (${this.name})...`);
 
-    console.log("[NevoFlux] Native messaging connected");
-  } catch (error) {
-    console.error("[NevoFlux] Failed to connect native messaging:", error);
-    console.error("[NevoFlux] Error stack:", error.stack);
-    nativePort = null;
+    try {
+      this.port = browser.runtime.connectNative(this.name);
 
-    broadcastToSidebar({
-      type: MessageTypes.CONNECTION_STATUS,
-      payload: { connected: false, error: error.message }
-    });
+      this.listeners = {
+        onMessage: (message) => {
+          console.log(`[NevoFlux] ${this.displayName} received:`, message);
+          if (this.onMessage) {
+            this.onMessage(message);
+          }
+        },
+        onDisconnect: (port) => {
+          const errorMsg = port.error ? port.error.message || String(port.error) : "null";
+          console.error(`[NevoFlux] ${this.displayName} channel disconnected:`, errorMsg);
+          this.cleanup();
+
+          if (this.onStatusChange) {
+            this.onStatusChange(false, errorMsg);
+          }
+
+          // Auto-reconnect if not intentional
+          if (!this.isIntentionalDisconnect) {
+            this.scheduleReconnect();
+          }
+        },
+      };
+
+      this.port.onMessage.addListener(this.listeners.onMessage);
+      this.port.onDisconnect.addListener(this.listeners.onDisconnect);
+
+      // Reset reconnect state on successful connection
+      this.reconnectAttempts = 0;
+      this.isIntentionalDisconnect = false;
+
+      console.log(`[NevoFlux] ${this.displayName} channel connected`);
+
+      if (this.onStatusChange) {
+        this.onStatusChange(true, null);
+      }
+
+      return true;
+    } catch (error) {
+      console.error(`[NevoFlux] Failed to connect ${this.displayName} channel:`, error);
+      this.cleanup();
+
+      if (this.onStatusChange) {
+        this.onStatusChange(false, error.message);
+      }
+
+      return false;
+    }
+  }
+
+  /**
+   * Disconnect from the native messaging host
+   */
+  disconnect() {
+    this.isIntentionalDisconnect = true;
+    this.cancelReconnect();
+    this.cleanup();
+    console.log(`[NevoFlux] ${this.displayName} channel disconnected intentionally`);
+  }
+
+  /**
+   * Cleanup port and listeners
+   */
+  cleanup() {
+    if (this.port) {
+      try {
+        this.port.disconnect();
+      } catch (e) {
+        // Ignore errors during disconnect
+      }
+    }
+    this.port = null;
+    this.listeners = null;
+  }
+
+  /**
+   * Schedule a reconnection attempt with exponential backoff
+   */
+  scheduleReconnect() {
+    this.cancelReconnect();
+
+    const delay = Math.min(
+      RECONNECT_CONFIG.initialDelay * Math.pow(RECONNECT_CONFIG.multiplier, this.reconnectAttempts),
+      RECONNECT_CONFIG.maxDelay
+    );
+
+    console.log(`[NevoFlux] Scheduling ${this.displayName} reconnect in ${delay}ms (attempt ${this.reconnectAttempts + 1})`);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectAttempts++;
+      if (!this.connect()) {
+        // If reconnect fails, schedule another attempt
+        this.scheduleReconnect();
+      }
+    }, delay);
+  }
+
+  /**
+   * Cancel any pending reconnection attempt
+   */
+  cancelReconnect() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  /**
+   * Send a message through the channel
+   * @param {Object} message - Message to send
+   * @returns {boolean} - Whether the message was sent
+   */
+  send(message) {
+    if (!this.port) {
+      console.warn(`[NevoFlux] Cannot send to ${this.displayName} - not connected`);
+      return false;
+    }
+
+    try {
+      this.port.postMessage(message);
+      console.log(`[NevoFlux] ${this.displayName} sent:`, message.type || message);
+      return true;
+    } catch (error) {
+      console.error(`[NevoFlux] Failed to send to ${this.displayName}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if channel is connected
+   */
+  isConnected() {
+    return this.port !== null;
   }
 }
+
+// =============================================================================
+// Channel Manager
+// =============================================================================
 
 /**
- * Handle messages received from native agent
+ * Manages all 4 native messaging channels
  */
-function handleNativeMessage(message) {
-  const msgType = message.type;
+class ChannelManager {
+  constructor() {
+    // Input channel: Sidebar -> Agent (always connected)
+    this.input = new NativeChannel(
+      CHANNEL_NAMES.INPUT,
+      "Input",
+      null, // Input channel doesn't receive messages (it's one-way)
+      (connected, error) => this.handleInputStatusChange(connected, error)
+    );
 
-  // Route native agent messages
-  switch (msgType) {
-    case MessageTypes.STREAM_CHUNK:
-    case MessageTypes.STREAM_END:
-    case MessageTypes.AGENT_ERROR:
-    case MessageTypes.TAB_CONTEXT_UPDATE:
+    // Output channel: Agent -> Sidebar (always connected)
+    this.output = new NativeChannel(
+      CHANNEL_NAMES.OUTPUT,
+      "Output",
+      (message) => this.handleOutputMessage(message),
+      (connected, error) => this.handleOutputStatusChange(connected, error)
+    );
+
+    // MCP channel: Browser Use MCP (bidirectional, connected based on config)
+    this.mcp = new NativeChannel(
+      CHANNEL_NAMES.MCP,
+      "MCP",
+      (message) => this.handleMcpMessage(message),
+      (connected, error) => this.handleMcpStatusChange(connected, error)
+    );
+
+    // PageLLM channel: Page-mode LLM calls (bidirectional, connected on demand)
+    this.pagellm = new NativeChannel(
+      CHANNEL_NAMES.PAGELLM,
+      "PageLLM",
+      (message) => this.handlePageLlmMessage(message),
+      (connected, error) => this.handlePageLlmStatusChange(connected, error)
+    );
+
+    // Track overall connection status
+    this.connectionStatus = {
+      input: false,
+      output: false,
+      mcp: false,
+      pagellm: false,
+    };
+
+    // MCP enabled flag (set via configuration)
+    this.mcpEnabled = false;
+  }
+
+  /**
+   * Initialize core channels (Input and Output)
+   * These are always connected when the extension is active
+   */
+  connectCoreChannels() {
+    console.log("[NevoFlux] Connecting core channels...");
+    this.input.connect();
+    this.output.connect();
+  }
+
+  /**
+   * Enable/disable MCP channel based on configuration
+   */
+  setMcpEnabled(enabled) {
+    this.mcpEnabled = enabled;
+    if (enabled && !this.mcp.isConnected()) {
+      this.mcp.connect();
+    } else if (!enabled && this.mcp.isConnected()) {
+      this.mcp.disconnect();
+    }
+  }
+
+  /**
+   * Connect PageLLM channel on demand
+   */
+  connectPageLlm() {
+    if (!this.pagellm.isConnected()) {
+      this.pagellm.connect();
+    }
+  }
+
+  /**
+   * Disconnect PageLLM channel when no longer needed
+   */
+  disconnectPageLlm() {
+    if (this.pagellm.isConnected()) {
+      this.pagellm.disconnect();
+    }
+  }
+
+  /**
+   * Disconnect all channels
+   */
+  disconnectAll() {
+    this.input.disconnect();
+    this.output.disconnect();
+    this.mcp.disconnect();
+    this.pagellm.disconnect();
+  }
+
+  /**
+   * Route a message to the appropriate channel
+   * @param {Object} message - Message with type field
+   * @returns {boolean} - Whether the message was sent
+   */
+  routeMessage(message) {
+    const msgType = message.type;
+
+    // Route to Input channel
+    if (INPUT_CHANNEL_TYPES.has(msgType)) {
+      return this.sendToInput(message);
+    }
+
+    // Route to MCP channel
+    if (MCP_CHANNEL_TYPES.has(msgType)) {
+      return this.sendToMcp(message);
+    }
+
+    // Route to PageLLM channel
+    if (PAGELLM_CHANNEL_TYPES.has(msgType)) {
+      return this.sendToPageLlm(message);
+    }
+
+    // Default: send to Input channel (for unknown types)
+    console.warn(`[NevoFlux] Unknown message type ${msgType}, routing to Input channel`);
+    return this.sendToInput(message);
+  }
+
+  /**
+   * Send message to Input channel
+   */
+  sendToInput(message) {
+    if (!this.input.isConnected()) {
+      console.warn("[NevoFlux] Input channel not connected, attempting to connect...");
+      this.input.connect();
+    }
+    return this.input.send(message);
+  }
+
+  /**
+   * Send message to MCP channel
+   */
+  sendToMcp(message) {
+    if (!this.mcp.isConnected()) {
+      if (!this.mcpEnabled) {
+        console.warn("[NevoFlux] MCP channel is disabled");
+        return false;
+      }
+      console.warn("[NevoFlux] MCP channel not connected, attempting to connect...");
+      this.mcp.connect();
+    }
+    return this.mcp.send(message);
+  }
+
+  /**
+   * Send message to PageLLM channel
+   */
+  sendToPageLlm(message) {
+    if (!this.pagellm.isConnected()) {
+      console.warn("[NevoFlux] PageLLM channel not connected, attempting to connect...");
+      this.pagellm.connect();
+    }
+    return this.pagellm.send(message);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Message Handlers
+  // ---------------------------------------------------------------------------
+
+  handleOutputMessage(message) {
+    // Forward all Output channel messages to sidebar
+    broadcastToSidebar(message);
+  }
+
+  handleMcpMessage(message) {
+    // MCP messages may need to be routed to:
+    // 1. Browser Use API (via ext-nevoflux actor)
+    // 2. Sidebar for status display
+    const msgType = message.type;
+
+    if (msgType === MessageTypes.MCP_REQUEST) {
+      // MCP request from external agent -> execute via Browser Use API
+      handleMcpRequest(message.payload);
+    } else if (msgType === MessageTypes.MCP_RESPONSE) {
+      // MCP response -> forward to sidebar or back to native agent
       broadcastToSidebar(message);
-      break;
+    } else {
+      // Unknown MCP message type
+      console.warn(`[NevoFlux] Unknown MCP message type: ${msgType}`);
+    }
+  }
 
-    // Browser control messages need to be forwarded to content script
-    case "browser_control":
-      handleBrowserControlFromAgent(message.payload);
-      break;
+  handlePageLlmMessage(message) {
+    // PageLLM messages are for browser-based LLM calls
+    const msgType = message.type;
 
-    // Tool calls from native agent need to go to Content Sidebar
-    case MessageTypes.TOOL_CALL:
-      console.log("[NevoFlux] Routing tool_call to Content Sidebar:", message.payload);
-      // Also broadcast to Chat Sidebar for UI feedback
-      broadcastToSidebar(message);
-      // Execute the tool via Content Sidebar
-      handleToolCall(message.payload);
-      break;
+    if (msgType === MessageTypes.PAGE_LLM_REQUEST) {
+      // Request to make an LLM call via page mode
+      handlePageLlmRequest(message.payload);
+    } else {
+      // Response messages (chunk, done, error) -> forward to native agent
+      // These would come from the page content script, not native agent
+      console.log(`[NevoFlux] PageLLM response: ${msgType}`);
+    }
+  }
 
-    // Page context requests need to go to Content Sidebar
-    case MessageTypes.REQUEST_PAGE_CONTEXT:
-      console.log("[NevoFlux] Routing page context request to Content Sidebar");
-      handleRequestPageContext(message.payload?.session_id);
-      break;
+  // ---------------------------------------------------------------------------
+  // Status Change Handlers
+  // ---------------------------------------------------------------------------
 
-    // Agent state updates go to Chat Sidebar for UI
-    case MessageTypes.AGENT_STATE_UPDATE:
-      broadcastToSidebar(message);
-      break;
+  handleInputStatusChange(connected, error) {
+    this.connectionStatus.input = connected;
+    this.broadcastConnectionStatus();
+  }
 
-    default:
-      console.log("[NevoFlux] Forwarding native message to sidebar:", msgType);
-      broadcastToSidebar(message);
+  handleOutputStatusChange(connected, error) {
+    this.connectionStatus.output = connected;
+    this.broadcastConnectionStatus();
+  }
+
+  handleMcpStatusChange(connected, error) {
+    this.connectionStatus.mcp = connected;
+    this.broadcastConnectionStatus();
+  }
+
+  handlePageLlmStatusChange(connected, error) {
+    this.connectionStatus.pagellm = connected;
+    this.broadcastConnectionStatus();
+  }
+
+  /**
+   * Broadcast overall connection status to sidebar
+   */
+  broadcastConnectionStatus() {
+    // Core channels (input + output) determine "connected" status
+    const coreConnected = this.connectionStatus.input && this.connectionStatus.output;
+
+    broadcastToSidebar({
+      type: MessageTypes.CONNECTION_STATUS,
+      payload: {
+        connected: coreConnected,
+        channels: { ...this.connectionStatus },
+      },
+    });
+  }
+
+  /**
+   * Get current connection status
+   */
+  getStatus() {
+    return {
+      connected: this.connectionStatus.input && this.connectionStatus.output,
+      channels: { ...this.connectionStatus },
+    };
   }
 }
+
+// =============================================================================
+// Global Channel Manager Instance
+// =============================================================================
+
+const channelManager = new ChannelManager();
+
+// =============================================================================
+// Sidebar Communication
+// =============================================================================
 
 /**
  * Broadcast message to sidebar (Chat Sidebar Dioxus app)
@@ -212,192 +560,99 @@ function broadcastToSidebar(message) {
   });
 }
 
+// =============================================================================
+// MCP Request Handler
+// =============================================================================
+
 /**
- * Send message to Content Sidebar in a specific tab
+ * Handle MCP request from external agent
+ * Routes to Browser Use API via JSWindowActor
  */
-async function sendToContentSidebar(tabId, message) {
+async function handleMcpRequest(payload) {
+  const { request_id, source, payload: jsonRpcRequest } = payload;
+  console.log(`[NevoFlux] MCP request from ${source?.agent || "unknown"}:`, jsonRpcRequest.method);
+
   try {
-    await browser.tabs.sendMessage(tabId, {
-      target: "content-sidebar",
-      ...message
+    // Get active tab to execute Browser Use API
+    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]) {
+      throw new Error("No active tab");
+    }
+
+    // Send to content script which will communicate with JSWindowActor
+    const result = await browser.tabs.sendMessage(tabs[0].id, {
+      target: "browser-use-api",
+      type: "mcp_execute",
+      payload: jsonRpcRequest,
+    });
+
+    // Send response back through MCP channel
+    channelManager.sendToMcp({
+      type: MessageTypes.MCP_RESPONSE,
+      payload: {
+        request_id,
+        payload: {
+          jsonrpc: "2.0",
+          id: jsonRpcRequest.id,
+          result,
+        },
+      },
     });
   } catch (error) {
-    console.warn(`[NevoFlux] Failed to send to Content Sidebar in tab ${tabId}:`, error);
-  }
-}
+    console.error("[NevoFlux] MCP request failed:", error);
 
-/**
- * Broadcast message to all Content Sidebars
- */
-async function broadcastToContentSidebars(message) {
-  const tabs = await browser.tabs.query({});
-  for (const tab of tabs) {
-    if (contentSidebarStatus.get(tab.id)) {
-      sendToContentSidebar(tab.id, message);
-    }
-  }
-}
-
-/**
- * Handle messages from Chat Sidebar or Content Sidebar
- */
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log("[NevoFlux] Background received:", message.type, message);
-
-  const msgType = message.type;
-
-  // Handle Ping/Pong for connection check
-  if (msgType === MessageTypes.PING) {
-    sendResponse({ type: MessageTypes.PONG, payload: { timestamp: message.payload?.timestamp } });
-
-    // Also check native connection and report status
-    const port = ensureNativeConnection();
-    broadcastToSidebar({
-      type: MessageTypes.CONNECTION_STATUS,
-      payload: { connected: !!port }
-    });
-    return;
-  }
-
-  // Route based on message type
-  switch (msgType) {
-    // =============================================
-    // Chat Sidebar -> Native Agent
-    // =============================================
-    case MessageTypes.CHAT_MESSAGE:
-    case MessageTypes.STOP_GENERATION:
-    case MessageTypes.UI_ACTION:
-      forwardToNativeAgent(message);
-      break;
-
-    case MessageTypes.REQUEST_TAB_CONTEXT:
-      getActiveTabContext().then((context) => {
-        broadcastToSidebar({
-          type: MessageTypes.TAB_CONTEXT_UPDATE,
-          payload: context
-        });
-      });
-      break;
-
-    // =============================================
-    // Chat Sidebar -> Content Sidebar (downstream)
-    // =============================================
-    case MessageTypes.DISPLAY_CONTENT:
-    case MessageTypes.CLEAR_CONTENT:
-    case MessageTypes.HIGHLIGHT_ELEMENT:
-    case MessageTypes.CLEAR_HIGHLIGHT:
-      // Forward to active tab's Content Sidebar
-      getActiveTabId().then((tabId) => {
-        if (tabId) {
-          sendToContentSidebar(tabId, message);
-        }
-      });
-      break;
-
-    case MessageTypes.INJECT_CONTENT_SIDEBAR:
-      injectContentSidebar(message.payload?.tab_id || null);
-      sendResponse({ success: true });
-      return;
-
-    // =============================================
-    // Content Sidebar -> Chat Sidebar (upstream)
-    // =============================================
-    case MessageTypes.CONTENT_URL_REPORT:
-    case MessageTypes.CONTENT_ELEMENT_CLICK:
-      broadcastToSidebar(message);
-      break;
-
-    case MessageTypes.CONTENT_SIDEBAR_READY:
-      // Track that Content Sidebar is ready in this tab
-      const tabId = message.payload?.tab_id || sender.tab?.id;
-      if (tabId) {
-        contentSidebarStatus.set(tabId, true);
-        console.log(`[NevoFlux] Content Sidebar ready in tab ${tabId}`);
-
-        // Notify Chat Sidebar
-        broadcastToSidebar({
-          type: MessageTypes.CONTENT_SIDEBAR_INJECTED,
-          payload: { tab_id: tabId, success: true }
-        });
-      }
-      break;
-
-    // =============================================
-    // Page Context (Computer Use)
-    // =============================================
-    case MessageTypes.REQUEST_PAGE_CONTEXT:
-      // Forward to Content Sidebar to extract page context
-      handleRequestPageContext(message.payload?.session_id);
-      break;
-
-    case MessageTypes.PAGE_CONTEXT_RESPONSE:
-      // Forward page context to Chat Sidebar (came from Content Sidebar)
-      broadcastToSidebar(message);
-      break;
-
-    // =============================================
-    // Tool Execution (Computer Use)
-    // =============================================
-    case MessageTypes.TOOL_CALL:
-      // Route tool call to appropriate executor
-      handleToolCall(message.payload);
-      break;
-
-    case MessageTypes.TOOL_RESULT:
-      // Forward tool result to Native Agent (came from Content Sidebar)
-      forwardToNativeAgent(message);
-      break;
-
-    case MessageTypes.AGENT_STATE_UPDATE:
-      // Forward agent state to Chat Sidebar (came from Native Agent)
-      broadcastToSidebar(message);
-      break;
-
-    // =============================================
-    // Legacy message types (backwards compatibility)
-    // =============================================
-    case "agent_request":
-      forwardToNativeAgent(message.data);
-      break;
-
-    case "get_page_content":
-      getActiveTabContent().then(sendResponse).catch((e) => sendResponse({ error: e.message }));
-      return true;
-
-    case "browser_action":
-      handleBrowserAction(message.data).then(sendResponse).catch((e) => sendResponse({ error: e.message }));
-      return true;
-
-    default:
-      console.warn("[NevoFlux] Unknown message type:", msgType);
-      sendResponse({ success: false, error: "Unknown message type" });
-      return;
-  }
-
-  // Default response for messages that don't explicitly respond
-  sendResponse({ success: true });
-});
-
-/**
- * Forward message to native agent
- */
-function forwardToNativeAgent(message) {
-  const port = ensureNativeConnection();
-  if (port) {
-    port.postMessage(message);
-  } else {
-    console.error("[NevoFlux] Cannot forward - native port not connected");
-    broadcastToSidebar({
-      type: MessageTypes.AGENT_ERROR,
+    // Send error response
+    channelManager.sendToMcp({
+      type: MessageTypes.MCP_RESPONSE,
       payload: {
-        session_id: message.payload?.session_id || "",
-        code: "CONNECTION_ERROR",
-        message: "Native messaging not available",
-        recoverable: true
-      }
+        request_id,
+        payload: {
+          jsonrpc: "2.0",
+          id: jsonRpcRequest.id,
+          error: {
+            code: -32603,
+            message: error.message,
+          },
+        },
+      },
     });
   }
 }
+
+// =============================================================================
+// PageLLM Request Handler
+// =============================================================================
+
+/**
+ * Handle PageLLM request
+ * Routes to appropriate LLM page (claude.ai, chat.openai.com, etc.)
+ */
+async function handlePageLlmRequest(payload) {
+  const { request_id, provider, payload: openAiRequest } = payload;
+  console.log(`[NevoFlux] PageLLM request for ${provider}:`, openAiRequest.model);
+
+  // This would be implemented to:
+  // 1. Find or open the appropriate LLM page
+  // 2. Inject input and trigger response
+  // 3. Extract streaming response
+  // 4. Send back through PageLLM channel
+
+  // For now, send an error indicating not implemented
+  channelManager.sendToPageLlm({
+    type: MessageTypes.PAGE_LLM_ERROR,
+    payload: {
+      request_id,
+      error: {
+        code: "NOT_IMPLEMENTED",
+        message: "Page LLM mode is not yet implemented",
+      },
+    },
+  });
+}
+
+// =============================================================================
+// Tab Context Helpers
+// =============================================================================
 
 /**
  * Get active tab ID
@@ -420,7 +675,7 @@ async function getActiveTabContext() {
       url: "",
       title: "",
       favicon_url: null,
-      status: "complete"
+      status: "complete",
     };
   }
 
@@ -429,371 +684,111 @@ async function getActiveTabContext() {
     url: tab.url || "",
     title: tab.title || "",
     favicon_url: tab.favIconUrl || null,
-    status: tab.status || "complete"
+    status: tab.status || "complete",
   };
 }
 
-/**
- * Get content from active tab via content script
- */
-async function getActiveTabContent() {
-  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-  if (!tabs[0]) {
-    throw new Error("No active tab");
-  }
+// =============================================================================
+// Message Listener (from Sidebar)
+// =============================================================================
 
-  return await browser.tabs.sendMessage(tabs[0].id, { type: "extract_content" });
-}
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log("[NevoFlux] Background received:", message.type, message);
 
-/**
- * Inject Content Sidebar into a tab
- */
-async function injectContentSidebar(targetTabId) {
-  let tabId = targetTabId;
+  const msgType = message.type;
 
-  if (!tabId) {
-    tabId = await getActiveTabId();
-  }
+  // Handle Ping/Pong for connection check
+  if (msgType === MessageTypes.PING) {
+    sendResponse({ type: MessageTypes.PONG, payload: { timestamp: message.payload?.timestamp } });
 
-  if (!tabId) {
-    console.error("[NevoFlux] No tab to inject Content Sidebar");
-    return;
-  }
-
-  // Check if already injected
-  if (contentSidebarStatus.get(tabId)) {
-    console.log(`[NevoFlux] Content Sidebar already in tab ${tabId}`);
-    return;
-  }
-
-  try {
-    // Send message to bootstrap script (runs at document_start on all pages)
-    // The bootstrap script will initialize the Content Sidebar
-    await browser.tabs.sendMessage(tabId, {
-      type: "inject_content_sidebar",
-      target: "content-bootstrap"
-    });
-
-    console.log(`[NevoFlux] Sent inject request to tab ${tabId}`);
-  } catch (error) {
-    // If message fails, the bootstrap script might not be loaded yet
-    // Fall back to scripting.executeScript
-    console.warn(`[NevoFlux] Bootstrap message failed, using executeScript:`, error.message);
-
-    try {
-      await browser.scripting.executeScript({
-        target: { tabId },
-        files: ["content/content-bootstrap.js"]
-      });
-      console.log(`[NevoFlux] Injected bootstrap script into tab ${tabId}`);
-    } catch (execError) {
-      console.error(`[NevoFlux] Failed to inject Content Sidebar:`, execError);
-
-      broadcastToSidebar({
-        type: MessageTypes.CONTENT_SIDEBAR_INJECTED,
-        payload: { tab_id: tabId, success: false }
-      });
-    }
-  }
-}
-
-/**
- * Handle browser control commands from native agent
- */
-async function handleBrowserControlFromAgent(control) {
-  const { tab_id, action, selector, value } = control;
-
-  switch (action) {
-    case "navigate":
-      await browser.tabs.update(tab_id, { url: value });
-      break;
-
-    case "click":
-      await browser.tabs.sendMessage(tab_id, {
-        type: "click_element",
-        selector
-      });
-      break;
-
-    case "highlight":
-      await sendToContentSidebar(tab_id, {
-        type: MessageTypes.HIGHLIGHT_ELEMENT,
-        payload: { session_id: "", selector, style: "outline" }
-      });
-      break;
-
-    case "scroll":
-      await browser.tabs.sendMessage(tab_id, {
-        type: "scroll_to",
-        value
-      });
-      break;
-
-    default:
-      console.warn(`[NevoFlux] Unknown browser control action: ${action}`);
-  }
-}
-
-/**
- * Handle browser automation actions (legacy)
- */
-async function handleBrowserAction(action) {
-  const { command, params } = action;
-
-  switch (command) {
-    case "navigate":
-      const tab = await browser.tabs.create({ url: params.url });
-      return { success: true, tabId: tab.id };
-
-    case "click":
-      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-      if (tabs[0]) {
-        return await browser.tabs.sendMessage(tabs[0].id, {
-          type: "click_element",
-          selector: params.selector
-        });
-      }
-      throw new Error("No active tab");
-
-    case "fill_form":
-      const activeTabs = await browser.tabs.query({ active: true, currentWindow: true });
-      if (activeTabs[0]) {
-        return await browser.tabs.sendMessage(activeTabs[0].id, {
-          type: "fill_form",
-          fields: params.fields
-        });
-      }
-      throw new Error("No active tab");
-
-    default:
-      throw new Error(`Unknown browser action: ${command}`);
-  }
-}
-
-// =========================================================================
-// Computer Use: Page Context
-// =========================================================================
-
-/**
- * Request page context from Content Sidebar
- */
-async function handleRequestPageContext(sessionId) {
-  const tabId = await getActiveTabId();
-  if (!tabId) {
-    console.warn("[NevoFlux] No active tab for page context request");
-    return;
-  }
-
-  // Check if Content Sidebar is ready in this tab
-  if (!contentSidebarStatus.get(tabId)) {
-    console.warn(`[NevoFlux] Content Sidebar not ready in tab ${tabId}`);
-    // Send empty context
+    // Also report connection status
+    const status = channelManager.getStatus();
     broadcastToSidebar({
-      type: MessageTypes.PAGE_CONTEXT_RESPONSE,
-      payload: {
-        session_id: sessionId || "",
-        tab_id: tabId,
-        context: {
-          url: "",
-          title: "",
-          viewport: { width: 0, height: 0, scroll_x: 0, scroll_y: 0, scroll_height: 0 },
-          interactive_elements: [],
-          text_content: null
-        }
-      }
+      type: MessageTypes.CONNECTION_STATUS,
+      payload: status,
     });
     return;
   }
 
-  // Request context from Content Sidebar
-  try {
-    await browser.tabs.sendMessage(tabId, {
-      target: "content-sidebar",
-      type: MessageTypes.REQUEST_PAGE_CONTEXT,
-      payload: { session_id: sessionId || "" }
-    });
-  } catch (error) {
-    console.error("[NevoFlux] Failed to request page context:", error);
-  }
-}
-
-// =========================================================================
-// Computer Use: Tool Execution
-// =========================================================================
-
-/**
- * Route tool call to appropriate executor
- */
-async function handleToolCall(payload) {
-  if (!payload || !payload.tool_name) {
-    console.error("[NevoFlux] Invalid tool call payload:", payload);
-    return;
-  }
-
-  const { call_id, session_id, tool_name, parameters, show_feedback } = payload;
-  console.log(`[NevoFlux] Tool call: ${tool_name}`, parameters);
-
-  // Track pending call
-  pendingToolCalls.set(call_id, { tool_name, session_id, timestamp: Date.now() });
-
-  // Check if this tool should be executed by Background Script
-  if (BACKGROUND_TOOLS.includes(tool_name)) {
-    await executeBackgroundTool(call_id, session_id, tool_name, parameters);
-  } else {
-    // Forward to Content Sidebar for DOM operations
-    const tabId = await getActiveTabId();
-    if (!tabId) {
-      sendToolResult(call_id, session_id, false, null, "No active tab");
-      return;
-    }
-
-    if (!contentSidebarStatus.get(tabId)) {
-      sendToolResult(call_id, session_id, false, null, "Content Sidebar not ready");
-      return;
-    }
-
-    try {
-      await browser.tabs.sendMessage(tabId, {
-        target: "content-sidebar",
-        type: MessageTypes.TOOL_CALL,
-        payload: { call_id, session_id, tool_name, parameters, show_feedback }
+  // Handle tab context request locally
+  if (msgType === MessageTypes.REQUEST_TAB_CONTEXT) {
+    getActiveTabContext().then((context) => {
+      broadcastToSidebar({
+        type: MessageTypes.TAB_CONTEXT_UPDATE,
+        payload: context,
       });
-    } catch (error) {
-      console.error(`[NevoFlux] Failed to send tool call to Content Sidebar:`, error);
-      sendToolResult(call_id, session_id, false, null, error.message);
-    }
-  }
-}
-
-/**
- * Execute tools that run in Background Script (not Content Sidebar)
- */
-async function executeBackgroundTool(callId, sessionId, toolName, parameters) {
-  try {
-    let result;
-
-    switch (toolName) {
-      case "screenshot":
-        result = await captureScreenshot(parameters);
-        break;
-
-      case "navigate":
-        result = await navigateToUrl(parameters);
-        break;
-
-      default:
-        throw new Error(`Unknown background tool: ${toolName}`);
-    }
-
-    sendToolResult(callId, sessionId, true, result, null);
-
-  } catch (error) {
-    console.error(`[NevoFlux] Background tool ${toolName} failed:`, error);
-    sendToolResult(callId, sessionId, false, null, error.message);
-  }
-}
-
-/**
- * Capture screenshot of current tab
- */
-async function captureScreenshot(params) {
-  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-  if (!tabs[0]) {
-    throw new Error("No active tab");
+    });
+    sendResponse({ success: true });
+    return;
   }
 
-  const options = {
-    format: "jpeg",
-    quality: params?.quality || 80
-  };
-
-  // Note: captureVisibleTab may require additional permissions
-  try {
-    const dataUrl = await browser.tabs.captureVisibleTab(null, options);
-    return {
-      screenshot: dataUrl,
-      tab_id: tabs[0].id,
-      url: tabs[0].url,
-      title: tabs[0].title
-    };
-  } catch (error) {
-    // Fallback: may need activeTab permission
-    throw new Error(`Screenshot failed: ${error.message}`);
-  }
-}
-
-/**
- * Navigate to URL in active tab
- */
-async function navigateToUrl(params) {
-  const url = params?.url;
-  if (!url) {
-    throw new Error("URL is required for navigate tool");
+  // Handle connection management commands
+  if (msgType === "connect_channels") {
+    channelManager.connectCoreChannels();
+    sendResponse({ success: true });
+    return;
   }
 
-  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-  if (!tabs[0]) {
-    throw new Error("No active tab");
+  if (msgType === "disconnect_channels") {
+    channelManager.disconnectAll();
+    sendResponse({ success: true });
+    return;
   }
 
-  await browser.tabs.update(tabs[0].id, { url });
-
-  return {
-    success: true,
-    tab_id: tabs[0].id,
-    url: url
-  };
-}
-
-/**
- * Send tool execution result back to Native Agent
- */
-function sendToolResult(callId, sessionId, success, result, error) {
-  // Remove from pending
-  pendingToolCalls.delete(callId);
-
-  const message = {
-    type: MessageTypes.TOOL_RESULT,
-    payload: {
-      call_id: callId,
-      session_id: sessionId,
-      success,
-      result: result || null,
-      error: error || null,
-      screenshot: null
-    }
-  };
-
-  // Forward to Native Agent
-  forwardToNativeAgent(message);
-}
-
-// Clean up pending tool calls periodically (timeout after 60 seconds)
-setInterval(() => {
-  const now = Date.now();
-  for (const [callId, info] of pendingToolCalls) {
-    if (now - info.timestamp > 60000) {
-      console.warn(`[NevoFlux] Tool call ${callId} timed out`);
-      sendToolResult(callId, info.session_id, false, null, "Tool execution timed out");
-    }
+  if (msgType === "enable_mcp") {
+    channelManager.setMcpEnabled(message.payload?.enabled ?? true);
+    sendResponse({ success: true });
+    return;
   }
-}, 10000);
 
-// =========================================================================
-// Event Listeners
-// =========================================================================
+  if (msgType === "connect_pagellm") {
+    channelManager.connectPageLlm();
+    sendResponse({ success: true });
+    return;
+  }
 
-// Clean up Content Sidebar status when tabs are closed
-browser.tabs.onRemoved.addListener((tabId) => {
-  contentSidebarStatus.delete(tabId);
+  if (msgType === "disconnect_pagellm") {
+    channelManager.disconnectPageLlm();
+    sendResponse({ success: true });
+    return;
+  }
+
+  if (msgType === "get_connection_status") {
+    sendResponse(channelManager.getStatus());
+    return;
+  }
+
+  // Route message to appropriate native channel
+  const sent = channelManager.routeMessage(message);
+
+  if (!sent) {
+    // Failed to send - notify sidebar of error
+    broadcastToSidebar({
+      type: MessageTypes.ERROR,
+      payload: {
+        session_id: message.payload?.session_id || "",
+        error_id: `send_error_${Date.now()}`,
+        level: "error",
+        code: "SEND_FAILED",
+        message: "Failed to send message to native agent",
+        recoverable: true,
+      },
+    });
+  }
+
+  sendResponse({ success: sent });
 });
+
+// =============================================================================
+// Event Listeners
+// =============================================================================
 
 // Update tab context when active tab changes
 browser.tabs.onActivated.addListener(async (activeInfo) => {
   const context = await getActiveTabContext();
   broadcastToSidebar({
     type: MessageTypes.TAB_CONTEXT_UPDATE,
-    payload: context
+    payload: context,
   });
 });
 
@@ -805,22 +800,18 @@ browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       const context = await getActiveTabContext();
       broadcastToSidebar({
         type: MessageTypes.TAB_CONTEXT_UPDATE,
-        payload: context
+        payload: context,
       });
     }
   }
 });
 
-// Handle keyboard commands from manifest.json
-browser.commands.onCommand.addListener((command) => {
-  console.log("[NevoFlux] Command received:", command);
+// =============================================================================
+// Initialization
+// =============================================================================
 
-  switch (command) {
-    case "inject_content_sidebar":
-      console.log("[NevoFlux] Injecting Content Sidebar via keyboard shortcut");
-      injectContentSidebar(null);
-      break;
-  }
-});
-
-console.log("[NevoFlux] Background script loaded (Protocol v3.0)");
+// Connect core channels on script load
+// Note: We use lazy connection - channels connect when first message is sent
+// This prevents errors if native agent is not installed
+console.log("[NevoFlux] Background script initialized (Protocol v4.0 - 4-channel architecture)");
+console.log("[NevoFlux] Channels will connect on first message or explicit connect command");
