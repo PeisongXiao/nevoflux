@@ -13,6 +13,7 @@
 pub mod common;
 pub mod channel1;
 pub mod channel2;
+pub mod channel3;
 
 use serde::{Deserialize, Serialize};
 
