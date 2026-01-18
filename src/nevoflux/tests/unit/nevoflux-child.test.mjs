@@ -12,6 +12,7 @@ import {
   createMockDocument,
   createMockWindow,
   createMockStorage,
+  createMockIframe,
 } from './mocks/browser-mocks.mjs';
 
 // Create a mock NevofluxChild class that mirrors the real implementation
@@ -19,6 +20,8 @@ class MockNevofluxChild {
   constructor() {
     this._document = createMockDocument();
     this._contentWindow = createMockWindow(this._document);
+    // P2: Frame context tracking
+    this._currentFrameSelector = null;
   }
 
   get doc() {
@@ -31,6 +34,23 @@ class MockNevofluxChild {
 
   get contentWindow() {
     return this._contentWindow;
+  }
+
+  // P2: Current document respecting frame context
+  get currentDoc() {
+    if (!this._currentFrameSelector) {
+      return this.doc;
+    }
+    const iframe = this.doc?.querySelector(this._currentFrameSelector);
+    return iframe?.contentDocument || this.doc;
+  }
+
+  get currentWin() {
+    if (!this._currentFrameSelector) {
+      return this.contentWindow;
+    }
+    const iframe = this.doc?.querySelector(this._currentFrameSelector);
+    return iframe?.contentWindow || this.contentWindow;
   }
 
   // ========== Execute Handler ==========
@@ -69,6 +89,10 @@ class MockNevofluxChild {
       eval: () => this.evalScript(safeParams),
       addScript: () => this.addScript(safeParams),
       removeScript: () => this.removeScript(safeParams),
+      // P2: Frame Management
+      listFrames: () => this.listFrames(safeParams),
+      switchFrame: () => this.switchFrame(safeParams),
+      frameMain: () => this.frameMain(safeParams),
     };
 
     const handler = handlers[action];
@@ -85,12 +109,12 @@ class MockNevofluxChild {
 
   // ========== Data Extraction ==========
   getText({ selector }) {
-    const el = this.document.querySelector(selector);
+    const el = this.currentDoc?.querySelector(selector);
     return el?.textContent || "";
   }
 
   getHtml({ selector }) {
-    const el = this.document.querySelector(selector);
+    const el = this.currentDoc?.querySelector(selector);
     return el?.innerHTML || "";
   }
 
@@ -121,7 +145,7 @@ class MockNevofluxChild {
   }
 
   exists({ selector }) {
-    return this.doc?.querySelector(selector) !== null;
+    return this.currentDoc?.querySelector(selector) !== null;
   }
 
   // ========== Keyboard ==========
@@ -724,6 +748,80 @@ class MockNevofluxChild {
 
   snapshot() {
     return { tree: "", refs: {} };
+  }
+
+  // ========== P2: Frame Management ==========
+
+  listFrames() {
+    const doc = this.currentDoc;
+    if (!doc) {
+      return [];
+    }
+
+    const iframes = doc.querySelectorAll("iframe");
+    const frames = [];
+
+    for (const iframe of iframes) {
+      const rect = iframe.getBoundingClientRect();
+      const style = doc.defaultView?.getComputedStyle(iframe);
+      const visible = rect.width > 0 && rect.height > 0 &&
+                      style?.visibility !== "hidden" &&
+                      style?.display !== "none";
+
+      frames.push({
+        selector: this.generateSelector(iframe),
+        url: iframe.src || "",
+        name: iframe.name || "",
+        visible
+      });
+    }
+
+    return frames;
+  }
+
+  switchFrame({ selector }) {
+    const doc = this.doc;
+    if (!doc) {
+      return { success: false, error: { code: 5001, message: "No document available", recoverable: false } };
+    }
+
+    const searchDoc = this._currentFrameSelector
+      ? doc.querySelector(this._currentFrameSelector)?.contentDocument || doc
+      : doc;
+
+    const iframe = searchDoc.querySelector(selector);
+    if (!iframe || iframe.tagName !== "IFRAME") {
+      return { success: false, error: { code: 10001, message: `Frame not found: ${selector}`, recoverable: true } };
+    }
+
+    try {
+      const frameDoc = iframe.contentDocument;
+      if (!frameDoc) {
+        return { success: false, error: { code: 10002, message: "Frame access denied (cross-origin)", recoverable: false } };
+      }
+
+      if (this._currentFrameSelector) {
+        this._currentFrameSelector = `${this._currentFrameSelector} ${selector}`;
+      } else {
+        this._currentFrameSelector = selector;
+      }
+
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 10002, message: `Frame access denied: ${e.message}`, recoverable: false } };
+    }
+  }
+
+  frameMain() {
+    this._currentFrameSelector = null;
+    return { success: true };
+  }
+
+  generateSelector(el) {
+    if (el.id) {
+      return `#${el.id}`;
+    }
+    return el.tagName?.toLowerCase() || 'unknown';
   }
 
   type({ selector, text }) {
@@ -1367,6 +1465,235 @@ describe('NevofluxChild - Execute Handler Coverage', () => {
   it('execute keyPress with missing key should fail', async () => {
     const result = await child.execute('keyPress', {});
     expect(result.success).toBe(false);
+  });
+});
+
+// ========== P2: Frame Management Tests ==========
+
+describe('NevofluxChild - Frame Management (P2)', () => {
+  beforeEach(() => {
+    child = new MockNevofluxChild();
+  });
+
+  it('listFrames should return empty array when no iframes', () => {
+    const frames = child.listFrames();
+    expect(Array.isArray(frames)).toBe(true);
+    expect(frames.length).toBe(0);
+  });
+
+  it('listFrames should return iframe info', () => {
+    // Create mock iframe
+    const iframe = child.document.createElement('iframe');
+    iframe.id = 'paymentFrame';
+    iframe.src = 'https://stripe.com/payment';
+    iframe.name = 'payment-iframe';
+    // Set up contentDocument for accessible iframe
+    const iframeDoc = createMockDocument();
+    const iframeWin = createMockWindow(iframeDoc);
+    iframe.contentDocument = iframeDoc;
+    iframe.contentWindow = iframeWin;
+    child.document.body.appendChild(iframe);
+
+    const frames = child.listFrames();
+    expect(frames.length).toBe(1);
+    expect(frames[0].url).toBe('https://stripe.com/payment');
+    expect(frames[0].name).toBe('payment-iframe');
+    expect(frames[0].visible).toBe(true);
+  });
+
+  it('listFrames should return multiple iframes', () => {
+    // Create two iframes
+    const iframe1 = child.document.createElement('iframe');
+    iframe1.id = 'frame1';
+    iframe1.src = 'https://a.com';
+    iframe1.contentDocument = createMockDocument();
+    child.document.body.appendChild(iframe1);
+
+    const iframe2 = child.document.createElement('iframe');
+    iframe2.id = 'frame2';
+    iframe2.src = 'https://b.com';
+    iframe2.contentDocument = createMockDocument();
+    child.document.body.appendChild(iframe2);
+
+    const frames = child.listFrames();
+    expect(frames.length).toBe(2);
+  });
+
+  it('switchFrame should succeed for existing accessible iframe', () => {
+    const iframe = child.document.createElement('iframe');
+    iframe.id = 'testFrame';
+    const iframeDoc = createMockDocument();
+    iframe.contentDocument = iframeDoc;
+    iframe.contentWindow = createMockWindow(iframeDoc);
+    child.document.body.appendChild(iframe);
+
+    const result = child.switchFrame({ selector: '#testFrame' });
+    expect(result.success).toBe(true);
+    expect(child._currentFrameSelector).toBe('#testFrame');
+  });
+
+  it('switchFrame should fail for non-existent iframe', () => {
+    const result = child.switchFrame({ selector: '#nonexistent' });
+    expect(result.success).toBe(false);
+    expect(result.error.code).toBe(10001);
+  });
+
+  it('switchFrame should fail for cross-origin iframe', () => {
+    const iframe = child.document.createElement('iframe');
+    iframe.id = 'crossOriginFrame';
+    iframe.src = 'https://different-domain.com';
+    // Simulate cross-origin: contentDocument is null
+    iframe.contentDocument = null;
+    child.document.body.appendChild(iframe);
+
+    const result = child.switchFrame({ selector: '#crossOriginFrame' });
+    expect(result.success).toBe(false);
+    expect(result.error.code).toBe(10002);
+  });
+
+  it('frameMain should reset frame context', () => {
+    child._currentFrameSelector = '#someFrame';
+    const result = child.frameMain();
+    expect(result.success).toBe(true);
+    expect(child._currentFrameSelector).toBeNull();
+  });
+
+  it('switchFrame should build compound selector for nested frames', () => {
+    // Set up first frame
+    const iframe1 = child.document.createElement('iframe');
+    iframe1.id = 'outerFrame';
+    const innerDoc = createMockDocument();
+    iframe1.contentDocument = innerDoc;
+    iframe1.contentWindow = createMockWindow(innerDoc);
+    child.document.body.appendChild(iframe1);
+
+    // Switch to outer frame
+    child.switchFrame({ selector: '#outerFrame' });
+    expect(child._currentFrameSelector).toBe('#outerFrame');
+
+    // Create inner frame in outer frame's document
+    const iframe2 = innerDoc.createElement('iframe');
+    iframe2.id = 'innerFrame';
+    iframe2.contentDocument = createMockDocument();
+    innerDoc.body.appendChild(iframe2);
+
+    // Switch to inner frame (nested)
+    child.switchFrame({ selector: '#innerFrame' });
+    expect(child._currentFrameSelector).toBe('#outerFrame #innerFrame');
+  });
+
+  it('currentDoc should return frame document when switched', () => {
+    const iframe = child.document.createElement('iframe');
+    iframe.id = 'targetFrame';
+    const iframeDoc = createMockDocument();
+    // Add distinct element to iframe document
+    const innerDiv = iframeDoc.createElement('div');
+    innerDiv.id = 'insideFrame';
+    iframeDoc.body.appendChild(innerDiv);
+    iframe.contentDocument = iframeDoc;
+    iframe.contentWindow = createMockWindow(iframeDoc);
+    child.document.body.appendChild(iframe);
+
+    // Before switch, currentDoc is main doc
+    expect(child.currentDoc).toBe(child.doc);
+
+    // Switch to frame
+    child.switchFrame({ selector: '#targetFrame' });
+
+    // After switch, currentDoc should be frame doc
+    expect(child.currentDoc).toBe(iframeDoc);
+  });
+
+  it('execute listFrames should work', async () => {
+    const result = await child.execute('listFrames', {});
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it('execute switchFrame should work', async () => {
+    const iframe = child.document.createElement('iframe');
+    iframe.id = 'execFrame';
+    iframe.contentDocument = createMockDocument();
+    child.document.body.appendChild(iframe);
+
+    const result = await child.execute('switchFrame', { selector: '#execFrame' });
+    expect(result.success).toBe(true);
+  });
+
+  it('execute frameMain should work', async () => {
+    child._currentFrameSelector = '#someFrame';
+    const result = await child.execute('frameMain', {});
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('NevofluxChild - Frame Context Integration', () => {
+  beforeEach(() => {
+    child = new MockNevofluxChild();
+  });
+
+  it('getText should use frame document when switched', () => {
+    // Set up iframe with distinct content
+    const iframe = child.document.createElement('iframe');
+    iframe.id = 'contentFrame';
+    const iframeDoc = createMockDocument();
+    const div = iframeDoc.createElement('div');
+    div.id = 'frameContent';
+    div.textContent = 'Content inside iframe';
+    iframeDoc.body.appendChild(div);
+    iframe.contentDocument = iframeDoc;
+    iframe.contentWindow = createMockWindow(iframeDoc);
+    child.document.body.appendChild(iframe);
+
+    // Switch to frame
+    child.switchFrame({ selector: '#contentFrame' });
+
+    // getText should now search in frame document
+    const text = child.getText({ selector: '#frameContent' });
+    expect(text).toBe('Content inside iframe');
+  });
+
+  it('exists should check frame document when switched', () => {
+    const iframe = child.document.createElement('iframe');
+    iframe.id = 'existsFrame';
+    const iframeDoc = createMockDocument();
+    const innerEl = iframeDoc.createElement('button');
+    innerEl.id = 'frameButton';
+    iframeDoc.body.appendChild(innerEl);
+    iframe.contentDocument = iframeDoc;
+    iframe.contentWindow = createMockWindow(iframeDoc);
+    child.document.body.appendChild(iframe);
+
+    // Before switch - element doesn't exist in main doc
+    expect(child.exists({ selector: '#frameButton' })).toBe(false);
+
+    // Switch to frame
+    child.switchFrame({ selector: '#existsFrame' });
+
+    // After switch - element exists in frame doc
+    expect(child.exists({ selector: '#frameButton' })).toBe(true);
+  });
+
+  it('frameMain should restore main document context', () => {
+    // Add element to main doc
+    const mainDiv = child.document.createElement('div');
+    mainDiv.id = 'mainElement';
+    child.document.body.appendChild(mainDiv);
+
+    // Set up iframe without the main element
+    const iframe = child.document.createElement('iframe');
+    iframe.id = 'switchFrame';
+    const iframeDoc = createMockDocument();
+    iframe.contentDocument = iframeDoc;
+    iframe.contentWindow = createMockWindow(iframeDoc);
+    child.document.body.appendChild(iframe);
+
+    // Switch to frame - main element not visible
+    child.switchFrame({ selector: '#switchFrame' });
+    expect(child.exists({ selector: '#mainElement' })).toBe(false);
+
+    // Return to main
+    child.frameMain();
+    expect(child.exists({ selector: '#mainElement' })).toBe(true);
   });
 });
 

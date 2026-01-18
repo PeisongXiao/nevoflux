@@ -12,6 +12,9 @@ import {
   createMockServices,
   createMockExtension,
   createMockTabTracker,
+  createMockDialog,
+  createMockObserverService,
+  createMockDownloadItem,
 } from './mocks/browser-mocks.mjs';
 
 // Helper to escape regex special characters (mirrors the real implementation)
@@ -488,6 +491,134 @@ class MockExtNevofluxAPI {
   async clear(tabId, selector) {
     const resolvedTabId = tabId ?? (await this.getActiveTabId());
     return this.executeInTab(resolvedTabId, "clear", { selector });
+  }
+
+  // ========== P2: Frame Management ==========
+
+  async listFrames(tabId) {
+    const resolvedTabId = tabId ?? (await this.getActiveTabId());
+    return this.executeInTab(resolvedTabId, "listFrames", {});
+  }
+
+  async switchFrame(tabId, selector) {
+    const resolvedTabId = tabId ?? (await this.getActiveTabId());
+    return this.executeInTab(resolvedTabId, "switchFrame", { selector });
+  }
+
+  async frameMain(tabId) {
+    const resolvedTabId = tabId ?? (await this.getActiveTabId());
+    return this.executeInTab(resolvedTabId, "frameMain", {});
+  }
+
+  // ========== P3: Dialog Handling ==========
+
+  _pendingDialog = null;
+  _dialogObserver = null;
+  _observerService = createMockObserverService();
+
+  setupDialogObserver() {
+    if (this._dialogObserver) return;
+
+    this._dialogObserver = {
+      observe: (subject, topic, data) => {
+        if (topic === "common-dialog-loaded") {
+          this._pendingDialog = subject;
+        }
+      }
+    };
+    this._observerService.addObserver(this._dialogObserver, "common-dialog-loaded");
+  }
+
+  async dialogAccept(text) {
+    if (!this._pendingDialog) {
+      return { success: true }; // Silent success if no dialog
+    }
+
+    const dialog = this._pendingDialog;
+    try {
+      // For prompt dialogs, set the text
+      if (text && dialog.ui.loginTextbox) {
+        dialog.ui.loginTextbox.value = text;
+      }
+
+      // Click OK/Accept button
+      if (dialog.ui.button0) {
+        dialog.ui.button0.click();
+      }
+
+      this._pendingDialog = null;
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 11001, message: `Accept dialog failed: ${e.message}`, recoverable: false } };
+    }
+  }
+
+  async dialogDismiss() {
+    if (!this._pendingDialog) {
+      return { success: true }; // Silent success if no dialog
+    }
+
+    const dialog = this._pendingDialog;
+    try {
+      // Click Cancel button (button1) or OK for alert (which has no cancel)
+      if (dialog.ui.button1) {
+        dialog.ui.button1.click();
+      } else if (dialog.ui.button0) {
+        dialog.ui.button0.click();
+      }
+
+      this._pendingDialog = null;
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: { code: 11002, message: `Dismiss dialog failed: ${e.message}`, recoverable: false } };
+    }
+  }
+
+  // Simulate dialog appearing
+  _simulateDialog(dialog) {
+    this._observerService.notifyObservers(dialog, "common-dialog-loaded", null);
+  }
+
+  // ========== P3: Download Wait ==========
+
+  _downloadListeners = [];
+  _downloadTimeout = null;
+
+  async waitForDownload(options = {}) {
+    const timeout = options.timeout || 30000;
+
+    return new Promise((resolve, reject) => {
+      // Set up timeout
+      this._downloadTimeout = setTimeout(() => {
+        this._downloadListeners = [];
+        resolve({
+          success: false,
+          error: { code: 12001, message: 'Download timeout', recoverable: true }
+        });
+      }, timeout);
+
+      // Set up listener
+      const listener = (downloadItem) => {
+        clearTimeout(this._downloadTimeout);
+        this._downloadListeners = [];
+        resolve({
+          success: true,
+          url: downloadItem.url,
+          filename: downloadItem.filename,
+          mimeType: downloadItem.mime,
+          size: downloadItem.totalBytes
+        });
+      };
+
+      this._downloadListeners.push(listener);
+    });
+  }
+
+  // Simulate download starting (for testing)
+  _simulateDownloadStart(downloadItem) {
+    for (const listener of this._downloadListeners) {
+      listener(downloadItem);
+    }
   }
 }
 
@@ -1408,6 +1539,292 @@ describe('ext-nevoflux - Window Management Extended', () => {
     // Our mock returns success but a real implementation would fail
     // The test ensures the code path is exercised
     expect(result).toBeDefined();
+  });
+});
+
+// ========== P2: Frame Management Tests ==========
+
+describe('ext-nevoflux - Frame Management (P2)', () => {
+  beforeEach(() => {
+    api = new MockExtNevofluxAPI();
+  });
+
+  it('listFrames should call executeInTab', async () => {
+    const result = await api.listFrames();
+    expect(result.success).toBe(true);
+  });
+
+  it('switchFrame should call executeInTab', async () => {
+    const result = await api.switchFrame(null, '#paymentFrame');
+    expect(result.success).toBe(true);
+  });
+
+  it('frameMain should call executeInTab', async () => {
+    const result = await api.frameMain();
+    expect(result.success).toBe(true);
+  });
+
+  it('listFrames with specific tabId should work', async () => {
+    const tab = await api.createTab({ url: 'https://example.com' });
+    const result = await api.listFrames(tab.tab.id);
+    expect(result.success).toBe(true);
+  });
+
+  it('switchFrame with specific tabId should work', async () => {
+    const tab = await api.createTab({ url: 'https://example.com' });
+    const result = await api.switchFrame(tab.tab.id, 'iframe[name="payment"]');
+    expect(result.success).toBe(true);
+  });
+});
+
+// ========== P3: Dialog Handling Tests ==========
+
+describe('ext-nevoflux - Dialog Handling (P3)', () => {
+  beforeEach(() => {
+    api = new MockExtNevofluxAPI();
+    api.setupDialogObserver();
+  });
+
+  it('dialogAccept should return success when no dialog', async () => {
+    const result = await api.dialogAccept();
+    expect(result.success).toBe(true);
+  });
+
+  it('dialogDismiss should return success when no dialog', async () => {
+    const result = await api.dialogDismiss();
+    expect(result.success).toBe(true);
+  });
+
+  it('dialogAccept should handle alert dialog', async () => {
+    const dialog = createMockDialog('alert', 'Test alert message');
+    api._simulateDialog(dialog);
+
+    const result = await api.dialogAccept();
+    expect(result.success).toBe(true);
+    expect(dialog.ui.button0._clicked).toBe(true);
+  });
+
+  it('dialogAccept should handle confirm dialog', async () => {
+    const dialog = createMockDialog('confirm', 'Are you sure?');
+    api._simulateDialog(dialog);
+
+    const result = await api.dialogAccept();
+    expect(result.success).toBe(true);
+    expect(dialog.ui.button0._clicked).toBe(true);
+  });
+
+  it('dialogDismiss should handle confirm dialog (click cancel)', async () => {
+    const dialog = createMockDialog('confirm', 'Are you sure?');
+    api._simulateDialog(dialog);
+
+    const result = await api.dialogDismiss();
+    expect(result.success).toBe(true);
+    expect(dialog.ui.button1._clicked).toBe(true);
+  });
+
+  it('dialogAccept should handle prompt dialog with text', async () => {
+    const dialog = createMockDialog('prompt', 'Enter your name:');
+    api._simulateDialog(dialog);
+
+    const result = await api.dialogAccept('John Doe');
+    expect(result.success).toBe(true);
+    expect(dialog.ui.loginTextbox.value).toBe('John Doe');
+    expect(dialog.ui.button0._clicked).toBe(true);
+  });
+
+  it('dialogDismiss should handle prompt dialog (click cancel)', async () => {
+    const dialog = createMockDialog('prompt', 'Enter value:');
+    api._simulateDialog(dialog);
+
+    const result = await api.dialogDismiss();
+    expect(result.success).toBe(true);
+    expect(dialog.ui.button1._clicked).toBe(true);
+  });
+
+  it('dialogDismiss should handle alert (no cancel button)', async () => {
+    const dialog = createMockDialog('alert', 'Notice');
+    api._simulateDialog(dialog);
+
+    const result = await api.dialogDismiss();
+    expect(result.success).toBe(true);
+    // Alert has no cancel, so button0 (OK) is clicked
+    expect(dialog.ui.button0._clicked).toBe(true);
+  });
+
+  it('dialog should be cleared after accept', async () => {
+    const dialog = createMockDialog('alert', 'First alert');
+    api._simulateDialog(dialog);
+    await api.dialogAccept();
+
+    // Dialog should be cleared
+    expect(api._pendingDialog).toBeNull();
+
+    // Second accept should succeed silently
+    const result = await api.dialogAccept();
+    expect(result.success).toBe(true);
+  });
+
+  it('dialog should be cleared after dismiss', async () => {
+    const dialog = createMockDialog('confirm', 'Confirm action');
+    api._simulateDialog(dialog);
+    await api.dialogDismiss();
+
+    // Dialog should be cleared
+    expect(api._pendingDialog).toBeNull();
+  });
+
+  it('multiple dialogs should be handled sequentially', async () => {
+    // First dialog
+    const dialog1 = createMockDialog('alert', 'Alert 1');
+    api._simulateDialog(dialog1);
+    await api.dialogAccept();
+
+    // Second dialog
+    const dialog2 = createMockDialog('confirm', 'Confirm?');
+    api._simulateDialog(dialog2);
+    const result = await api.dialogDismiss();
+
+    expect(result.success).toBe(true);
+    expect(dialog1.ui.button0._clicked).toBe(true);
+    expect(dialog2.ui.button1._clicked).toBe(true);
+  });
+});
+
+// ========== P3: Download Wait Tests ==========
+
+describe('ext-nevoflux - Download Wait (P3)', () => {
+  beforeEach(() => {
+    api = new MockExtNevofluxAPI();
+  });
+
+  it('waitForDownload should return download info when download starts', async () => {
+    const downloadItem = createMockDownloadItem({
+      url: 'https://example.com/report.pdf',
+      filename: 'report.pdf',
+      mime: 'application/pdf',
+      totalBytes: 2048
+    });
+
+    // Start waiting in background
+    const waitPromise = api.waitForDownload({ timeout: 5000 });
+
+    // Simulate download starting
+    setTimeout(() => {
+      api._simulateDownloadStart(downloadItem);
+    }, 10);
+
+    const result = await waitPromise;
+    expect(result.success).toBe(true);
+    expect(result.url).toBe('https://example.com/report.pdf');
+    expect(result.filename).toBe('report.pdf');
+    expect(result.mimeType).toBe('application/pdf');
+    expect(result.size).toBe(2048);
+  });
+
+  it('waitForDownload should timeout when no download', async () => {
+    const result = await api.waitForDownload({ timeout: 50 });
+    expect(result.success).toBe(false);
+    expect(result.error.code).toBe(12001);
+    expect(result.error.message).toContain('timeout');
+  });
+
+  it('waitForDownload should use default timeout', async () => {
+    // Just ensure it can be called without options
+    const waitPromise = api.waitForDownload();
+
+    // Simulate immediate download
+    setTimeout(() => {
+      api._simulateDownloadStart(createMockDownloadItem());
+    }, 5);
+
+    const result = await waitPromise;
+    expect(result.success).toBe(true);
+  });
+
+  it('waitForDownload should handle different file types', async () => {
+    const csvDownload = createMockDownloadItem({
+      url: 'https://example.com/data.csv',
+      filename: 'data.csv',
+      mime: 'text/csv',
+      totalBytes: 512
+    });
+
+    const waitPromise = api.waitForDownload({ timeout: 1000 });
+
+    setTimeout(() => {
+      api._simulateDownloadStart(csvDownload);
+    }, 10);
+
+    const result = await waitPromise;
+    expect(result.success).toBe(true);
+    expect(result.mimeType).toBe('text/csv');
+    expect(result.filename).toBe('data.csv');
+  });
+
+  it('waitForDownload should handle unknown file size', async () => {
+    const downloadItem = createMockDownloadItem({
+      totalBytes: -1 // Unknown size
+    });
+
+    const waitPromise = api.waitForDownload({ timeout: 1000 });
+
+    setTimeout(() => {
+      api._simulateDownloadStart(downloadItem);
+    }, 10);
+
+    const result = await waitPromise;
+    expect(result.success).toBe(true);
+    expect(result.size).toBe(-1);
+  });
+});
+
+// ========== P2+P3 Integration Tests ==========
+
+describe('ext-nevoflux - P2+P3 API Integration', () => {
+  beforeEach(() => {
+    api = new MockExtNevofluxAPI();
+    api.setupDialogObserver();
+  });
+
+  it('Frame + Dialog workflow: switch frame then handle dialog', async () => {
+    // Switch to payment frame
+    const frameResult = await api.switchFrame(null, '#stripeFrame');
+    expect(frameResult.success).toBe(true);
+
+    // Simulate payment confirmation dialog
+    const dialog = createMockDialog('confirm', 'Confirm payment?');
+    api._simulateDialog(dialog);
+
+    // Accept the dialog
+    const dialogResult = await api.dialogAccept();
+    expect(dialogResult.success).toBe(true);
+  });
+
+  it('Dialog accept without text for non-prompt', async () => {
+    const dialog = createMockDialog('confirm', 'Delete item?');
+    api._simulateDialog(dialog);
+
+    // Accept without text (should work for confirm)
+    const result = await api.dialogAccept();
+    expect(result.success).toBe(true);
+  });
+
+  it('Download after frame operation', async () => {
+    // First switch frame
+    await api.switchFrame(null, '#downloadFrame');
+
+    // Then wait for download
+    const downloadItem = createMockDownloadItem({
+      filename: 'export.xlsx',
+      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+
+    const waitPromise = api.waitForDownload({ timeout: 1000 });
+    setTimeout(() => api._simulateDownloadStart(downloadItem), 10);
+
+    const result = await waitPromise;
+    expect(result.success).toBe(true);
+    expect(result.filename).toBe('export.xlsx');
   });
 });
 

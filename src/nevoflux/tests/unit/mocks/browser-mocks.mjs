@@ -40,14 +40,61 @@ export function createMockDocument() {
       parentElement: null,
       attributes: new Map(),
       _eventListeners: new Map(),
+      // iframe-specific properties
+      src: '',
+      name: '',
+      contentDocument: null,
+      contentWindow: null,
 
       querySelector: (selector) => {
         if (selector.startsWith('#')) {
           return elements.get(selector.slice(1)) || null;
         }
+        // Handle iframe selector
+        if (selector === 'iframe' || selector.startsWith('iframe')) {
+          const collectFirstIframe = (node) => {
+            for (const child of node.children || []) {
+              if (child.tagName === 'IFRAME') {
+                // Check if selector matches (e.g., iframe[name="payment"])
+                if (selector === 'iframe') return child;
+                // Match id selector like #id
+                if (selector.includes('#')) {
+                  const id = selector.match(/#([^\s\[]+)/)?.[1];
+                  if (id && child.id === id) return child;
+                }
+                // Match attribute selectors like iframe[name="value"]
+                const attrMatch = selector.match(/\[(\w+)=["']([^"']+)["']\]/);
+                if (attrMatch) {
+                  const [, attr, val] = attrMatch;
+                  if (child[attr] === val || child.getAttribute?.(attr) === val) return child;
+                }
+                return child;
+              }
+              const found = collectFirstIframe(child);
+              if (found) return found;
+            }
+            return null;
+          };
+          return collectFirstIframe(el);
+        }
         return null;
       },
-      querySelectorAll: () => [],
+      querySelectorAll: (selector) => {
+        if (selector === 'iframe') {
+          const iframes = [];
+          const collectIframes = (node) => {
+            for (const child of node.children || []) {
+              if (child.tagName === 'IFRAME') {
+                iframes.push(child);
+              }
+              collectIframes(child);
+            }
+          };
+          collectIframes(el);
+          return iframes;
+        }
+        return [];
+      },
       appendChild: function(child) {
         this.children.push(child);
         child.parentElement = this;
@@ -81,6 +128,12 @@ export function createMockDocument() {
           this.id = value;
           elements.set(value, this);
         }
+        if (name === 'src') {
+          this.src = value;
+        }
+        if (name === 'name') {
+          this.name = value;
+        }
       },
       addEventListener: function(event, handler) {
         if (!this._eventListeners.has(event)) {
@@ -112,7 +165,7 @@ export function createMockDocument() {
   const documentElement = createElement('html');
   documentElement.appendChild(body);
 
-  return {
+  const doc = {
     body,
     documentElement,
     createElement,
@@ -120,13 +173,35 @@ export function createMockDocument() {
     querySelector: (selector) => {
       if (selector === 'body') return body;
       if (selector.startsWith('#')) {
-        return elements.get(selector.slice(1)) || null;
+        // First check registered elements
+        const el = elements.get(selector.slice(1));
+        if (el) return el;
+        // Also search body children recursively
+        const findById = (node, id) => {
+          for (const child of node.children || []) {
+            if (child.id === id || child._id === id) return child;
+            const found = findById(child, id);
+            if (found) return found;
+          }
+          return null;
+        };
+        return findById(body, selector.slice(1));
+      }
+      // Handle iframe selectors - delegate to body
+      if (selector === 'iframe' || selector.includes('iframe')) {
+        return body.querySelector(selector);
       }
       return null;
     },
-    querySelectorAll: () => [],
+    querySelectorAll: (selector) => {
+      if (selector === 'iframe') {
+        return body.querySelectorAll(selector);
+      }
+      return [];
+    },
     defaultView: null, // Will be set by window mock
   };
+  return doc;
 }
 
 // Mock window
@@ -349,3 +424,97 @@ export const MockCi = {
     NOTIFY_STATE_ALL: 0xff,
   },
 };
+
+// Create a mock iframe with its own document/window
+export function createMockIframe(doc, options = {}) {
+  const iframeDoc = createMockDocument();
+  const iframeWin = createMockWindow(iframeDoc);
+
+  const iframe = doc.createElement('iframe');
+  iframe.src = options.src || 'about:blank';
+  iframe.name = options.name || '';
+  iframe.contentDocument = iframeDoc;
+  iframe.contentWindow = iframeWin;
+
+  if (options.id) {
+    iframe.id = options.id;
+  }
+
+  // Set visible by default unless cross-origin
+  if (options.crossOrigin) {
+    iframe.contentDocument = null; // Simulate cross-origin restriction
+  }
+
+  return iframe;
+}
+
+// Create mock dialog for P3 dialog handling tests
+export function createMockDialog(type = 'alert', message = '') {
+  return {
+    type,
+    message,
+    ui: {
+      loginTextbox: type === 'prompt' ? { value: '' } : null,
+      button0: {
+        click: function() { this._clicked = true; },
+        _clicked: false
+      },
+      button1: type !== 'alert' ? {
+        click: function() { this._clicked = true; },
+        _clicked: false
+      } : null,
+    },
+    opener: null,
+    args: {
+      text: message,
+      GetInt: (idx) => idx === 3 ? { alert: 0, confirm: 1, prompt: 2 }[type] : 0,
+    },
+    _dismissed: false,
+    close: function() { this._dismissed = true; },
+  };
+}
+
+// Create mock Services.obs for dialog observer testing
+export function createMockObserverService() {
+  const observers = new Map();
+
+  return {
+    addObserver: (observer, topic) => {
+      if (!observers.has(topic)) {
+        observers.set(topic, []);
+      }
+      observers.get(topic).push(observer);
+    },
+    removeObserver: (observer, topic) => {
+      const list = observers.get(topic);
+      if (list) {
+        const idx = list.indexOf(observer);
+        if (idx > -1) list.splice(idx, 1);
+      }
+    },
+    notifyObservers: (subject, topic, data) => {
+      const list = observers.get(topic) || [];
+      list.forEach(obs => {
+        if (typeof obs.observe === 'function') {
+          obs.observe(subject, topic, data);
+        } else if (typeof obs === 'function') {
+          obs(subject, topic, data);
+        }
+      });
+    },
+    _observers: observers, // Test helper
+  };
+}
+
+// Create mock download item for P3 download tests
+export function createMockDownloadItem(options = {}) {
+  return {
+    id: options.id || Date.now(),
+    url: options.url || 'https://example.com/file.pdf',
+    filename: options.filename || 'file.pdf',
+    mime: options.mime || 'application/pdf',
+    totalBytes: options.totalBytes ?? 1024,
+    state: options.state || 'in_progress',
+    startTime: options.startTime || Date.now(),
+  };
+}
