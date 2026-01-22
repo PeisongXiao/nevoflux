@@ -2,9 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-//! Channel 3: MCP Server (bidirectional)
+//! MCP Channel (bidirectional)
 //!
 //! Messages for MCP Server functionality (Browser Use API).
+//!
+//! Renamed from Channel 3 in protocol v5.0
 
 use serde::{Deserialize, Serialize};
 
@@ -61,7 +63,7 @@ pub struct McpResponsePayload {
     pub payload: JsonRpcResponse,
 }
 
-/// All Channel 3 message types
+/// All MCP channel message types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum McpMessage {

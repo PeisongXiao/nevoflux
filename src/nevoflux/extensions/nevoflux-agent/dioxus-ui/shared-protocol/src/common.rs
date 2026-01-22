@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Protocol version
-pub const PROTOCOL_VERSION: &str = "4.0.0";
+pub const PROTOCOL_VERSION: &str = "5.0.0";
 
 /// Permission scope for authorization
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,8 +91,9 @@ pub enum ContentType {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
-    #[default]
     Thinking,
+    #[default]
+    Idle,
     /// Executing a tool (alias for computer use compatibility)
     Executing,
     /// Executing a specific tool
@@ -134,15 +135,6 @@ pub enum PlanType {
     Team,
 }
 
-/// LLM provider for page mode
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LlmProvider {
-    Claude,
-    Chatgpt,
-    Gemini,
-}
-
 /// Plugin action
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -150,4 +142,42 @@ pub enum PluginAction {
     Start,
     Stop,
     Restart,
+}
+
+/// Browser tool action types
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserToolAction {
+    /// Navigate to a URL
+    Navigate,
+    /// Click an element
+    Click,
+    /// Type text
+    Type,
+    /// Fill form field
+    Fill,
+    /// Get page content
+    GetContent,
+    /// Take screenshot
+    Screenshot,
+    /// Execute JavaScript
+    EvalJs,
+    /// Wait for element
+    WaitFor,
+    /// Scroll page
+    Scroll,
+    /// Get element info
+    GetElement,
+    /// Get all elements
+    QueryAll,
+    /// Take snapshot of interactive elements
+    Snapshot,
+    /// Click element by snapshot ID
+    ClickById,
+    /// Fill element by snapshot ID
+    FillById,
+    /// Type into element by snapshot ID
+    TypeById,
+    /// Get page content as Markdown
+    GetMarkdown,
 }
