@@ -18,16 +18,49 @@ use crate::common::{
 // Sidebar → Agent Payloads
 // =============================================================================
 
+/// Chat mode (selected from sidebar toolbar)
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatMode {
+    #[default]
+    Chat,
+    Browser,
+    Agent,
+}
+
+/// Tab reference with space, id and title (for @ mention context)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabReference {
+    /// The space/workspace the tab belongs to
+    pub space: String,
+    /// Tab id
+    pub tab_id: i64,
+    /// Tab title
+    pub tab_title: String,
+}
+
 /// Chat message from user
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessagePayload {
     pub session_id: String,
     pub message_id: String,
-    pub text: String,
+    /// Message content (renamed from "text" to match nevoflux-agent protocol)
+    pub content: String,
+    /// Chat mode: chat, browser, or agent
+    #[serde(default)]
+    pub mode: ChatMode,
+    /// Image attachments (base64 encoded)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
+    /// Local files/directories selected via native file picker
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_files: Vec<FileInfo>,
+    /// Current active tab id
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_id: Option<i64>,
+    /// Selected tabs for context (user selected via @ mention)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tab_ids: Vec<TabReference>,
 }
 
 /// Skill command trigger
@@ -95,14 +128,28 @@ pub struct BrowserToolError {
 // Agent → Sidebar Payloads
 // =============================================================================
 
-/// Stream chunk for streaming responses
+/// Stream chunk for streaming responses (matches nevoflux-agent protocol)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamChunkPayload {
-    pub session_id: String,
-    pub stream_id: String,
-    pub delta: String,
+    /// Response content
+    pub content: String,
+    /// Tool calls made by the agent
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCallInfo>,
+    /// Whether generation is complete
     #[serde(default)]
-    pub format: StreamFormat,
+    pub done: bool,
+    /// Session title (only present when title is generated for first message)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_title: Option<String>,
+}
+
+/// Tool call information from agent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallInfo {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
 }
 
 /// Stream end marker
@@ -288,6 +335,58 @@ fn default_browser_timeout() -> u64 {
 }
 
 // =============================================================================
+// File Picker (Native Dialog via Agent)
+// =============================================================================
+
+/// File picker mode
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PickerMode {
+    #[default]
+    Files,
+    Directories,
+    Both,
+}
+
+/// Request to open native file picker dialog (Sidebar → Agent)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PickFilesRequestPayload {
+    pub request_id: String,
+    #[serde(default)]
+    pub mode: PickerMode,
+    #[serde(default)]
+    pub multiple: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_path: Option<String>,
+}
+
+/// File information returned from picker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileInfo {
+    pub path: String,
+    #[serde(default)]
+    pub is_directory: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+}
+
+/// Response from native file picker dialog (Agent → Sidebar)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PickFilesResponsePayload {
+    pub request_id: String,
+    #[serde(default)]
+    pub files: Vec<FileInfo>,
+    #[serde(default)]
+    pub cancelled: bool,
+}
+
+// =============================================================================
 // Chat Message Enum
 // =============================================================================
 
@@ -317,6 +416,8 @@ pub enum ChatMessage {
     SystemCommand(SystemCommandPayload),
     /// Browser tool response
     BrowserToolResponse(BrowserToolResponsePayload),
+    /// Pick files request (open native file dialog)
+    PickFilesRequest(PickFilesRequestPayload),
 
     // ========== Agent → Sidebar ==========
     /// Stream chunk
@@ -337,6 +438,8 @@ pub enum ChatMessage {
     SystemResponse(SystemResponsePayload),
     /// Browser tool request
     BrowserToolRequest(BrowserToolRequestPayload),
+    /// Pick files response (from native file dialog)
+    PickFilesResponse(PickFilesResponsePayload),
 }
 
 impl ChatMessage {
@@ -350,7 +453,8 @@ impl ChatMessage {
             Self::PermissionResponse(_) |
             Self::PluginCommand(_) |
             Self::SystemCommand(_) |
-            Self::BrowserToolResponse(_) => MessageDirection::ToAgent,
+            Self::BrowserToolResponse(_) |
+            Self::PickFilesRequest(_) => MessageDirection::ToAgent,
 
             // Agent → Sidebar
             Self::StreamChunk(_) |
@@ -361,7 +465,8 @@ impl ChatMessage {
             Self::Error(_) |
             Self::AccountStatus(_) |
             Self::SystemResponse(_) |
-            Self::BrowserToolRequest(_) => MessageDirection::ToSidebar,
+            Self::BrowserToolRequest(_) |
+            Self::PickFilesResponse(_) => MessageDirection::ToSidebar,
         }
     }
 
@@ -375,7 +480,8 @@ impl ChatMessage {
             Self::PluginCommand(_) => None,
             Self::SystemCommand(_) => None,
             Self::BrowserToolResponse(p) => Some(&p.session_id),
-            Self::StreamChunk(p) => Some(&p.session_id),
+            Self::PickFilesRequest(_) => None,
+            Self::StreamChunk(_) => None, // New protocol doesn't include session_id
             Self::StreamEnd(p) => Some(&p.session_id),
             Self::ContentBlock(p) => Some(&p.session_id),
             Self::PermissionRequest(p) => Some(&p.session_id),
@@ -384,6 +490,7 @@ impl ChatMessage {
             Self::AccountStatus(_) => None,
             Self::SystemResponse(_) => None,
             Self::BrowserToolRequest(p) => Some(&p.session_id),
+            Self::PickFilesResponse(_) => None,
         }
     }
 }
@@ -414,7 +521,7 @@ mod tests {
         let msg = ChatMessage::ChatMessage(ChatMessagePayload {
             session_id: "s1".to_string(),
             message_id: "m1".to_string(),
-            text: "Hello".to_string(),
+            content: "Hello".to_string(),
             attachments: vec![],
             tab_id: None,
         });
@@ -483,10 +590,9 @@ mod tests {
     #[test]
     fn test_stream_chunk_direction_to_sidebar() {
         let msg = ChatMessage::StreamChunk(StreamChunkPayload {
-            session_id: "s1".to_string(),
-            stream_id: "st1".to_string(),
-            delta: "Hi".to_string(),
-            format: StreamFormat::Markdown,
+            content: "Hi".to_string(),
+            tool_calls: vec![],
+            done: false,
         });
         assert_eq!(msg.direction(), MessageDirection::ToSidebar);
     }
@@ -606,7 +712,7 @@ mod tests {
         let msg = ChatMessage::ChatMessage(ChatMessagePayload {
             session_id: "test-session".to_string(),
             message_id: "m1".to_string(),
-            text: "Hello".to_string(),
+            content: "Hello".to_string(),
             attachments: vec![],
             tab_id: None,
         });
@@ -674,13 +780,13 @@ mod tests {
 
     #[test]
     fn test_session_id_stream_chunk() {
+        // New protocol: StreamChunk doesn't have session_id
         let msg = ChatMessage::StreamChunk(StreamChunkPayload {
-            session_id: "test-session".to_string(),
-            stream_id: "st1".to_string(),
-            delta: "Hello".to_string(),
-            format: StreamFormat::default(),
+            content: "Hello".to_string(),
+            tool_calls: vec![],
+            done: false,
         });
-        assert_eq!(msg.session_id(), Some("test-session"));
+        assert_eq!(msg.session_id(), None);
     }
 
     #[test]
@@ -801,7 +907,7 @@ mod tests {
         let msg = ChatMessage::ChatMessage(ChatMessagePayload {
             session_id: "session-1".to_string(),
             message_id: "msg-1".to_string(),
-            text: "Hello".to_string(),
+            content: "Hello".to_string(),
             attachments: vec![],
             tab_id: None,
         });
@@ -869,10 +975,9 @@ mod tests {
     #[test]
     fn test_stream_chunk_serialization() {
         let msg = ChatMessage::StreamChunk(StreamChunkPayload {
-            session_id: "session-1".to_string(),
-            stream_id: "stream-1".to_string(),
-            delta: "Hello".to_string(),
-            format: StreamFormat::Markdown,
+            content: "Hello".to_string(),
+            tool_calls: vec![],
+            done: false,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("stream_chunk"));
@@ -1042,7 +1147,7 @@ mod tests {
         let original = ChatMessage::ChatMessage(ChatMessagePayload {
             session_id: "s1".to_string(),
             message_id: "m1".to_string(),
-            text: "Hello".to_string(),
+            content: "Hello".to_string(),
             attachments: vec![],
             tab_id: Some(42),
         });
@@ -1051,7 +1156,7 @@ mod tests {
         match parsed {
             ChatMessage::ChatMessage(p) => {
                 assert_eq!(p.session_id, "s1");
-                assert_eq!(p.text, "Hello");
+                assert_eq!(p.content, "Hello");
                 assert_eq!(p.tab_id, Some(42));
             }
             _ => panic!("Wrong variant"),
@@ -1061,18 +1166,17 @@ mod tests {
     #[test]
     fn test_stream_chunk_roundtrip() {
         let original = ChatMessage::StreamChunk(StreamChunkPayload {
-            session_id: "s1".to_string(),
-            stream_id: "st1".to_string(),
-            delta: "Hello world".to_string(),
-            format: StreamFormat::Markdown,
+            content: "Hello world".to_string(),
+            tool_calls: vec![],
+            done: true,
         });
         let json = serde_json::to_string(&original).unwrap();
         let parsed: ChatMessage = serde_json::from_str(&json).unwrap();
         match parsed {
             ChatMessage::StreamChunk(p) => {
-                assert_eq!(p.session_id, "s1");
-                assert_eq!(p.delta, "Hello world");
-                assert_eq!(p.format, StreamFormat::Markdown);
+                assert_eq!(p.content, "Hello world");
+                assert!(p.done);
+                assert!(p.tool_calls.is_empty());
             }
             _ => panic!("Wrong variant"),
         }

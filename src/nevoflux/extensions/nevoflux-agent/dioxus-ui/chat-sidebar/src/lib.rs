@@ -7,23 +7,39 @@
 //! This crate implements the main chat interface displayed in the browser sidebar.
 //! It uses Dioxus signals for reactive state management and communicates with
 //! the background script via the WebExtension messaging API.
+//!
+//! ## Architecture
+//!
+//! - `state/` - State types (Session, Message, Agent, Permission, Connection)
+//! - `context.rs` - Context Provider with global signals
+//! - `components/` - UI components (Header, MessageArea, InputArea, etc.)
+//! - `messaging/` - WebExtension messaging bridge and handlers
+//! - `mock/` - Mock mode for development/testing
+//! - `utils/` - Utility functions
 
 mod components;
-mod hooks;
+mod context;
 mod messaging;
+mod mock;
 mod state;
+mod utils;
 
 use dioxus::prelude::*;
 use wasm_bindgen::prelude::*;
 
 pub use components::*;
-pub use hooks::*;
+pub use context::*;
 pub use messaging::*;
+pub use mock::*;
 pub use state::*;
+pub use utils::*;
 
 /// Initialize and launch the Chat Sidebar application
 #[wasm_bindgen(start)]
 pub fn main() {
+    // Set up panic hook for better error messages in WASM
+    console_error_panic_hook::set_once();
+
     // Initialize tracing for WASM
     tracing_wasm::set_as_global_default();
     tracing::info!("NevoFlux Chat Sidebar initializing...");
@@ -35,73 +51,53 @@ pub fn main() {
 /// Root application component
 #[component]
 fn App() -> Element {
-    // Global application state using signals
-    let app_state = use_signal(AppState::default);
-    let messages = use_signal(Vec::<ChatMessage>::new);
-    let streaming_message = use_signal(|| None::<StreamingMessage>);
-    let tab_context = use_signal(TabContext::default);
-    let connection_status = use_signal(|| ConnectionStatus::Disconnected);
-    let agent_status = use_signal(AgentStatus::new);
+    // Check if mock mode is enabled via URL parameter
+    let mock_enabled = is_mock_mode();
 
-    // Initialize messaging on mount
-    use_effect(move || {
-        spawn(async move {
-            if let Err(e) = init_messaging(
-                app_state,
-                messages,
-                streaming_message,
-                tab_context,
-                connection_status,
-                agent_status,
-            ).await {
-                tracing::error!("Failed to initialize messaging: {:?}", e);
-            }
-        });
-    });
+    rsx! {
+        // Context Provider wraps the entire app
+        ContextProvider {
+            mock_enabled: mock_enabled,
+            ChatSidebar {}
+        }
+    }
+}
 
-    // Request initial tab context
-    use_effect(move || {
-        spawn(async move {
-            request_tab_context().await;
-        });
-    });
+/// Main chat sidebar layout
+#[component]
+fn ChatSidebar() -> Element {
+    let ctx = use_app_context();
+    let show_mcp_config = *ctx.show_mcp_config.read();
 
     rsx! {
         div {
             class: "chat-sidebar",
             id: "nevoflux-chat-sidebar",
 
-            // Header with connection status
-            Header {
-                connection_status: connection_status(),
-                tab_context: tab_context(),
-            }
+            // MCP Config Modal (full-screen when visible)
+            if show_mcp_config {
+                McpConfigModal {}
+            } else {
+                // Header with connection status and controls
+                Header {}
 
-            // Message list
-            MessageList {
-                messages: messages(),
-                streaming_message: streaming_message(),
-            }
+                // Main content area
+                div { class: "chat-content",
+                    // Message display area
+                    MessageArea {}
 
-            // Agent status display
-            AgentStatusDisplay {
-                status: agent_status,
-            }
+                    // Agent status bar (shows when agent is active)
+                    AgentStatusBar {}
+                }
 
-            // Input area
-            InputArea {
-                disabled: connection_status() != ConnectionStatus::Connected,
-                on_send: move |text: String| {
-                    spawn(async move {
-                        send_chat_message(text, messages, app_state, agent_status).await;
-                    });
-                },
-                tab_context: tab_context(),
-            }
+                // Input area with context bar
+                InputArea {}
 
-            // Status bar
-            StatusBar {
-                status: connection_status(),
+                // Permission dialog (modal, P0 priority)
+                PermissionDialog {}
+
+                // AskUser dialog (modal, for agent questions)
+                AskUserDialog {}
             }
         }
     }

@@ -62,8 +62,12 @@ pub enum RequesterType {
 pub struct Attachment {
     pub name: String,
     pub mime_type: String,
-    /// Base64 encoded data
-    pub data: String,
+    /// Base64 encoded data (for images) or None (for files)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    /// File path (for non-image files, agent will read)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
 }
 
 /// Stream format
@@ -180,4 +184,14 @@ pub enum BrowserToolAction {
     TypeById,
     /// Get page content as Markdown
     GetMarkdown,
+    /// Fetch URL and convert to Markdown (saves to cache file)
+    WebFetch,
+    /// Cache tab content as Markdown (saves to cache file, returns path)
+    CacheTabMarkdown,
+    /// Web search (returns search results)
+    WebSearch,
+    /// Ask user a question (shows UI, waits for response)
+    AskUser,
+    /// Cache uploaded file to disk (returns absolute path)
+    CacheFile,
 }

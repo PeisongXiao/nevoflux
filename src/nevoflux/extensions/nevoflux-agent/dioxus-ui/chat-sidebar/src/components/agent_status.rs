@@ -2,199 +2,131 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-//! Agent Status Component
-//!
-//! Displays the current state of the AI agent during Computer Use operations.
-//! Shows thinking indicator, tool execution progress, and step counts.
+//! Agent status bar component
 
 use dioxus::prelude::*;
 use shared_protocol::AgentState;
+use crate::context::use_app_context;
 
-/// Agent execution status for display
-#[derive(Debug, Clone, Default)]
-pub struct AgentStatus {
-    pub state: AgentState,
-    pub current_tool: Option<String>,
-    pub step_count: u32,
-    pub max_steps: u32,
-    pub message: Option<String>,
-    pub visible: bool,
-}
-
-impl AgentStatus {
-    pub fn new() -> Self {
-        Self {
-            state: AgentState::Thinking,
-            current_tool: None,
-            step_count: 0,
-            max_steps: 10,
-            message: None,
-            visible: false,
-        }
-    }
-
-    /// Check if agent is actively working
-    pub fn is_active(&self) -> bool {
-        matches!(
-            self.state,
-            AgentState::Thinking
-                | AgentState::Executing
-                | AgentState::ExecutingTool
-                | AgentState::Waiting
-                | AgentState::WaitingResult
-        )
-    }
-
-    /// Get state display label
-    pub fn state_label(&self) -> &'static str {
-        match self.state {
-            AgentState::Thinking => "Thinking...",
-            AgentState::Executing | AgentState::ExecutingTool => "Executing",
-            AgentState::Waiting | AgentState::WaitingResult => "Waiting",
-            AgentState::Complete => "Complete",
-            AgentState::Error => "Error",
-            AgentState::WaitingConfirmation => "Needs Confirmation",
-        }
-    }
-
-    /// Get progress percentage
-    pub fn progress(&self) -> u32 {
-        if self.max_steps == 0 {
-            0
-        } else {
-            (self.step_count * 100) / self.max_steps
-        }
-    }
-}
-
-/// Agent Status Display Component
+/// Agent status bar component
 #[component]
-pub fn AgentStatusDisplay(status: Signal<AgentStatus>) -> Element {
-    let status_val = status.read();
+pub fn AgentStatusBar() -> Element {
+    let ctx = use_app_context();
+    let status = ctx.agent_status.read();
 
     // Don't render if not visible
-    if !status_val.visible {
+    if !status.visible {
         return rsx! {};
     }
 
-    let state_class = match status_val.state {
+    let state_class = match status.state {
+        AgentState::Idle => "idle",
         AgentState::Thinking => "thinking",
         AgentState::Executing | AgentState::ExecutingTool => "executing",
-        AgentState::Waiting | AgentState::WaitingResult => "waiting",
+        AgentState::Waiting | AgentState::WaitingResult | AgentState::WaitingConfirmation => "waiting",
         AgentState::Complete => "complete",
         AgentState::Error => "error",
-        AgentState::WaitingConfirmation => "confirmation",
     };
-
-    let progress = status_val.progress();
-    let is_active = status_val.is_active();
 
     rsx! {
         div {
-            class: "agent-status {state_class}",
-            class: if is_active { "active" } else { "" },
+            class: "agent-status-bar {state_class}",
+            role: "status",
+            aria_live: "polite",
+            aria_atomic: "true",
 
-            // Status icon and label
-            div {
-                class: "status-header",
+            // Left side: indicator + label + tool
+            div { class: "status-left",
+                StatusIndicator { state: status.state.clone() }
+                span { class: "status-label", "{status.state_label()}" }
 
-                // Animated icon based on state
-                div {
-                    class: "status-icon",
-
-                    match status_val.state {
-                        AgentState::Thinking => rsx! {
-                            // Thinking dots animation
-                            span { class: "thinking-dots",
-                                span { class: "dot", "." }
-                                span { class: "dot", "." }
-                                span { class: "dot", "." }
-                            }
-                        },
-                        AgentState::Executing
-                        | AgentState::ExecutingTool
-                        | AgentState::Waiting
-                        | AgentState::WaitingResult => rsx! {
-                            // Spinner
-                            span { class: "spinner" }
-                        },
-                        AgentState::Complete => rsx! {
-                            // Checkmark
-                            span { class: "checkmark", "OK" }
-                        },
-                        AgentState::Error => rsx! {
-                            // Error icon
-                            span { class: "error-icon", "X" }
-                        },
-                        AgentState::WaitingConfirmation => rsx! {
-                            // Warning icon
-                            span { class: "warning-icon", "!" }
-                        },
-                    }
-                }
-
-                // Status text
-                span {
-                    class: "status-label",
-                    "{status_val.state_label()}"
-                }
-
-                // Current tool if executing
-                if let Some(ref tool) = status_val.current_tool {
-                    span {
-                        class: "current-tool",
-                        "{tool}"
+                // Current tool info
+                if let Some(ref tool) = status.current_tool {
+                    span { class: "current-tool",
+                        span { class: "tool-icon", "{tool.icon}" }
+                        span { class: "tool-name", "{tool.name}" }
                     }
                 }
             }
 
-            // Progress bar
-            if is_active {
-                div {
-                    class: "progress-container",
-
-                    div {
-                        class: "progress-bar",
-                        style: "width: {progress}%",
-                    }
-
-                    span {
-                        class: "step-count",
-                        "Step {status_val.step_count}/{status_val.max_steps}"
+            // Right side: step progress + stop button
+            div { class: "status-right",
+                // Step progress
+                if let Some(ref step) = status.step {
+                    span { class: "step-progress",
+                        "Step {step.current}/{step.total}"
                     }
                 }
-            }
 
-            // Message if any
-            if let Some(ref msg) = status_val.message {
-                div {
-                    class: "status-message",
-                    "{msg}"
+                // Stop button (only when active)
+                if status.is_active() {
+                    StopButton {}
                 }
             }
         }
     }
 }
 
-/// Compact inline status indicator
+/// Status indicator with animation
 #[component]
-pub fn AgentStatusIndicator(status: Signal<AgentStatus>) -> Element {
-    let status_val = status.read();
-
-    if !status_val.is_active() {
-        return rsx! {};
+fn StatusIndicator(state: AgentState) -> Element {
+    rsx! {
+        span { class: "status-indicator",
+            match state {
+                AgentState::Idle => rsx! {
+                    span { class: "indicator-dot idle" }
+                },
+                AgentState::Thinking => rsx! {
+                    span { class: "indicator-dot pulsing" }
+                },
+                AgentState::Executing | AgentState::ExecutingTool => rsx! {
+                    span { class: "indicator-spinner" }
+                },
+                AgentState::Waiting | AgentState::WaitingResult => rsx! {
+                    span { class: "indicator-dot waiting" }
+                },
+                AgentState::WaitingConfirmation => rsx! {
+                    span { class: "indicator-dot waiting" }
+                },
+                AgentState::Complete => rsx! {
+                    span { class: "indicator-check", "✓" }
+                },
+                AgentState::Error => rsx! {
+                    span { class: "indicator-error", "✗" }
+                },
+            }
+        }
     }
+}
+
+/// Stop button component
+#[component]
+fn StopButton() -> Element {
+    let mut ctx = use_app_context();
+
+    let handle_stop = move |_| {
+        if ctx.mock_enabled {
+            // Mock mode: use mock stop function
+            crate::mock::stop_mock_streaming();
+        } else {
+            // Real mode: send stop message to agent
+            let session_id = ctx.tab_context.read().zen_sync_id.clone()
+                .unwrap_or_else(|| ctx.session.read().id.clone());
+            spawn(async move {
+                let _ = crate::messaging::send_stop_generation(&session_id).await;
+            });
+            // Update status immediately in real mode
+            ctx.agent_status.write().hide();
+        }
+    };
 
     rsx! {
-        span {
-            class: "agent-indicator",
-            title: "{status_val.state_label()}",
-
-            span { class: "indicator-dot pulsing" }
-
-            if let Some(ref tool) = status_val.current_tool {
-                span { class: "indicator-text", "{tool}" }
-            }
+        button {
+            class: "stop-button",
+            onclick: handle_stop,
+            aria_label: "Stop generation",
+            title: "Stop",
+            "Stop"
         }
     }
 }

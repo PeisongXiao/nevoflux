@@ -11,7 +11,7 @@
 //! - `bg:get_tab_context` - Get current tab context
 
 use crate::messaging::bridge::*;
-use shared_protocol::*;
+use shared_protocol::{*, chat::TabReference};
 use wasm_bindgen_futures::JsFuture;
 
 // ============================================
@@ -52,8 +52,24 @@ pub struct ExecToolResponse {
 
 /// Send ChatMessage to agent via bg:send_to_agent
 pub async fn send_to_agent(message: ChatMessage) -> Result<(), String> {
+    // Log the message being sent for debugging
+    let message_type = match &message {
+        ChatMessage::ChatMessage(_) => "chat_message",
+        ChatMessage::StopGeneration(_) => "stop_generation",
+        ChatMessage::PermissionResponse(_) => "permission_response",
+        ChatMessage::SkillCommand(_) => "skill_command",
+        ChatMessage::PluginCommand(_) => "plugin_command",
+        ChatMessage::SystemCommand(_) => "system_command",
+        ChatMessage::BrowserToolResponse(_) => "browser_tool_response",
+        ChatMessage::PickFilesRequest(_) => "pick_files_request",
+        _ => "other",
+    };
+
     let payload = serde_json::to_value(&message)
         .map_err(|e| format!("Serialize ChatMessage error: {}", e))?;
+
+    // Log the full message payload
+    tracing::info!("[Sidebar] Sending to agent: {} - {}", message_type, payload);
 
     let request = BackgroundRequest::SendToAgent { payload };
     let js_value = to_js_value(&request)
@@ -63,22 +79,29 @@ pub async fn send_to_agent(message: ChatMessage) -> Result<(), String> {
         .await
         .map_err(|e| format!("Send failed: {:?}", e))?;
 
+    tracing::debug!("[Sidebar] Message sent successfully: {}", message_type);
     Ok(())
 }
 
 /// Send chat message to agent
 pub async fn send_chat_message(
     session_id: &str,
-    text: String,
+    content: String,
+    mode: ChatMode,
     attachments: Vec<Attachment>,
+    local_files: Vec<FileInfo>,
     tab_id: Option<u32>,
+    tab_ids: Vec<TabReference>,
 ) -> Result<(), String> {
     let message = ChatMessage::ChatMessage(ChatMessagePayload {
         session_id: session_id.to_string(),
         message_id: uuid::Uuid::new_v4().to_string(),
-        text,
+        content,
+        mode,
         attachments,
+        local_files,
         tab_id: tab_id.map(|id| id as i64),
+        tab_ids,
     });
 
     send_to_agent(message).await
@@ -130,6 +153,198 @@ pub async fn send_browser_tool_response(response: BrowserToolResponsePayload) ->
 }
 
 // ============================================
+// File Picker (Native Dialog via Agent)
+// ============================================
+
+/// Send pick files request to agent to open native file dialog
+/// Uses system_command with "file.pick" command
+/// Returns request_id for tracking the response
+pub async fn send_pick_files_request(
+    mode: &str,  // "files", "directories", or "both"
+    multiple: bool,
+    title: Option<String>,
+) -> Result<String, String> {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: request_id.clone(),
+        command: "file.pick".to_string(),
+        params: Some(serde_json::json!({
+            "mode": mode,
+            "multiple": multiple,
+            "title": title,
+        })),
+    });
+
+    send_to_agent(message).await?;
+    Ok(request_id)
+}
+
+// ============================================
+// Session Management Commands
+// ============================================
+
+/// Send session.resolve command to agent
+/// Returns the session info and messages for the given session_id (zen_sync_id)
+pub async fn send_session_resolve(session_id: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "session.resolve".to_string(),
+        params: Some(serde_json::json!({
+            "session_id": session_id
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send session.list command to agent
+/// Returns list of historical sessions
+pub async fn send_session_list(limit: u32, offset: u32) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "session.list".to_string(),
+        params: Some(serde_json::json!({
+            "limit": limit,
+            "offset": offset
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send session.clone command to agent
+/// Copies messages from source session to target session
+pub async fn send_session_clone(source_id: &str, target_id: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "session.clone".to_string(),
+        params: Some(serde_json::json!({
+            "source_id": source_id,
+            "target_id": target_id
+        })),
+    });
+    send_to_agent(message).await
+}
+
+// ============================================
+// MCP Configuration Commands
+// ============================================
+
+/// Send mcp.list command to agent
+/// Returns list of configured MCP servers and their connection status
+pub async fn send_mcp_list() -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "mcp.list".to_string(),
+        params: None,
+    });
+    send_to_agent(message).await
+}
+
+/// Send mcp.add command to agent
+/// Adds a new MCP server configuration
+pub async fn send_mcp_add(
+    name: &str,
+    command: &str,
+    args: Vec<String>,
+    enabled: bool,
+    env: Vec<(String, String)>,
+) -> Result<(), String> {
+    let env_map: std::collections::HashMap<String, String> = env.into_iter().collect();
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "mcp.add".to_string(),
+        params: Some(serde_json::json!({
+            "server": {
+                "name": name,
+                "command": command,
+                "args": args,
+                "enabled": enabled,
+                "env": env_map
+            }
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send mcp.update command to agent
+/// Updates an existing MCP server configuration
+pub async fn send_mcp_update(
+    name: &str,
+    command: &str,
+    args: Vec<String>,
+    enabled: bool,
+    env: Vec<(String, String)>,
+) -> Result<(), String> {
+    let env_map: std::collections::HashMap<String, String> = env.into_iter().collect();
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "mcp.update".to_string(),
+        params: Some(serde_json::json!({
+            "name": name,
+            "server": {
+                "name": name,
+                "command": command,
+                "args": args,
+                "enabled": enabled,
+                "env": env_map
+            }
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send mcp.delete command to agent
+/// Deletes an MCP server configuration
+pub async fn send_mcp_delete(name: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "mcp.delete".to_string(),
+        params: Some(serde_json::json!({
+            "name": name
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send mcp.test command to agent
+/// Tests connection to an MCP server
+pub async fn send_mcp_test(name: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "mcp.test".to_string(),
+        params: Some(serde_json::json!({
+            "name": name
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send mcp.connect command to agent
+/// Connects to an MCP server
+pub async fn send_mcp_connect(name: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "mcp.connect".to_string(),
+        params: Some(serde_json::json!({
+            "name": name
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send mcp.disconnect command to agent
+/// Disconnects from an MCP server
+pub async fn send_mcp_disconnect(name: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "mcp.disconnect".to_string(),
+        params: Some(serde_json::json!({
+            "name": name
+        })),
+    });
+    send_to_agent(message).await
+}
+
+// ============================================
 // Browser Tool Execution (bg:exec_tool)
 // ============================================
 
@@ -142,9 +357,34 @@ pub async fn exec_browser_tool(request: BrowserToolRequestPayload) -> Result<Bro
     let js_value = to_js_value(&bg_request)
         .map_err(|e| format!("Serialize request error: {:?}", e))?;
 
-    let response_js = JsFuture::from(runtime_send_message(js_value))
-        .await
-        .map_err(|e| format!("bg:exec_tool failed: {:?}", e))?;
+    // Use safe error handling to avoid Xray wrapper issues in Firefox extensions
+    let response_js = match JsFuture::from(runtime_send_message(js_value)).await {
+        Ok(v) => v,
+        Err(e) => {
+            // Avoid accessing properties on JsValue error objects directly
+            // as they may be Xray-wrapped and trigger security errors
+            let error_msg = if e.is_string() {
+                e.as_string().unwrap_or_else(|| "Unknown error".to_string())
+            } else if e.is_object() {
+                // Try to safely convert to string without accessing .message directly
+                e.as_string()
+                    .or_else(|| {
+                        js_sys::JSON::stringify(&e)
+                            .ok()
+                            .and_then(|s| s.as_string())
+                    })
+                    .unwrap_or_else(|| "bg:exec_tool failed (object error)".to_string())
+            } else {
+                "bg:exec_tool failed".to_string()
+            };
+            return Err(error_msg);
+        }
+    };
+
+    // Parse response - handle undefined/null responses
+    if response_js.is_undefined() || response_js.is_null() {
+        return Err("bg:exec_tool returned undefined/null".to_string());
+    }
 
     // Parse response
     let response: ExecToolResponse = from_js_value(response_js)
@@ -176,12 +416,34 @@ pub enum InternalMessage {
     TabContextUpdate(TabContextPayload),
     /// Connection status update
     ConnectionStatus { connected: bool },
+    /// AskUser request from agent (via background.js)
+    AskUserRequest(AskUserRequestPayload),
+}
+
+/// AskUser request payload from background.js
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AskUserRequestPayload {
+    pub request_id: String,
+    pub question: String,
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub allow_custom: bool,
+    #[serde(default = "default_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+fn default_timeout_ms() -> u64 {
+    60000
 }
 
 /// Tab context from background script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TabContextPayload {
     pub tab_id: u32,
+    /// Zen Sync ID (persistent across restarts, used as session_id)
+    #[serde(default)]
+    pub zen_sync_id: Option<String>,
     pub url: String,
     pub title: String,
     #[serde(default)]
@@ -232,6 +494,77 @@ pub async fn send_ping() -> Result<(), String> {
         timestamp: js_sys::Date::now() as u64,
     })
     .await
+}
+
+// ============================================
+// AskUser Response Messages
+// ============================================
+
+/// AskUser response message for sending back to background.js
+#[derive(Debug, Clone, serde::Serialize)]
+struct AskUserResponseMessage {
+    r#type: &'static str,
+    payload: AskUserResponsePayload,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct AskUserResponsePayload {
+    request_id: String,
+    answer: String,
+    is_custom: bool,
+    selected_index: i32,
+    cancelled: bool,
+}
+
+/// Send AskUser response back to background.js
+pub async fn send_ask_user_response(
+    request_id: &str,
+    answer: &str,
+    is_custom: bool,
+    selected_index: Option<i32>,
+) -> Result<(), String> {
+    let message = AskUserResponseMessage {
+        r#type: "ask_user_response",
+        payload: AskUserResponsePayload {
+            request_id: request_id.to_string(),
+            answer: answer.to_string(),
+            is_custom,
+            selected_index: selected_index.unwrap_or(-1),
+            cancelled: false,
+        },
+    };
+
+    let js_value = to_js_value(&message)
+        .map_err(|e| format!("Serialize error: {:?}", e))?;
+
+    JsFuture::from(runtime_send_message(js_value))
+        .await
+        .map_err(|e| format!("Send failed: {:?}", e))?;
+
+    Ok(())
+}
+
+/// Send AskUser cancel back to background.js
+pub async fn send_ask_user_cancel(request_id: &str) -> Result<(), String> {
+    let message = AskUserResponseMessage {
+        r#type: "ask_user_response",
+        payload: AskUserResponsePayload {
+            request_id: request_id.to_string(),
+            answer: String::new(),
+            is_custom: false,
+            selected_index: -1,
+            cancelled: true,
+        },
+    };
+
+    let js_value = to_js_value(&message)
+        .map_err(|e| format!("Serialize error: {:?}", e))?;
+
+    JsFuture::from(runtime_send_message(js_value))
+        .await
+        .map_err(|e| format!("Send failed: {:?}", e))?;
+
+    Ok(())
 }
 
 // ============================================

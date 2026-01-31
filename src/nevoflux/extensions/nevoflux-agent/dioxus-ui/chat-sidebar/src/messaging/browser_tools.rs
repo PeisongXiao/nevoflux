@@ -132,6 +132,26 @@ pub async fn execute_browser_tool(request: &BrowserToolRequestPayload) -> Browse
         BrowserToolAction::TypeById => {
             make_error_result("Snapshot actions should be forwarded to background.js")
         }
+        // WebFetch is executed in background.js (URL fetch + markdown conversion)
+        BrowserToolAction::WebFetch => {
+            make_error_result("WebFetch should be forwarded to background.js")
+        }
+        // CacheTabMarkdown is executed in background.js (tab markdown + cache file)
+        BrowserToolAction::CacheTabMarkdown => {
+            make_error_result("CacheTabMarkdown should be forwarded to background.js")
+        }
+        // WebSearch is executed in background.js (web search via DuckDuckGo)
+        BrowserToolAction::WebSearch => {
+            make_error_result("WebSearch should be forwarded to background.js")
+        }
+        // AskUser is handled via sidebar UI interaction
+        BrowserToolAction::AskUser => {
+            make_error_result("AskUser should be forwarded to background.js")
+        }
+        // CacheFile is executed in background.js (saves file to disk, returns path)
+        BrowserToolAction::CacheFile => {
+            make_error_result("CacheFile should be forwarded to background.js")
+        }
     }
 }
 

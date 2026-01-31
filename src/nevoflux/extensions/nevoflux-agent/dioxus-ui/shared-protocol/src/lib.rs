@@ -21,11 +21,13 @@ pub use common::*;
 
 // Re-export chat types
 pub use chat::{
-    ChatMessage, MessageDirection,
+    ChatMessage, MessageDirection, ChatMode,
     // Sidebar -> Agent
     ChatMessagePayload, SkillCommandPayload, StopGenerationPayload,
     PermissionResponsePayload, PluginCommandPayload, SystemCommandPayload,
     BrowserToolResponsePayload, BrowserToolError,
+    // File picker (native dialog)
+    PickerMode, PickFilesRequestPayload, FileInfo, PickFilesResponsePayload,
     // Agent -> Sidebar
     StreamChunkPayload, StreamEndPayload, StreamMetadata,
     ContentBlockPayload, PermissionRequestPayload, AgentStatePayload,
@@ -117,7 +119,7 @@ mod tests {
         let msg = ChatMessage::ChatMessage(ChatMessagePayload {
             session_id: "s1".to_string(),
             message_id: "m1".to_string(),
-            text: "Hello".to_string(),
+            content: "Hello".to_string(),
             attachments: vec![],
             tab_id: Some(123),
         });
@@ -125,7 +127,7 @@ mod tests {
         let parsed: ChatMessage = serde_json::from_str(&json).unwrap();
         match parsed {
             ChatMessage::ChatMessage(p) => {
-                assert_eq!(p.text, "Hello");
+                assert_eq!(p.content, "Hello");
                 assert_eq!(p.tab_id, Some(123));
             }
             _ => panic!("Wrong type"),
@@ -155,15 +157,14 @@ mod tests {
     #[test]
     fn test_stream_chunk_roundtrip() {
         let msg = ChatMessage::StreamChunk(StreamChunkPayload {
-            session_id: "s1".to_string(),
-            stream_id: "st1".to_string(),
-            delta: "World".to_string(),
-            format: StreamFormat::Markdown,
+            content: "World".to_string(),
+            tool_calls: vec![],
+            done: false,
         });
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ChatMessage = serde_json::from_str(&json).unwrap();
         match parsed {
-            ChatMessage::StreamChunk(p) => assert_eq!(p.delta, "World"),
+            ChatMessage::StreamChunk(p) => assert_eq!(p.content, "World"),
             _ => panic!("Wrong type"),
         }
     }
@@ -174,7 +175,7 @@ mod tests {
         let msg = ChatMessage::ChatMessage(ChatMessagePayload {
             session_id: "s1".to_string(),
             message_id: "m1".to_string(),
-            text: "Hello".to_string(),
+            content: "Hello".to_string(),
             attachments: vec![],
             tab_id: None,
         });
@@ -182,10 +183,9 @@ mod tests {
 
         // ToSidebar messages
         let msg = ChatMessage::StreamChunk(StreamChunkPayload {
-            session_id: "s1".to_string(),
-            stream_id: "st1".to_string(),
-            delta: "Hi".to_string(),
-            format: StreamFormat::Markdown,
+            content: "Hi".to_string(),
+            tool_calls: vec![],
+            done: false,
         });
         assert_eq!(msg.direction(), MessageDirection::ToSidebar);
     }
@@ -197,17 +197,16 @@ mod tests {
         let msg: InputMessage = ChatMessage::ChatMessage(ChatMessagePayload {
             session_id: "s1".to_string(),
             message_id: "m1".to_string(),
-            text: "Hello".to_string(),
+            content: "Hello".to_string(),
             attachments: vec![],
             tab_id: None,
         });
         assert_eq!(msg.direction(), MessageDirection::ToAgent);
 
         let msg: OutputMessage = ChatMessage::StreamChunk(StreamChunkPayload {
-            session_id: "s1".to_string(),
-            stream_id: "st1".to_string(),
-            delta: "Response".to_string(),
-            format: StreamFormat::Markdown,
+            content: "Response".to_string(),
+            tool_calls: vec![],
+            done: true,
         });
         assert_eq!(msg.direction(), MessageDirection::ToSidebar);
     }

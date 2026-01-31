@@ -9,6 +9,8 @@
 pub struct SessionState {
     /// Unique session ID
     pub id: String,
+    /// Session title (auto-generated from first message)
+    pub title: Option<String>,
     /// Session creation timestamp
     pub created_at: u64,
     /// Whether the session is active
@@ -26,8 +28,14 @@ impl SessionState {
     pub fn new() -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
+            title: None,
             created_at: js_sys::Date::now() as u64,
             is_active: true,
         }
+    }
+
+    /// Set the session title
+    pub fn set_title(&mut self, title: String) {
+        self.title = Some(title);
     }
 }

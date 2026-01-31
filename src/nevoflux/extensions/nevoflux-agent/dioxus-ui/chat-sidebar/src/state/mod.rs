@@ -9,9 +9,17 @@ mod message;
 mod agent;
 pub mod permission;
 mod connection;
+mod history;
+mod mcp;
+mod ask_user;
+mod file_picker;
 
 pub use session::*;
 pub use message::*;
 pub use agent::*;
 pub use permission::*;
 pub use connection::*;
+pub use history::*;
+pub use mcp::*;
+pub use ask_user::*;
+pub use file_picker::*;

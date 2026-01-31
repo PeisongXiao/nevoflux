@@ -1125,6 +1125,7 @@ body {
 }
 
 .text-input-wrapper {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1756,4 +1757,929 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #9ca3af; /* Darker on hover */
+}
+
+/* ============================================
+   Header History Button & Dropdown
+   ============================================ */
+.header {
+  justify-content: space-between;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--nevo-space-sm);
+}
+
+/* History dropdown */
+.history-dropdown {
+  left: var(--nevo-space-lg);
+  right: auto;
+  width: 280px;
+}
+
+.history-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--nevo-space-sm) var(--nevo-space-md);
+}
+
+.history-dropdown-title {
+  font-size: var(--nevo-font-size-sm);
+  font-weight: 600;
+  color: var(--nevo-text);
+}
+
+.new-chat-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--nevo-space-xs);
+  padding: var(--nevo-space-xs) var(--nevo-space-sm);
+  background: var(--nevo-primary);
+  border: none;
+  border-radius: var(--nevo-radius-sm);
+  color: white;
+  font-size: var(--nevo-font-size-sm);
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.new-chat-btn:hover {
+  background: var(--nevo-primary-hover);
+}
+
+.history-dropdown-loading,
+.history-dropdown-error,
+.history-dropdown-empty {
+  padding: var(--nevo-space-lg) var(--nevo-space-md);
+  text-align: center;
+  color: var(--nevo-text-muted);
+  font-size: var(--nevo-font-size-sm);
+}
+
+.history-dropdown-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--nevo-space-sm);
+}
+
+.history-dropdown-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.history-dropdown-item {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.history-dropdown-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.history-dropdown-item-title {
+  font-size: var(--nevo-font-size-sm);
+  font-weight: 500;
+  color: var(--nevo-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-dropdown-item-time {
+  font-size: var(--nevo-font-size-xs);
+  color: var(--nevo-text-muted);
+}
+
+/* ============================================
+   Welcome Screen History Section
+   ============================================ */
+.welcome-screen {
+  overflow-y: auto;
+  justify-content: flex-start;
+  padding-top: var(--nevo-space-xl);
+}
+
+.history-section {
+  width: 100%;
+  max-width: 320px;
+  margin-top: var(--nevo-space-xl);
+}
+
+.history-title {
+  font-size: var(--nevo-font-size-sm);
+  font-weight: 600;
+  color: var(--nevo-text-secondary);
+  margin-bottom: var(--nevo-space-md);
+  text-align: left;
+}
+
+.history-loading,
+.history-error {
+  padding: var(--nevo-space-md);
+  text-align: center;
+  color: var(--nevo-text-muted);
+  font-size: var(--nevo-font-size-sm);
+}
+
+.history-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--nevo-space-sm);
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nevo-space-xs);
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--nevo-space-md);
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-md);
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+  text-align: left;
+}
+
+.history-item:hover {
+  background: var(--nevo-surface);
+  border-color: var(--nevo-primary);
+}
+
+.history-item-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-item-title {
+  font-size: var(--nevo-font-size-sm);
+  font-weight: 500;
+  color: var(--nevo-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-item-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--nevo-space-sm);
+}
+
+.history-item-time,
+.history-item-count {
+  font-size: var(--nevo-font-size-xs);
+  color: var(--nevo-text-muted);
+}
+
+.history-item-arrow {
+  flex-shrink: 0;
+  color: var(--nevo-text-muted);
+  transition: transform var(--nevo-transition-fast);
+}
+
+.history-item:hover .history-item-arrow {
+  color: var(--nevo-primary);
+  transform: translateX(2px);
+}
+
+/* Loading spinner */
+.loading-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--nevo-border);
+  border-top-color: var(--nevo-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ============================================
+   MCP Configuration Modal
+   ============================================ */
+.mcp-config-modal {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--nevo-background);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  animation: fadeIn var(--nevo-transition-fast);
+}
+
+.mcp-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--nevo-space-md) var(--nevo-space-lg);
+  border-bottom: 1px solid var(--nevo-border);
+  min-height: 52px;
+  flex-shrink: 0;
+}
+
+.mcp-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--nevo-space-sm);
+}
+
+.mcp-config-title {
+  font-size: var(--nevo-font-size-lg);
+  font-weight: 600;
+  color: var(--nevo-text);
+  margin: 0;
+}
+
+.mcp-back-btn,
+.mcp-close-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--nevo-radius-md);
+  color: var(--nevo-text-secondary);
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.mcp-back-btn:hover,
+.mcp-close-btn:hover {
+  background: var(--nevo-surface);
+  color: var(--nevo-text);
+}
+
+.mcp-config-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--nevo-space-lg);
+}
+
+/* MCP Server List */
+.mcp-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nevo-space-md);
+}
+
+.mcp-add-server-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--nevo-space-sm);
+  padding: var(--nevo-space-md);
+  background: var(--nevo-primary-light);
+  border: 2px dashed var(--nevo-primary);
+  border-radius: var(--nevo-radius-lg);
+  color: var(--nevo-primary);
+  font-size: var(--nevo-font-size-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.mcp-add-server-btn:hover {
+  background: var(--nevo-primary);
+  border-style: solid;
+  color: white;
+}
+
+.mcp-loading,
+.mcp-empty-state {
+  padding: var(--nevo-space-xl);
+  text-align: center;
+  color: var(--nevo-text-muted);
+}
+
+.mcp-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--nevo-space-sm);
+}
+
+.mcp-empty-state p {
+  margin: var(--nevo-space-xs) 0;
+}
+
+.mcp-empty-hint {
+  font-size: var(--nevo-font-size-sm);
+}
+
+.mcp-error {
+  display: flex;
+  align-items: center;
+  gap: var(--nevo-space-sm);
+  padding: var(--nevo-space-md);
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid var(--nevo-error);
+  border-radius: var(--nevo-radius-md);
+  color: var(--nevo-error);
+}
+
+.mcp-error-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--nevo-error);
+  border-radius: 50%;
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.mcp-server-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nevo-space-md);
+}
+
+/* MCP Server Card */
+.mcp-server-card {
+  padding: var(--nevo-space-md);
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-lg);
+  transition: all var(--nevo-transition-fast);
+}
+
+.mcp-server-card:hover {
+  box-shadow: var(--nevo-shadow-md);
+}
+
+.mcp-server-card.disabled {
+  opacity: 0.6;
+}
+
+.mcp-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--nevo-space-sm);
+}
+
+.mcp-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--nevo-space-sm);
+}
+
+.mcp-server-name {
+  font-weight: 600;
+  color: var(--nevo-text);
+}
+
+.mcp-status-badge {
+  padding: 2px 8px;
+  border-radius: var(--nevo-radius-full);
+  font-size: var(--nevo-font-size-xs);
+  font-weight: 500;
+}
+
+.mcp-status-badge.connected {
+  background: rgba(22, 163, 74, 0.1);
+  color: var(--nevo-success);
+}
+
+.mcp-status-badge.connecting {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--nevo-warning);
+}
+
+.mcp-status-badge.disconnected {
+  background: var(--nevo-surface);
+  color: var(--nevo-text-muted);
+}
+
+.mcp-status-badge.error {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--nevo-error);
+}
+
+/* Toggle switch */
+.mcp-toggle-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.mcp-toggle-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.mcp-toggle-switch {
+  width: 36px;
+  height: 20px;
+  background: var(--nevo-surface-active);
+  border-radius: var(--nevo-radius-full);
+  position: relative;
+  transition: background var(--nevo-transition-fast);
+}
+
+.mcp-toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform var(--nevo-transition-fast);
+  box-shadow: var(--nevo-shadow-sm);
+}
+
+.mcp-toggle-input:checked + .mcp-toggle-switch {
+  background: var(--nevo-primary);
+}
+
+.mcp-toggle-input:checked + .mcp-toggle-switch::after {
+  transform: translateX(16px);
+}
+
+.mcp-card-command {
+  font-family: var(--nevo-font-mono);
+  font-size: var(--nevo-font-size-sm);
+  color: var(--nevo-text-secondary);
+  background: var(--nevo-surface);
+  padding: var(--nevo-space-xs) var(--nevo-space-sm);
+  border-radius: var(--nevo-radius-sm);
+  margin-bottom: var(--nevo-space-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-card-args {
+  color: var(--nevo-text-muted);
+}
+
+.mcp-test-result {
+  padding: var(--nevo-space-sm);
+  border-radius: var(--nevo-radius-sm);
+  font-size: var(--nevo-font-size-sm);
+  margin-bottom: var(--nevo-space-sm);
+}
+
+.mcp-test-result.success {
+  background: rgba(22, 163, 74, 0.1);
+  color: var(--nevo-success);
+}
+
+.mcp-test-result.failure {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--nevo-error);
+}
+
+.mcp-card-actions {
+  display: flex;
+  gap: var(--nevo-space-xs);
+  padding-top: var(--nevo-space-sm);
+  border-top: 1px solid var(--nevo-border);
+}
+
+.mcp-action-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-md);
+  color: var(--nevo-text-secondary);
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.mcp-action-btn:hover {
+  background: var(--nevo-surface);
+  color: var(--nevo-text);
+}
+
+.mcp-action-btn.connected {
+  background: rgba(22, 163, 74, 0.1);
+  border-color: var(--nevo-success);
+  color: var(--nevo-success);
+}
+
+.mcp-action-btn.danger:hover {
+  background: rgba(220, 38, 38, 0.1);
+  border-color: var(--nevo-error);
+  color: var(--nevo-error);
+}
+
+/* MCP Server Form */
+.mcp-server-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nevo-space-lg);
+}
+
+.mcp-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nevo-space-xs);
+}
+
+.mcp-form-field label {
+  font-size: var(--nevo-font-size-sm);
+  font-weight: 500;
+  color: var(--nevo-text);
+}
+
+.mcp-form-field input[type="text"] {
+  padding: var(--nevo-space-sm) var(--nevo-space-md);
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-md);
+  color: var(--nevo-text);
+  font-size: var(--nevo-font-size-base);
+  transition: all var(--nevo-transition-fast);
+}
+
+.mcp-form-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--nevo-primary);
+  box-shadow: 0 0 0 2px var(--nevo-primary-light);
+}
+
+.mcp-form-field input[type="text"]:disabled {
+  background: var(--nevo-surface);
+  color: var(--nevo-text-muted);
+  cursor: not-allowed;
+}
+
+.mcp-form-hint {
+  font-size: var(--nevo-font-size-xs);
+  color: var(--nevo-text-muted);
+}
+
+.mcp-form-checkbox {
+  flex-direction: row;
+  align-items: center;
+}
+
+.mcp-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--nevo-space-sm);
+  cursor: pointer;
+}
+
+.mcp-checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--nevo-primary);
+  cursor: pointer;
+}
+
+/* Environment Variables Editor */
+.mcp-env-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nevo-space-sm);
+}
+
+.mcp-env-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--nevo-space-xs);
+}
+
+.mcp-env-key {
+  flex: 1;
+  max-width: 120px;
+  padding: var(--nevo-space-xs) var(--nevo-space-sm);
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-sm);
+  color: var(--nevo-text);
+  font-family: var(--nevo-font-mono);
+  font-size: var(--nevo-font-size-sm);
+}
+
+.mcp-env-key:focus,
+.mcp-env-value:focus {
+  outline: none;
+  border-color: var(--nevo-primary);
+}
+
+.mcp-env-equals {
+  color: var(--nevo-text-muted);
+  font-weight: bold;
+}
+
+.mcp-env-value {
+  flex: 2;
+  padding: var(--nevo-space-xs) var(--nevo-space-sm);
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-sm);
+  color: var(--nevo-text);
+  font-size: var(--nevo-font-size-sm);
+}
+
+.mcp-env-remove {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--nevo-radius-sm);
+  color: var(--nevo-text-muted);
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.mcp-env-remove:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--nevo-error);
+}
+
+.mcp-add-env-btn {
+  padding: var(--nevo-space-xs) var(--nevo-space-sm);
+  background: transparent;
+  border: 1px dashed var(--nevo-border);
+  border-radius: var(--nevo-radius-sm);
+  color: var(--nevo-text-secondary);
+  font-size: var(--nevo-font-size-sm);
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.mcp-add-env-btn:hover {
+  background: var(--nevo-surface);
+  border-color: var(--nevo-primary);
+  color: var(--nevo-primary);
+}
+
+/* Form Actions */
+.mcp-form-actions {
+  display: flex;
+  gap: var(--nevo-space-sm);
+  padding-top: var(--nevo-space-lg);
+  border-top: 1px solid var(--nevo-border);
+}
+
+.mcp-btn {
+  flex: 1;
+  padding: var(--nevo-space-sm) var(--nevo-space-md);
+  border-radius: var(--nevo-radius-md);
+  font-size: var(--nevo-font-size-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.mcp-btn-secondary {
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  color: var(--nevo-text);
+}
+
+.mcp-btn-secondary:hover {
+  background: var(--nevo-surface);
+}
+
+.mcp-btn-primary {
+  background: var(--nevo-primary);
+  border: 1px solid var(--nevo-primary);
+  color: white;
+}
+
+.mcp-btn-primary:hover {
+  background: var(--nevo-primary-hover);
+}
+/* Tab Selector Popup */
+.tab-selector-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-md);
+  box-shadow: var(--nevo-shadow-lg);
+  margin-bottom: var(--nevo-space-sm);
+  max-height: 250px;
+  overflow-y: auto;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+.tab-selector-item {
+  display: flex;
+  align-items: center;
+  gap: var(--nevo-space-sm);
+  padding: var(--nevo-space-sm) var(--nevo-space-md);
+  cursor: pointer;
+  transition: background var(--nevo-transition-fast);
+}
+
+.tab-selector-item:hover {
+  background: var(--nevo-surface);
+}
+
+.tab-selector-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--nevo-radius-sm);
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.tab-selector-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tab-selector-title {
+  font-size: var(--nevo-font-size-sm);
+  font-weight: 500;
+  color: var(--nevo-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-selector-url {
+  font-size: var(--nevo-font-size-xs);
+  color: var(--nevo-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================
+   AskUser Dialog
+   ============================================ */
+.ask-user-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+  padding: var(--nevo-space-lg);
+  animation: fadeIn var(--nevo-transition-fast);
+  backdrop-filter: blur(2px);
+}
+
+.ask-user-dialog {
+  width: 100%;
+  max-width: 380px;
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-xl);
+  padding: var(--nevo-space-xl);
+  animation: slideUp var(--nevo-transition-normal);
+  box-shadow: var(--nevo-shadow-lg);
+}
+
+.ask-user-question {
+  font-size: var(--nevo-font-size-lg);
+  font-weight: 500;
+  color: var(--nevo-text);
+  margin-bottom: var(--nevo-space-lg);
+  line-height: 1.5;
+}
+
+.ask-user-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nevo-space-sm);
+  margin-bottom: var(--nevo-space-lg);
+}
+
+.ask-user-option {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: var(--nevo-space-md);
+  background: var(--nevo-surface);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-md);
+  color: var(--nevo-text);
+  font-size: var(--nevo-font-size-base);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.ask-user-option:hover {
+  background: var(--nevo-surface-hover);
+  border-color: var(--nevo-primary);
+}
+
+.ask-user-option.selected {
+  background: var(--nevo-primary-light);
+  border-color: var(--nevo-primary);
+  color: var(--nevo-primary);
+  font-weight: 500;
+}
+
+.ask-user-custom {
+  margin-bottom: var(--nevo-space-lg);
+}
+
+.ask-user-input {
+  width: 100%;
+  padding: var(--nevo-space-md);
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-md);
+  color: var(--nevo-text);
+  font-size: var(--nevo-font-size-base);
+  transition: all var(--nevo-transition-fast);
+}
+
+.ask-user-input:focus {
+  outline: none;
+  border-color: var(--nevo-primary);
+  box-shadow: 0 0 0 2px var(--nevo-primary-light);
+}
+
+.ask-user-input::placeholder {
+  color: var(--nevo-text-muted);
+}
+
+.ask-user-actions {
+  display: flex;
+  gap: var(--nevo-space-sm);
+  justify-content: flex-end;
+}
+
+.ask-user-cancel {
+  padding: var(--nevo-space-sm) var(--nevo-space-lg);
+  background: var(--nevo-background);
+  border: 1px solid var(--nevo-border);
+  border-radius: var(--nevo-radius-md);
+  color: var(--nevo-text-secondary);
+  font-size: var(--nevo-font-size-base);
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.ask-user-cancel:hover {
+  background: var(--nevo-surface);
+  color: var(--nevo-text);
+}
+
+.ask-user-submit {
+  padding: var(--nevo-space-sm) var(--nevo-space-lg);
+  background: var(--nevo-primary);
+  border: 1px solid var(--nevo-primary);
+  border-radius: var(--nevo-radius-md);
+  color: white;
+  font-size: var(--nevo-font-size-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--nevo-transition-fast);
+}
+
+.ask-user-submit:hover:not(:disabled) {
+  background: var(--nevo-primary-hover);
+}
+
+.ask-user-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

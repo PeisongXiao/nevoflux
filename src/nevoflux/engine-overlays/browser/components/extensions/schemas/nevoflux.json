@@ -397,6 +397,17 @@
         "returns": { "$ref": "ScreenshotResult" }
       },
       {
+        "name": "getMarkdown",
+        "type": "function",
+        "async": "promise",
+        "description": "Get page content as Markdown",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "options", "type": "object", "optional": true }
+        ],
+        "returns": { "type": "object" }
+      },
+      {
         "name": "isVisible",
         "type": "function",
         "async": "promise",

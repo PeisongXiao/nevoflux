@@ -25,5 +25,5 @@ open = false
 
 [[hooks]]
 stage = "post_build"
-command = "sh"
-command_arguments = ["-c", "echo 'Chat Sidebar Trunk build complete'"]
+command = "python3"
+command_arguments = ["../scripts/fix-csp.py", "../dist/chat-sidebar"]

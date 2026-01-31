@@ -1,0 +1,27 @@
+2026-01-25T05:56:50.634683Z  INFO 🚀 Starting trunk 0.21.14
+2026-01-25T05:56:50.636144Z  INFO 📦 starting build
+warning: use of deprecated function `wasm_bindings::serialize_input_message`: Use serialize_chat_message instead
+  --> shared-protocol/src/lib.rs:95:12
+   |
+95 |     pub fn serialize_input_message(message: JsValue) -> Result<String, JsValue> {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated function `wasm_bindings::deserialize_output_message`: Use deserialize_chat_message instead
+   --> shared-protocol/src/lib.rs:101:12
+    |
+101 |     pub fn deserialize_output_message(json: &str) -> Result<JsValue, JsValue> {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `shared-protocol` (lib) generated 2 warnings
+warning: unused variable: `is_connected`
+  --> chat-sidebar/src/components/input_area/mod.rs:20:9
+   |
+20 |     let is_connected = ctx.connection.read().is_connected();
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_is_connected`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: `chat-sidebar` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.16s

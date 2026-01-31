@@ -261,8 +261,11 @@ fn EditMessageForm(
         ctx.messages.write().push(Message::user(&new_text));
 
         // Send updated message
-        let session_id = ctx.session.read().id.clone();
-        let tab_id = ctx.tab_context.read().tab_id;
+        let tab_context = ctx.tab_context.read();
+        let session_id = tab_context.zen_sync_id.clone()
+            .unwrap_or_else(|| ctx.session.read().id.clone());
+        let tab_id = tab_context.tab_id;
+        drop(tab_context);
         let mock_enabled = ctx.mock_enabled;
         let text = new_text;
 
@@ -271,7 +274,7 @@ fn EditMessageForm(
                 crate::mock::mock_send_message(ctx, text).await;
             } else {
                 ctx.agent_status.write().set_thinking();
-                let _ = crate::messaging::send_chat_message(&session_id, text, vec![], Some(tab_id)).await;
+                let _ = crate::messaging::send_chat_message(&session_id, text, ctx.chat_mode.read().clone(), vec![], vec![], Some(tab_id), vec![]).await;
             }
         });
     };

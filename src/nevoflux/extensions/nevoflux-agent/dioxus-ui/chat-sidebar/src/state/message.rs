@@ -184,8 +184,10 @@ impl StreamingState {
 /// Tab context for display
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TabContext {
-    /// Tab ID
+    /// Tab ID (Firefox numeric ID, used for browser tools)
     pub tab_id: u32,
+    /// Zen Sync ID (persistent across restarts, used as session_id)
+    pub zen_sync_id: Option<String>,
     /// Tab URL
     pub url: String,
     /// Tab title

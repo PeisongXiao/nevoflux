@@ -88,6 +88,10 @@ const MessageTypes = {
   PONG: "pong",
   CONNECTION_STATUS: "connection_status",
 
+  // AskUser interaction
+  ASK_USER_REQUEST: "ask_user_request",
+  ASK_USER_RESPONSE: "ask_user_response",
+
   // Legacy types (backwards compatibility)
   TAB_CONTEXT_UPDATE: "tab_context_update",
   REQUEST_TAB_CONTEXT: "request_tab_context",
@@ -450,13 +454,13 @@ class NativeChannel {
         for (const chunk of chunks) {
           this.port.postMessage(chunk);
         }
-        console.log(`[NevoFlux] ${this.displayName} sent ${chunks.length} chunks for:`, message.type || message);
+        console.log(`[NevoFlux] ${this.displayName} sent ${chunks.length} chunks for:`, message.type || message, message);
         return true;
       }
 
       // Send directly for small messages
       this.port.postMessage(message);
-      console.log(`[NevoFlux] ${this.displayName} sent:`, message.type || message);
+      console.log(`[NevoFlux] ${this.displayName} sent:`, message.type || message, message);
       return true;
     } catch (error) {
       console.error(`[NevoFlux] Failed to send to ${this.displayName}:`, error);
@@ -725,6 +729,7 @@ async function getActiveTabContext() {
   if (!tab) {
     return {
       tab_id: 0,
+      zen_sync_id: null,
       url: "",
       title: "",
       favicon_url: null,
@@ -732,8 +737,18 @@ async function getActiveTabContext() {
     };
   }
 
+  // Get zenSyncId from nevoflux API (includes Zen Browser's persistent tab ID)
+  let zenSyncId = null;
+  try {
+    const tabInfo = await browser.nevoflux.getTab(tab.id);
+    zenSyncId = tabInfo?.zenSyncId || null;
+  } catch (e) {
+    console.warn("[NevoFlux] Failed to get zenSyncId:", e);
+  }
+
   return {
     tab_id: tab.id,
+    zen_sync_id: zenSyncId,
     url: tab.url || "",
     title: tab.title || "",
     favicon_url: tab.favIconUrl || null,
@@ -831,6 +846,26 @@ async function executeBrowserTool(request, caller = "unknown") {
       // Content extraction
       case "get_markdown":
         return await executeGetMarkdownViaApi(targetTabId, params);
+
+      // Web fetch (URL to markdown, saved to cache)
+      case "web_fetch":
+        return await executeWebFetch(params);
+
+      // Cache tab markdown (tab content to markdown, saved to cache)
+      case "cache_tab_markdown":
+        return await executeCacheTabMarkdown(targetTabId, params);
+
+      // Web search
+      case "web_search":
+        return await executeWebSearch(params);
+
+      // Ask user a question
+      case "ask_user":
+        return await executeAskUser(params);
+
+      // Cache uploaded file (save to disk, return absolute path)
+      case "cache_file":
+        return await executeCacheFile(params);
 
       default:
         return { success: false, error: { code: -1, message: `Unknown action: ${action}`, recoverable: false } };
@@ -1222,12 +1257,16 @@ async function executeSnapshotViaApi(tabId, params) {
 
 /**
  * Get element selector from element ID (stored from snapshot result)
+ * @param {number} tabId - Tab ID
+ * @param {number} elementId - Element ID from snapshot
+ * @param {boolean} getChildren - If true, return array of child selectors (parent first, then children)
+ * @returns {string|string[]|null} CSS selector, array of selectors, or null if not found
  */
-async function getElementSelector(tabId, elementId) {
+async function getElementSelector(tabId, elementId, getChildren = false) {
   // Look up from stored snapshot refs
   const tabData = snapshotRefs.get(tabId);
 
-  console.log(`[NevoFlux] getElementSelector called: tabId=${tabId}, elementId=${elementId}`);
+  console.log(`[NevoFlux] getElementSelector called: tabId=${tabId}, elementId=${elementId}, getChildren=${getChildren}`);
   console.log(`[NevoFlux] snapshotRefs has keys:`, Array.from(snapshotRefs.keys()));
 
   if (!tabData) {
@@ -1251,6 +1290,36 @@ async function getElementSelector(tabId, elementId) {
   }
 
   console.log(`[NevoFlux] Found element ${elementId}:`, JSON.stringify(elementRef).substring(0, 300));
+
+  // If getChildren is true, return array with parent and all direct children
+  if (getChildren) {
+    const parentSelector = elementRef.selector;
+    const allRefs = Object.entries(tabData.refs);
+
+    // Find direct children by checking if selector starts with parent + " > "
+    const childRefs = allRefs.filter(([id, ref]) => {
+      if (!ref.selector || ref.selector === parentSelector) return false;
+      // Must start with parent selector
+      if (!ref.selector.startsWith(parentSelector)) return false;
+      // Check the part after parent selector: must be " > something" without another " > "
+      const afterParent = ref.selector.substring(parentSelector.length);
+      return afterParent.startsWith(" > ") && !afterParent.substring(3).includes(" > ");
+    });
+
+    // Sort children by element ID (DOM order)
+    childRefs.sort((a, b) => Number(a[0]) - Number(b[0]));
+
+    // Build result array: children first, then parent (try children before parent)
+    const selectors = [];
+    for (const [id, ref] of childRefs) {
+      selectors.push(ref.selector);
+    }
+    selectors.push(parentSelector);
+
+    console.log(`[NevoFlux] Returning ${selectors.length} selectors (${childRefs.length} children + 1 parent)`);
+    return selectors;
+  }
+
   return elementRef.selector;
 }
 
@@ -1272,28 +1341,73 @@ async function executeClickByIdViaApi(tabId, params, timeout_ms) {
   }
 
   try {
-    // Get selector from element ID
-    const selector = await getElementSelector(tabId, element_id);
+    // Get selectors: parent element + all direct children
+    const selectors = await getElementSelector(tabId, element_id, true);
 
-    if (!selector) {
+    if (!selectors || selectors.length === 0) {
       return {
         success: false,
         error: { code: -1, message: `Element ID ${element_id} not found. Take a new snapshot first.`, recoverable: true },
       };
     }
 
-    console.log(`[NevoFlux] Clicking element ${element_id} via browser.nevoflux.click('${selector}')`);
+    // Handle both single selector (string) and multiple selectors (array)
+    const selectorList = Array.isArray(selectors) ? selectors : [selectors];
 
-    // Use browser.nevoflux.click with trusted mouse events
-    const result = await browser.nevoflux.click(tabId, selector);
+    console.log(`[NevoFlux] Trying to click element ${element_id}, ${selectorList.length} candidate(s)`);
 
-    if (result.success === false) {
-      return result;
+    // Try each selector until one has detectable effect
+    let lastError = null;
+    let lastResult = null;
+    for (let i = 0; i < selectorList.length; i++) {
+      const selector = selectorList[i];
+      console.log(`[NevoFlux] Attempt ${i + 1}/${selectorList.length}: clicking '${selector.substring(0, 100)}...'`);
+
+      try {
+        const result = await browser.nevoflux.click(tabId, selector);
+
+        if (result.success === false) {
+          lastError = result.error || { message: "Click returned success=false" };
+          console.log(`[NevoFlux] Attempt ${i + 1} failed:`, lastError.message || lastError);
+          continue;
+        }
+
+        // Check if click had detectable effect (DOM change, network request, or element removed)
+        const effective = result.effective === true;
+        console.log(`[NevoFlux] Attempt ${i + 1} - effective: ${effective}, domChanged: ${result.domChanged}, networkRequest: ${result.networkRequestMade}, elementRemoved: ${result.elementRemoved}`);
+
+        if (effective) {
+          console.log(`[NevoFlux] Click effective on attempt ${i + 1}`);
+          return {
+            success: true,
+            result: { element_id, selector, clicked: true, method: "nevoflux_api", attempt: i + 1, ...result },
+          };
+        }
+
+        // Click executed but no detectable effect - try next selector
+        lastResult = result;
+        console.log(`[NevoFlux] Attempt ${i + 1} no effect, trying next...`);
+      } catch (clickError) {
+        lastError = { message: clickError.message || String(clickError) };
+        console.log(`[NevoFlux] Attempt ${i + 1} threw error:`, lastError.message);
+      }
     }
 
+    // All attempts had no detectable effect
+    // Return last result if any click was executed (might still have worked, just not detected)
+    if (lastResult) {
+      console.log(`[NevoFlux] All ${selectorList.length} attempts had no detectable effect, returning last result`);
+      return {
+        success: true,
+        result: { element_id, selector: selectorList[selectorList.length - 1], clicked: true, method: "nevoflux_api", effective: false, ...lastResult },
+      };
+    }
+
+    // All attempts truly failed
+    console.error(`[NevoFlux] All ${selectorList.length} click attempts failed`);
     return {
-      success: true,
-      result: { element_id, selector, clicked: true, method: "nevoflux_api" },
+      success: false,
+      error: { code: -1, message: `All click attempts failed. Last error: ${lastError?.message || "unknown"}`, recoverable: true },
     };
   } catch (error) {
     console.error("[NevoFlux] nevoflux.click failed:", error.message);
@@ -1470,10 +1584,415 @@ async function executeKeyPressViaApi(tabId, params) {
 async function executeGetMarkdownViaApi(tabId, params) {
   try {
     const result = await browser.nevoflux.getMarkdown(tabId, params);
-    return result.success !== undefined ? result : { success: true, result };
+
+    // Check for error response
+    if (result.success === false) {
+      return result;
+    }
+
+    // Wrap successful result in the expected format { success, result }
+    // The raw response has { success, markdown, title, url } which needs
+    // to be wrapped so the sidebar can access it via result.markdown
+    return { success: true, result };
   } catch (error) {
     return { success: false, error: { code: -1, message: error.message, recoverable: true } };
   }
+}
+
+/**
+ * Cache tab markdown: Get tab content as markdown and save to cache file
+ * Returns the file path for the agent to read
+ */
+async function executeCacheTabMarkdown(tabId, params) {
+  const { max_length = 100000 } = params;
+
+  console.log("[NevoFlux] CacheTabMarkdown: Getting markdown for tab", tabId);
+
+  // Get tab info for URL
+  let tabUrl = "";
+  let tabTitle = "";
+  try {
+    const tab = await browser.tabs.get(tabId);
+    tabUrl = tab.url || "";
+    tabTitle = tab.title || "";
+  } catch (e) {
+    console.warn("[NevoFlux] CacheTabMarkdown: Failed to get tab info:", e.message);
+  }
+
+  // Get markdown from tab via browser.nevoflux.getMarkdown()
+  let markdown;
+  try {
+    const result = await browser.nevoflux.getMarkdown(tabId, params);
+
+    if (result.success === false) {
+      return {
+        success: false,
+        error: result.error || { code: -1, message: "getMarkdown failed", recoverable: true },
+      };
+    }
+
+    // Extract markdown from result
+    if (typeof result === "string") {
+      markdown = result;
+    } else if (result.markdown) {
+      markdown = result.markdown;
+    } else if (result.result && typeof result.result === "string") {
+      markdown = result.result;
+    } else if (result.result && result.result.markdown) {
+      markdown = result.result.markdown;
+    } else {
+      markdown = JSON.stringify(result);
+    }
+
+    // Use title from result if available
+    if (result.title) tabTitle = result.title;
+    if (result.result?.title) tabTitle = result.result.title;
+  } catch (error) {
+    return {
+      success: false,
+      error: { code: -1, message: `getMarkdown failed: ${error.message}`, recoverable: true },
+    };
+  }
+
+  if (!markdown) {
+    return {
+      success: false,
+      error: { code: -1, message: "No markdown content extracted", recoverable: true },
+    };
+  }
+
+  // Truncate if needed
+  if (markdown.length > max_length) {
+    markdown = markdown.substring(0, max_length) + "\n\n[Content truncated...]";
+  }
+
+  // Generate cache file path using tab URL or ID
+  const cacheKey = tabUrl || `tab_${tabId}`;
+  const urlHash = await hashString(cacheKey);
+  const cacheDir = await getCacheDirectory();
+  const cacheFilePath = `${cacheDir}/${urlHash}.md`;
+
+  console.log("[NevoFlux] CacheTabMarkdown: Success, markdown length:", markdown.length, "path:", cacheFilePath);
+
+  return {
+    success: true,
+    result: {
+      file_path: cacheFilePath,
+      url: tabUrl,
+      title: tabTitle,
+      tab_id: tabId,
+      content_length: markdown.length,
+      // Include markdown directly for agent to save
+      _markdown: markdown,
+    },
+  };
+}
+
+// =============================================================================
+// Cache File Implementation
+// =============================================================================
+
+/**
+ * Cache uploaded file to disk and return the absolute path
+ * Params: { name: string, content: string (base64), mime_type: string }
+ * Returns: { file_path: string, name: string, size: number }
+ */
+async function executeCacheFile(params) {
+  const { name, content, mime_type } = params;
+
+  if (!name || !content) {
+    return {
+      success: false,
+      error: { code: -1, message: "Missing required params: name and content", recoverable: false },
+    };
+  }
+
+  console.log("[NevoFlux] CacheFile: Caching file", name, "mime:", mime_type);
+
+  // Generate cache file path
+  const timestamp = Date.now();
+  const safeFileName = name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const cacheDir = await getCacheDirectory();
+  const cacheFilePath = `${cacheDir}/upload_${timestamp}_${safeFileName}`;
+
+  // Decode base64 content
+  let decodedContent;
+  try {
+    // For text files, decode base64 to string
+    if (mime_type && mime_type.startsWith("text/")) {
+      decodedContent = atob(content);
+    } else {
+      // For binary files, keep as base64 - agent will handle decoding
+      decodedContent = content;
+    }
+  } catch (e) {
+    return {
+      success: false,
+      error: { code: -1, message: `Failed to decode content: ${e.message}`, recoverable: false },
+    };
+  }
+
+  console.log("[NevoFlux] CacheFile: Success, path:", cacheFilePath, "size:", decodedContent.length);
+
+  return {
+    success: true,
+    result: {
+      file_path: cacheFilePath,
+      name: name,
+      size: decodedContent.length,
+      mime_type: mime_type,
+      // Include content for agent to save to disk
+      _content: decodedContent,
+      _is_base64: !mime_type || !mime_type.startsWith("text/"),
+    },
+  };
+}
+
+// =============================================================================
+// Web Search Implementation
+// =============================================================================
+
+/**
+ * Execute web search using DuckDuckGo HTML search
+ * Returns search results without requiring an API key
+ */
+async function executeWebSearch(params) {
+  const {
+    query,
+    max_results = 10,
+    timeout_ms = 30000,
+  } = params;
+
+  // Validate query
+  if (!query || typeof query !== "string" || query.trim().length === 0) {
+    return {
+      success: false,
+      error: { code: 7001, message: "Search query is required", recoverable: false },
+    };
+  }
+
+  const searchQuery = query.trim();
+  console.log("[NevoFlux] WebSearch: Searching for:", searchQuery);
+
+  // Use DuckDuckGo HTML search
+  const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
+
+  let response;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout_ms);
+
+    response = await fetch(searchUrl, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+
+    clearTimeout(timeoutId);
+  } catch (e) {
+    const message = e.name === "AbortError" ? "Search timed out" : e.message;
+    return {
+      success: false,
+      error: { code: 7002, message: `Search failed: ${message}`, recoverable: true },
+    };
+  }
+
+  if (!response.ok) {
+    return {
+      success: false,
+      error: { code: 7002, message: `HTTP ${response.status}: ${response.statusText}`, recoverable: true },
+    };
+  }
+
+  // Parse HTML response
+  let html;
+  try {
+    html = await response.text();
+  } catch (e) {
+    return {
+      success: false,
+      error: { code: 7002, message: `Failed to read response: ${e.message}`, recoverable: true },
+    };
+  }
+
+  // Parse search results from DuckDuckGo HTML
+  const results = parseDuckDuckGoResults(html, max_results);
+
+  console.log("[NevoFlux] WebSearch: Found", results.length, "results");
+
+  return {
+    success: true,
+    result: {
+      results: results,
+      query: searchQuery,
+      total_results: results.length,
+    },
+  };
+}
+
+/**
+ * Parse DuckDuckGo HTML search results
+ * @param {string} html - HTML content
+ * @param {number} maxResults - Maximum number of results to return
+ * @returns {Array<{title: string, url: string, snippet: string}>}
+ */
+function parseDuckDuckGoResults(html, maxResults) {
+  const results = [];
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+
+    // DuckDuckGo HTML results are in div.result elements
+    const resultElements = doc.querySelectorAll(".result");
+
+    for (const el of resultElements) {
+      if (results.length >= maxResults) break;
+
+      // Skip ads and non-result elements
+      if (el.classList.contains("result--ad")) continue;
+
+      // Extract title and URL from the result__a link
+      const titleLink = el.querySelector(".result__a");
+      if (!titleLink) continue;
+
+      const title = titleLink.textContent?.trim() || "";
+      let url = titleLink.getAttribute("href") || "";
+
+      // DuckDuckGo wraps URLs in a redirect, extract the actual URL
+      if (url.startsWith("//duckduckgo.com/l/?")) {
+        const urlParams = new URLSearchParams(url.split("?")[1] || "");
+        url = urlParams.get("uddg") || url;
+      }
+
+      // Decode URL if needed
+      try {
+        url = decodeURIComponent(url);
+      } catch (e) {
+        // Keep original URL if decoding fails
+      }
+
+      // Skip if no valid URL
+      if (!url || url.startsWith("//duckduckgo.com")) continue;
+
+      // Extract snippet from result__snippet
+      const snippetEl = el.querySelector(".result__snippet");
+      const snippet = snippetEl?.textContent?.trim() || "";
+
+      results.push({
+        title,
+        url,
+        snippet,
+      });
+    }
+  } catch (e) {
+    console.error("[NevoFlux] WebSearch: Failed to parse results:", e.message);
+  }
+
+  return results;
+}
+
+// =============================================================================
+// Ask User Implementation
+// =============================================================================
+
+// Pending AskUser requests map: requestId -> {resolve, reject, timeoutId}
+const pendingAskUserRequests = new Map();
+
+/**
+ * Execute ask user: Show question to user and wait for response
+ */
+async function executeAskUser(params) {
+  const {
+    question,
+    options = [],
+    allow_custom = true,
+    timeout_ms = 60000,
+  } = params;
+
+  // Validate question
+  if (!question || typeof question !== "string" || question.trim().length === 0) {
+    return {
+      success: false,
+      error: { code: 8001, message: "Question is required", recoverable: false },
+    };
+  }
+
+  const requestId = `ask_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  console.log("[NevoFlux] AskUser: Sending question to sidebar:", question);
+
+  // Create promise that will be resolved when user responds
+  return new Promise((resolve) => {
+    // Set timeout
+    const timeoutId = setTimeout(() => {
+      if (pendingAskUserRequests.has(requestId)) {
+        pendingAskUserRequests.delete(requestId);
+        console.log("[NevoFlux] AskUser: Timed out waiting for user response");
+        resolve({
+          success: false,
+          error: { code: 8001, message: "User interaction timed out", recoverable: true },
+        });
+      }
+    }, timeout_ms);
+
+    // Store pending request
+    pendingAskUserRequests.set(requestId, {
+      resolve,
+      timeoutId,
+    });
+
+    // Send request to sidebar
+    broadcastToSidebar({
+      type: MessageTypes.ASK_USER_REQUEST,
+      payload: {
+        request_id: requestId,
+        question: question.trim(),
+        options: options,
+        allow_custom: allow_custom,
+        timeout_ms: timeout_ms,
+      },
+    });
+  });
+}
+
+/**
+ * Handle ask user response from sidebar
+ */
+function handleAskUserResponse(payload) {
+  const { request_id, answer, is_custom, selected_index, cancelled } = payload;
+
+  const pending = pendingAskUserRequests.get(request_id);
+  if (!pending) {
+    console.warn("[NevoFlux] AskUser: No pending request found for", request_id);
+    return;
+  }
+
+  // Clear timeout and remove from pending
+  clearTimeout(pending.timeoutId);
+  pendingAskUserRequests.delete(request_id);
+
+  if (cancelled) {
+    console.log("[NevoFlux] AskUser: User cancelled");
+    pending.resolve({
+      success: false,
+      error: { code: 8001, message: "User cancelled the interaction", recoverable: true },
+    });
+    return;
+  }
+
+  console.log("[NevoFlux] AskUser: Received response:", answer);
+  pending.resolve({
+    success: true,
+    result: {
+      answer: answer,
+      is_custom: is_custom || false,
+      selected_index: selected_index !== undefined ? selected_index : -1,
+    },
+  });
 }
 
 // =============================================================================
@@ -1561,6 +2080,573 @@ async function executeInContentScript(tabId, action, params, timeout_ms) {
 }
 
 // =============================================================================
+// Web Fetch Implementation
+// Fetches URL, converts to markdown, saves to cache
+// =============================================================================
+
+/**
+ * Execute web fetch: URL → fetch → markdown → cache file → return path
+ */
+async function executeWebFetch(params) {
+  const {
+    url,
+    timeout_ms = 30000,
+    include_images = false,
+    max_length = 100000,
+    force_refresh = false,
+  } = params;
+
+  // Validate URL
+  if (!url) {
+    return {
+      success: false,
+      error: { code: 6002, message: "URL is required", recoverable: false },
+    };
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      throw new Error("Only HTTP/HTTPS URLs are supported");
+    }
+  } catch (e) {
+    return {
+      success: false,
+      error: { code: 6002, message: `Invalid URL: ${e.message}`, recoverable: false },
+    };
+  }
+
+  // Generate cache file path
+  const urlHash = await hashString(url);
+  const cacheDir = await getCacheDirectory();
+  const cacheFilePath = `${cacheDir}/${urlHash}.md`;
+  const metaFilePath = `${cacheDir}/${urlHash}.meta`;
+
+  // Check cache (unless force_refresh)
+  if (!force_refresh) {
+    try {
+      const cached = await checkCache(cacheFilePath, metaFilePath);
+      if (cached) {
+        console.log("[NevoFlux] WebFetch: Using cached content for", url);
+        return {
+          success: true,
+          result: {
+            file_path: cacheFilePath,
+            url: url,
+            title: cached.title || "",
+            content_length: cached.content_length || 0,
+            cached: true,
+          },
+        };
+      }
+    } catch (e) {
+      console.log("[NevoFlux] WebFetch: Cache check failed, will fetch fresh:", e.message);
+    }
+  }
+
+  // Fetch the URL
+  console.log("[NevoFlux] WebFetch: Fetching", url);
+  let response;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout_ms);
+
+    response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; NevoFlux/1.0; +https://nevoflux.com)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    });
+
+    clearTimeout(timeoutId);
+  } catch (e) {
+    const message = e.name === "AbortError" ? "Request timed out" : e.message;
+    return {
+      success: false,
+      error: { code: 6001, message: `Fetch failed: ${message}`, recoverable: true },
+    };
+  }
+
+  if (!response.ok) {
+    return {
+      success: false,
+      error: { code: 6001, message: `HTTP ${response.status}: ${response.statusText}`, recoverable: true },
+    };
+  }
+
+  // Check content type
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+    return {
+      success: false,
+      error: { code: 6003, message: `Content type not supported: ${contentType}`, recoverable: false },
+    };
+  }
+
+  // Get HTML content
+  let html;
+  try {
+    html = await response.text();
+  } catch (e) {
+    return {
+      success: false,
+      error: { code: 6001, message: `Failed to read response: ${e.message}`, recoverable: true },
+    };
+  }
+
+  // Check size
+  if (html.length > max_length * 10) {
+    // Allow 10x for HTML since markdown will be smaller
+    return {
+      success: false,
+      error: { code: 6004, message: `Content too large: ${html.length} bytes`, recoverable: false },
+    };
+  }
+
+  // Convert HTML to Markdown
+  let markdown, title;
+  try {
+    const result = htmlToMarkdown(html, { includeImages: include_images, maxLength: max_length });
+    markdown = result.markdown;
+    title = result.title;
+  } catch (e) {
+    return {
+      success: false,
+      error: { code: 6001, message: `Markdown conversion failed: ${e.message}`, recoverable: false },
+    };
+  }
+
+  // Truncate if needed
+  if (markdown.length > max_length) {
+    markdown = markdown.substring(0, max_length) + "\n\n[Content truncated...]";
+  }
+
+  // Save to cache via native messaging (agent will write the file)
+  try {
+    await saveToCacheViaAgent(cacheFilePath, metaFilePath, markdown, { url, title, content_length: markdown.length });
+  } catch (e) {
+    console.error("[NevoFlux] WebFetch: Failed to save cache:", e.message);
+    // Continue anyway, just won't be cached
+  }
+
+  console.log("[NevoFlux] WebFetch: Success, markdown length:", markdown.length);
+
+  return {
+    success: true,
+    result: {
+      file_path: cacheFilePath,
+      url: url,
+      title: title || "",
+      content_length: markdown.length,
+      cached: false,
+      // Include markdown directly for agent to save
+      _markdown: markdown,
+    },
+  };
+}
+
+/**
+ * Hash a string using SHA-256
+ */
+async function hashString(str) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(str);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Get cache directory path
+ */
+async function getCacheDirectory() {
+  // Use a standard cache location - agent will handle actual file operations
+  const home = await getHomeDirectory();
+  return `${home}/.cache/nevoflux/web_fetch`;
+}
+
+/**
+ * Get home directory (platform-aware)
+ */
+async function getHomeDirectory() {
+  // This will be determined by the agent side
+  // For now, return a placeholder that agent will resolve
+  if (navigator.platform.startsWith("Win")) {
+    return "%USERPROFILE%";
+  }
+  return "~";
+}
+
+/**
+ * Check if valid cache exists
+ */
+async function checkCache(cacheFilePath, metaFilePath) {
+  // Cache checking is done via native agent
+  // For now, return null to always fetch fresh
+  // TODO: Implement cache checking via native messaging
+  return null;
+}
+
+/**
+ * Save content to cache via native agent
+ */
+async function saveToCacheViaAgent(cacheFilePath, metaFilePath, markdown, meta) {
+  // The agent will handle the actual file writing
+  // The _markdown field in the result will be used by the agent
+  return true;
+}
+
+/**
+ * Convert HTML to Markdown
+ * Simplified implementation for background script context
+ */
+function htmlToMarkdown(html, options = {}) {
+  const { includeImages = false, maxLength = 100000 } = options;
+
+  // Parse HTML
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  // Get title
+  const title = doc.title || "";
+
+  // Find main content
+  const mainContent = findMainContent(doc);
+
+  // Convert to markdown
+  const markdown = convertElementToMarkdown(mainContent, { includeImages });
+
+  return { markdown: cleanMarkdown(markdown), title };
+}
+
+/**
+ * Find main content area
+ */
+function findMainContent(doc) {
+  const selectors = [
+    "article",
+    "main",
+    "[role='main']",
+    "#content",
+    ".content",
+    "#main",
+    ".main",
+    ".post",
+    ".entry-content",
+    ".post-content",
+    ".article-content",
+    ".markdown-body", // GitHub
+    ".documentation", // Docs sites
+  ];
+
+  for (const selector of selectors) {
+    const el = doc.querySelector(selector);
+    if (el && el.textContent?.trim().length > 100) {
+      return el;
+    }
+  }
+
+  return doc.body;
+}
+
+/**
+ * Convert DOM element to markdown
+ */
+function convertElementToMarkdown(el, options, depth = 0) {
+  if (!el) return "";
+
+  const lines = [];
+  processElement(el, options, lines, depth);
+  return lines.join("\n");
+}
+
+/**
+ * Process single element
+ */
+function processElement(el, options, lines, depth) {
+  if (!el) return;
+
+  // Text node
+  if (el.nodeType === 3) {
+    const text = el.textContent?.trim();
+    if (text) lines.push(text);
+    return;
+  }
+
+  // Skip non-elements
+  if (el.nodeType !== 1) return;
+
+  const tagName = el.tagName.toUpperCase();
+
+  // Skip unwanted elements
+  const skipTags = ["SCRIPT", "STYLE", "NOSCRIPT", "SVG", "IFRAME", "NAV", "HEADER", "FOOTER", "ASIDE"];
+  if (skipTags.includes(tagName)) return;
+
+  // Skip by class/id patterns
+  const className = (el.className?.toString() || "").toLowerCase();
+  const id = (el.id || "").toLowerCase();
+  const skipPatterns = ["nav", "menu", "sidebar", "ad", "advertisement", "banner", "social", "comment", "related"];
+  for (const pattern of skipPatterns) {
+    if ((className.includes(pattern) || id.includes(pattern)) && el.textContent?.trim().length < 500) {
+      return;
+    }
+  }
+
+  // Handle specific tags
+  switch (tagName) {
+    case "H1":
+    case "H2":
+    case "H3":
+    case "H4":
+    case "H5":
+    case "H6": {
+      const level = parseInt(tagName.charAt(1), 10);
+      const text = el.textContent?.trim();
+      if (text) {
+        lines.push("");
+        lines.push("#".repeat(level) + " " + text);
+        lines.push("");
+      }
+      return;
+    }
+
+    case "P": {
+      const text = getInlineText(el, options);
+      if (text.trim()) {
+        lines.push("");
+        lines.push(text);
+        lines.push("");
+      }
+      return;
+    }
+
+    case "A": {
+      const text = el.textContent?.trim();
+      const href = el.href;
+      if (text && href && !href.startsWith("javascript:")) {
+        lines.push(`[${text}](${href})`);
+      } else if (text) {
+        lines.push(text);
+      }
+      return;
+    }
+
+    case "IMG": {
+      if (options.includeImages) {
+        const alt = el.alt || el.title || "image";
+        const src = el.src;
+        if (src) lines.push(`![${alt}](${src})`);
+      }
+      return;
+    }
+
+    case "UL":
+    case "OL": {
+      lines.push("");
+      processList(el, options, lines, tagName === "OL", depth);
+      lines.push("");
+      return;
+    }
+
+    case "PRE": {
+      const codeEl = el.querySelector("code");
+      const code = codeEl ? codeEl.textContent : el.textContent;
+      const lang = codeEl?.className.match(/language-(\w+)/)?.[1] || "";
+      lines.push("");
+      lines.push("```" + lang);
+      lines.push(code?.trim() || "");
+      lines.push("```");
+      lines.push("");
+      return;
+    }
+
+    case "CODE": {
+      if (el.parentElement?.tagName !== "PRE") {
+        const text = el.textContent?.trim();
+        if (text) lines.push("`" + text + "`");
+      }
+      return;
+    }
+
+    case "BLOCKQUOTE": {
+      lines.push("");
+      const quoteLines = [];
+      for (const child of el.childNodes) {
+        processElement(child, options, quoteLines, depth);
+      }
+      for (const line of quoteLines) {
+        if (line.trim()) lines.push("> " + line);
+      }
+      lines.push("");
+      return;
+    }
+
+    case "HR": {
+      lines.push("");
+      lines.push("---");
+      lines.push("");
+      return;
+    }
+
+    case "STRONG":
+    case "B": {
+      const text = el.textContent?.trim();
+      if (text) lines.push("**" + text + "**");
+      return;
+    }
+
+    case "EM":
+    case "I": {
+      const text = el.textContent?.trim();
+      if (text) lines.push("*" + text + "*");
+      return;
+    }
+
+    case "TABLE": {
+      const tableMarkdown = convertTable(el);
+      if (tableMarkdown) {
+        lines.push("");
+        lines.push(tableMarkdown);
+        lines.push("");
+      }
+      return;
+    }
+
+    default: {
+      // Container elements - process children
+      for (const child of el.childNodes) {
+        processElement(child, options, lines, depth);
+      }
+    }
+  }
+}
+
+/**
+ * Get inline text content
+ */
+function getInlineText(el, options) {
+  let text = "";
+  for (const child of el.childNodes) {
+    if (child.nodeType === 3) {
+      text += child.textContent;
+    } else if (child.nodeType === 1) {
+      const tag = child.tagName.toUpperCase();
+      if (tag === "A") {
+        const href = child.href;
+        const linkText = child.textContent?.trim();
+        if (linkText && href && !href.startsWith("javascript:")) {
+          text += `[${linkText}](${href})`;
+        } else {
+          text += linkText || "";
+        }
+      } else if (tag === "STRONG" || tag === "B") {
+        text += "**" + child.textContent + "**";
+      } else if (tag === "EM" || tag === "I") {
+        text += "*" + child.textContent + "*";
+      } else if (tag === "CODE") {
+        text += "`" + child.textContent + "`";
+      } else if (tag === "BR") {
+        text += "  \n";
+      } else {
+        text += child.textContent;
+      }
+    }
+  }
+  return text.trim();
+}
+
+/**
+ * Process list elements
+ */
+function processList(listEl, options, lines, isOrdered, depth) {
+  const indent = "  ".repeat(depth);
+  let counter = 1;
+
+  for (const li of listEl.children) {
+    if (li.tagName !== "LI") continue;
+
+    const prefix = isOrdered ? `${counter}. ` : "- ";
+    const content = getInlineText(li, options);
+
+    if (content.trim()) {
+      lines.push(indent + prefix + content);
+    }
+
+    // Handle nested lists
+    for (const child of li.children) {
+      if (child.tagName === "UL" || child.tagName === "OL") {
+        processList(child, options, lines, child.tagName === "OL", depth + 1);
+      }
+    }
+
+    counter++;
+  }
+}
+
+/**
+ * Convert table to markdown
+ */
+function convertTable(tableEl) {
+  const rows = [];
+  let headerRow = [];
+  let hasHeader = false;
+
+  for (const tr of tableEl.querySelectorAll("tr")) {
+    const cells = tr.querySelectorAll("th, td");
+    const rowData = [];
+
+    for (const cell of cells) {
+      rowData.push(cell.textContent?.trim().replace(/\|/g, "\\|") || "");
+    }
+
+    if (rowData.length === 0) continue;
+
+    // First row with TH is header
+    if (!hasHeader && tr.querySelector("th")) {
+      headerRow = rowData;
+      hasHeader = true;
+      continue;
+    }
+
+    rows.push(rowData);
+  }
+
+  // Use first row as header if no header found
+  if (headerRow.length === 0 && rows.length > 0) {
+    headerRow = rows.shift();
+  }
+
+  if (headerRow.length === 0) return "";
+
+  const colCount = headerRow.length;
+  const lines = [];
+
+  // Header
+  lines.push("| " + headerRow.join(" | ") + " |");
+  lines.push("| " + headerRow.map(() => "---").join(" | ") + " |");
+
+  // Rows
+  for (const row of rows) {
+    while (row.length < colCount) row.push("");
+    lines.push("| " + row.slice(0, colCount).join(" | ") + " |");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Clean markdown output
+ */
+function cleanMarkdown(markdown) {
+  return markdown
+    .replace(/\n{3,}/g, "\n\n") // Remove excessive blank lines
+    .replace(/[ \t]+$/gm, "") // Remove trailing whitespace
+    .trim();
+}
+
+// =============================================================================
 // Message Listener (Background API)
 // =============================================================================
 
@@ -1589,6 +2675,13 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         payload: context,
       });
     });
+    sendResponse({ success: true });
+    return;
+  }
+
+  // Handle AskUser response from sidebar
+  if (msgType === MessageTypes.ASK_USER_RESPONSE) {
+    handleAskUserResponse(message.payload);
     sendResponse({ success: true });
     return;
   }

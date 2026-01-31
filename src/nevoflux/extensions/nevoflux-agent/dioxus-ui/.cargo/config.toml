@@ -1,0 +1,6 @@
+# Use crates.io directly for dioxus-ui (not vendored sources from Firefox build)
+[source.crates-io]
+registry = "https://github.com/rust-lang/crates.io-index"
+
+[build]
+target = "wasm32-unknown-unknown"

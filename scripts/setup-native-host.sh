@@ -4,61 +4,157 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 # Setup NevoFlux Native Messaging Host
-# This script builds the Rust agent and registers it with Firefox/NevoFlux
+# This script locates/builds the native agent and registers it with Firefox/NevoFlux
+#
+# Binary resolution order:
+#   1. Command line argument: ./setup-native-host.sh /path/to/binary
+#   2. Environment variable: NEVOFLUX_AGENT_BIN=/path/to/binary
+#   3. Local development: /ai/project/nevoflux-agent/target/release/nevoflux-agent
+#   4. GitHub release download (for release builds)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Configuration
+AGENT_PROJECT="/ai/project/nevoflux-agent"
+AGENT_BIN_NAME="nevoflux-agent"
+EXTENSION_ID="agent@nevoflux.com"
+MANIFEST_NAME="com.nevoflux.agent"
+
+# GitHub release configuration (for future use)
+GITHUB_REPO="user/nevoflux-agent"
+GITHUB_RELEASE_TAG="latest"
+
 echo "=== NevoFlux Native Messaging Host Setup ==="
 echo ""
 
-# 1. Build Rust agent
-echo "[1/3] Building Rust agent..."
-cd "$PROJECT_ROOT/src/nevoflux/crates"
-cargo build --release
+# Function to download from GitHub releases
+download_from_github() {
+    local target_path="$1"
+    local os_type=""
+    local arch=""
 
-# 2. Get absolute path
-AGENT_BIN="$PROJECT_ROOT/src/nevoflux/crates/target/release/nevoflux-agent"
-if [ ! -f "$AGENT_BIN" ]; then
-    echo "Error: Agent binary not found at $AGENT_BIN"
-    echo "Please ensure the build completed successfully"
+    # Detect OS
+    case "$(uname -s)" in
+        Linux*)  os_type="linux";;
+        Darwin*) os_type="macos";;
+        *)       echo "Error: Unsupported OS"; exit 1;;
+    esac
+
+    # Detect architecture
+    case "$(uname -m)" in
+        x86_64)  arch="x86_64";;
+        aarch64) arch="aarch64";;
+        arm64)   arch="aarch64";;
+        *)       echo "Error: Unsupported architecture"; exit 1;;
+    esac
+
+    local asset_name="${AGENT_BIN_NAME}-${os_type}-${arch}"
+    local download_url="https://github.com/${GITHUB_REPO}/releases/${GITHUB_RELEASE_TAG}/download/${asset_name}"
+
+    echo "Downloading from: $download_url"
+
+    mkdir -p "$(dirname "$target_path")"
+
+    if command -v curl &> /dev/null; then
+        curl -fsSL -o "$target_path" "$download_url"
+    elif command -v wget &> /dev/null; then
+        wget -q -O "$target_path" "$download_url"
+    else
+        echo "Error: Neither curl nor wget is available"
+        exit 1
+    fi
+
+    chmod +x "$target_path"
+    echo "Downloaded to: $target_path"
+}
+
+# Resolve binary path
+resolve_binary() {
+    # Priority 1: Command line argument
+    if [ -n "$1" ] && [ -f "$1" ]; then
+        echo "$1"
+        return 0
+    fi
+
+    # Priority 2: Environment variable
+    if [ -n "$NEVOFLUX_AGENT_BIN" ] && [ -f "$NEVOFLUX_AGENT_BIN" ]; then
+        echo "$NEVOFLUX_AGENT_BIN"
+        return 0
+    fi
+
+    # Priority 3: Local development build (pre-built in separate project)
+    local dev_binary="$AGENT_PROJECT/target/release/$AGENT_BIN_NAME"
+    if [ -f "$dev_binary" ]; then
+        echo "$dev_binary"
+        return 0
+    fi
+
+    # Priority 4: Download from GitHub (for release builds)
+    # Uncomment when GitHub releases are available
+    # local download_path="$PROJECT_ROOT/build/nevoflux-agent/$AGENT_BIN_NAME"
+    # echo "Binary not found locally. Downloading from GitHub releases..."
+    # download_from_github "$download_path"
+    # echo "$download_path"
+    # return 0
+
+    return 1
+}
+
+# Get binary path
+AGENT_BIN=$(resolve_binary "$1")
+
+if [ -z "$AGENT_BIN" ] || [ ! -f "$AGENT_BIN" ]; then
+    echo "Error: Native agent binary not found"
+    echo ""
+    echo "Expected location: $AGENT_PROJECT/target/release/$AGENT_BIN_NAME"
+    echo ""
+    echo "Options:"
+    echo "  1. Build agent first:  cd $AGENT_PROJECT && cargo build --release"
+    echo "  2. Specify path:       ./setup-native-host.sh /path/to/nevoflux-agent"
+    echo "  3. Set env var:        NEVOFLUX_AGENT_BIN=/path/to/binary ./setup-native-host.sh"
     exit 1
 fi
 
-echo "✓ Agent built successfully"
+# Convert to absolute path
+if [[ "$AGENT_BIN" != /* ]]; then
+    AGENT_BIN="$(cd "$(dirname "$AGENT_BIN")" && pwd)/$(basename "$AGENT_BIN")"
+fi
+
+echo "Using binary: $AGENT_BIN"
 echo ""
 
-# 3. Create manifest directory
+# Create manifest directory (Firefox on Linux)
 echo "[2/3] Creating native messaging manifest..."
 MANIFEST_DIR="$HOME/.mozilla/native-messaging-hosts"
 mkdir -p "$MANIFEST_DIR"
 
-# 4. Write manifest
-MANIFEST_FILE="$MANIFEST_DIR/com.nevoflux.agent.json"
+# Write manifest
+MANIFEST_FILE="$MANIFEST_DIR/${MANIFEST_NAME}.json"
 cat > "$MANIFEST_FILE" <<EOF
 {
-  "name": "com.nevoflux.agent",
+  "name": "$MANIFEST_NAME",
   "description": "NevoFlux AI Agent Native Messaging Host",
   "path": "$AGENT_BIN",
   "type": "stdio",
-  "allowed_extensions": ["agent@nevoflux.com"]
+  "allowed_extensions": ["$EXTENSION_ID"]
 }
 EOF
 
-echo "✓ Manifest created"
+echo "Manifest created: $MANIFEST_FILE"
 echo ""
 
-# 5. Verify installation
+# Verify installation
 echo "[3/3] Verifying installation..."
-echo "  Agent binary: $AGENT_BIN"
+echo "  Binary: $AGENT_BIN"
 echo "  Manifest: $MANIFEST_FILE"
 echo ""
 
 # Test agent executable
 if "$AGENT_BIN" --help > /dev/null 2>&1; then
-    echo "✓ Agent is executable"
+    echo "Agent is executable"
 else
     echo "Warning: Could not execute agent. You may need to set execute permissions:"
     echo "  chmod +x $AGENT_BIN"

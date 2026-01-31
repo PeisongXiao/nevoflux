@@ -31,12 +31,39 @@ pub fn to_js_value<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValue> {
 }
 
 /// Convert JsValue to Rust struct via JSON
+///
+/// Note: This function handles Firefox's Xray wrappers safely by catching
+/// stringify errors that can occur with cross-compartment objects.
 pub fn from_js_value<T: serde::de::DeserializeOwned>(value: JsValue) -> Result<T, String> {
-    let json = js_sys::JSON::stringify(&value)
-        .map_err(|_| "Failed to stringify JsValue".to_string())?
-        .as_string()
-        .ok_or_else(|| "JsValue is not a string".to_string())?;
-    serde_json::from_str(&json).map_err(|e| format!("Deserialize error: {}", e))
+    // Handle undefined/null early
+    if value.is_undefined() {
+        return Err("Value is undefined".to_string());
+    }
+    if value.is_null() {
+        return Err("Value is null".to_string());
+    }
+
+    // Try to stringify - this can fail with Xray-wrapped objects in Firefox extensions
+    let json_result = js_sys::JSON::stringify(&value);
+
+    let json = match json_result {
+        Ok(js_string) => {
+            js_string.as_string()
+                .ok_or_else(|| "JSON.stringify returned non-string".to_string())?
+        }
+        Err(_e) => {
+            // JSON.stringify failed - likely an Xray wrapper issue
+            // Try alternative approaches
+            if let Some(s) = value.as_string() {
+                // It's a plain string, use it directly
+                format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+            } else {
+                return Err("Failed to stringify JsValue (possible Xray wrapper)".to_string());
+            }
+        }
+    };
+
+    serde_json::from_str(&json).map_err(|e| format!("Deserialize error: {} (json: {})", e, &json[..json.len().min(100)]))
 }
 
 /// Send message synchronously (fire-and-forget, ignores promise result)

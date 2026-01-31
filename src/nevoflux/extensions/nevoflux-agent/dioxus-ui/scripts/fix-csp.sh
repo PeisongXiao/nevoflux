@@ -24,6 +24,7 @@ export DIST_DIR
 python3 << 'PYTHON_SCRIPT'
 import re
 import os
+import time
 
 dist_dir = os.environ.get('DIST_DIR', '.')
 html_file = f"{dist_dir}/index.html"
@@ -37,7 +38,17 @@ pattern = r'<script type=module>(.*?)</script>'
 match = re.search(pattern, content, re.DOTALL)
 
 if not match:
-    print("No inline script found, skipping...")
+    # If already externalized, just update the timestamp
+    pattern_ext = r'<script type="module" src="init.js(?:\?v=\d+)?"></script>'
+    timestamp = int(time.time())
+    new_content = re.sub(
+        pattern_ext,
+        f'<script type="module" src="init.js?v={timestamp}"></script>',
+        content
+    )
+    with open(html_file, 'w') as f:
+        f.write(new_content)
+    print(f"Updated existing script tag with timestamp v={timestamp}")
     exit(0)
 
 script_content = match.group(1)
@@ -47,25 +58,26 @@ with open(init_js, 'w') as f:
     f.write(script_content)
 print(f"Extracted inline script to {init_js}")
 
-# Replace inline script with external reference
+# Replace inline script with external reference, adding a timestamp to bust cache
+timestamp = int(time.time())
 new_content = re.sub(
     pattern,
-    '<script type="module" src="init.js"></script>',
+    f'<script type="module" src="init.js?v={timestamp}"></script>',
     content,
     flags=re.DOTALL
 )
 
 with open(html_file, 'w') as f:
     f.write(new_content)
-print(f"Updated {html_file} to reference external init.js")
+print(f"Updated {html_file} to reference external init.js?v={timestamp}")
 
 # Fix absolute paths in init.js to be relative (for extension context)
 with open(init_js, 'r') as f:
     init_content = f.read()
 
 # Change absolute paths like '/foo.js' to relative './foo.js'
-init_content = re.sub(r"from\s+['\"]/([\w-]+)", r"from './\1", init_content)
-init_content = re.sub(r"module_or_path:\s+['\"]/([\w-]+)", r"module_or_path: './\1", init_content)
+init_content = re.sub(r"from\s+['"]/([\w-]+)", r"from './\1", init_content)
+init_content = re.sub(r"module_or_path:\s+['"]/([\w-]+)", r"module_or_path: './\1", init_content)
 
 with open(init_js, 'w') as f:
     f.write(init_content)

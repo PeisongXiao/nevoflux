@@ -102,8 +102,21 @@ impl AgentStatusState {
         self.visible = true;
     }
 
-    /// Hide the status bar
+    /// Hide the status bar and reset to idle state
     pub fn hide(&mut self) {
+        self.state = AgentState::Idle;
+        self.current_tool = None;
+        self.step = None;
+        self.error_message = None;
+        self.visible = false;
+    }
+
+    /// Reset to initial state (for tab switching)
+    pub fn reset(&mut self) {
+        self.state = AgentState::Idle;
+        self.current_tool = None;
+        self.step = None;
+        self.error_message = None;
         self.visible = false;
     }
 }

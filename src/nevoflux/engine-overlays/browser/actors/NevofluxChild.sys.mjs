@@ -2,6 +2,219 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// Lazy getter for accessibility service
+const lazy = {};
+ChromeUtils.defineLazyGetter(lazy, "a11yService", () => {
+  try {
+    return Cc["@mozilla.org/accessibilityService;1"].getService(
+      Ci.nsIAccessibilityService
+    );
+  } catch (e) {
+    return null;
+  }
+});
+
+// InspectorUtils is globally available in privileged Firefox contexts
+// Used to detect event listeners added via addEventListener
+
+// Interactive roles for filtering
+const INTERACTIVE_ROLES = new Set([
+  "pushbutton", "button", "link", "entry", "password text",
+  "text", "text container", "editable text", "searchbox",
+  "checkbox", "radio button", "check menu item", "radio menu item",
+  "toggle button", "combobox", "listbox", "option", "combobox option",
+  "slider", "spinbutton", "menuitem", "menubar", "menu",
+  "tab", "pagetab", "tablist", "tree item", "switch",
+  // Also include these for form elements
+  "autocomplete", "editbar", "password text", "dropdown list",
+]);
+
+// Role mapping from nsIAccessible role constants to readable strings
+const ROLE_MAP = {
+  1: "pushbutton",
+  3: "check menu item",
+  4: "dropdown list",
+  5: "menu bar",
+  6: "scroll bar",
+  7: "grip",
+  8: "sound",
+  9: "cursor",
+  10: "caret",
+  11: "alert",
+  12: "window",
+  13: "internal frame",
+  14: "menupopup",
+  15: "menuitem",
+  16: "tooltip",
+  17: "application",
+  18: "document",
+  19: "pane",
+  20: "chart",
+  21: "dialog",
+  22: "border",
+  23: "grouping",
+  24: "separator",
+  25: "toolbar",
+  26: "statusbar",
+  27: "table",
+  28: "columnheader",
+  29: "rowheader",
+  30: "column",
+  31: "row",
+  32: "cell",
+  33: "link",
+  34: "helpballoon",
+  35: "character",
+  36: "list",
+  37: "listitem",
+  38: "outline",
+  39: "outlineitem",
+  40: "pagetab",
+  41: "propertypage",
+  42: "indicator",
+  43: "graphic",
+  44: "statictext",
+  45: "text leaf",
+  46: "pushbutton",
+  47: "checkbutton",
+  48: "radiobutton",
+  49: "combobox",
+  50: "droplist",
+  51: "progressbar",
+  52: "dial",
+  53: "hotkeyfield",
+  54: "slider",
+  55: "spinbutton",
+  56: "diagram",
+  57: "animation",
+  58: "equation",
+  59: "buttondropdown",
+  60: "buttonmenu",
+  61: "buttondropdowngrid",
+  62: "whitespace",
+  63: "pagetablist",
+  64: "clock",
+  65: "splitbutton",
+  66: "ipaddress",
+  67: "accel label",
+  68: "arrow",
+  69: "canvas",
+  70: "check menu item",
+  71: "color chooser",
+  72: "date editor",
+  73: "desktop icon",
+  74: "desktop frame",
+  75: "directory pane",
+  76: "file chooser",
+  77: "font chooser",
+  78: "chrome window",
+  79: "glass pane",
+  80: "html container",
+  81: "icon",
+  82: "label",
+  83: "layered pane",
+  84: "option pane",
+  85: "password text",
+  86: "popup menu",
+  87: "radio menu item",
+  88: "root pane",
+  89: "scroll pane",
+  90: "split pane",
+  91: "table column header",
+  92: "table row header",
+  93: "tear off menu item",
+  94: "terminal",
+  95: "text container",
+  96: "toggle button",
+  97: "tree table",
+  98: "viewport",
+  99: "header",
+  100: "footer",
+  101: "paragraph",
+  102: "ruler",
+  103: "autocomplete",
+  104: "editbar",
+  105: "entry",
+  106: "caption",
+  107: "document frame",
+  108: "heading",
+  109: "page",
+  110: "section",
+  111: "redundant object",
+  112: "form",
+  113: "ime",
+  114: "app root",
+  115: "parent menuitem",
+  116: "calendar",
+  117: "combobox list",
+  118: "combobox option",
+  119: "image map",
+  120: "option",
+  121: "listbox",
+  122: "flat equation",
+  123: "gridcell",
+  124: "embedded object",
+  125: "note",
+  126: "figure",
+  127: "check rich option",
+  128: "rich option",
+  129: "definition list",
+  130: "term",
+  131: "definition",
+  132: "key",
+  133: "switch",
+  134: "mathml math",
+  135: "mathml identifier",
+  136: "mathml number",
+  137: "mathml operator",
+  138: "mathml text",
+  139: "mathml string literal",
+  140: "mathml glyph",
+  141: "mathml row",
+  142: "mathml fraction",
+  143: "mathml sqrt",
+  144: "mathml root",
+  145: "mathml fenced",
+  146: "mathml enclosed",
+  147: "mathml style",
+  148: "mathml sub",
+  149: "mathml sup",
+  150: "mathml subsup",
+  151: "mathml under",
+  152: "mathml over",
+  153: "mathml underover",
+  154: "mathml multiscripts",
+  155: "mathml table",
+  156: "mathml labeled row",
+  157: "mathml table row",
+  158: "mathml cell",
+  159: "mathml action",
+  160: "mathml error",
+  161: "mathml stack",
+  162: "mathml long division",
+  163: "mathml stack group",
+  164: "mathml stack row",
+  165: "mathml stack carries",
+  166: "mathml stack carry",
+  167: "mathml stack line",
+  168: "details",
+  169: "summary",
+  170: "meter",
+  171: "navigation",
+  172: "complementary",
+  173: "contentinfo",
+  174: "main",
+  175: "search",
+  176: "banner",
+  177: "region",
+  178: "article",
+  179: "landmark",
+  180: "blockquote",
+  181: "mark",
+  182: "suggestion",
+  183: "comment",
+};
+
 export class NevofluxChild extends JSWindowActorChild {
   // Frame context: null = main document, string = iframe selector
   _currentFrameSelector = null;
@@ -40,6 +253,7 @@ export class NevofluxChild extends JSWindowActorChild {
   }
 
   async execute(action, params) {
+    console.log("[NevofluxChild.execute] action:", action, "params:", JSON.stringify(params));
     // Ensure params is always an object (never null/undefined)
     const safeParams = params || {};
     const handlers = {
@@ -79,6 +293,7 @@ export class NevofluxChild extends JSWindowActorChild {
       listFrames: () => this.listFrames(safeParams),
       switchFrame: () => this.switchFrame(safeParams),
       frameMain: () => this.frameMain(safeParams),
+      getMarkdown: () => this.getMarkdown(safeParams),
     };
 
     const handler = handlers[action];
@@ -110,10 +325,13 @@ export class NevofluxChild extends JSWindowActorChild {
     return el?.value || "";
   }
 
-  snapshot({ interactive = false, compact = false, depth, root }) {
+  snapshot({ interactive = true, compact = false, depth, root, useA11y = true, domFallback = true, include_hidden = false }) {
     // Ensure root has a valid default
     const rootSelector = root || "body";
     const doc = this.currentDoc;
+    const win = this.currentWin;
+
+    console.log("[NevofluxChild.snapshot] Starting snapshot, params:", { interactive, compact, depth, root, rootSelector, useA11y, domFallback, include_hidden });
 
     if (!doc) {
       return { tree: "", refs: {}, error: "No document available" };
@@ -126,58 +344,298 @@ export class NevofluxChild extends JSWindowActorChild {
 
     const refs = {};
     let refCounter = 1;
+    const seenElements = new WeakSet();
     const self = this;
 
-    const buildTree = (el, currentDepth = 0) => {
-      if (!el || el.nodeType !== 1) {
-        return "";
+    // ========== A11y Tree Traversal ==========
+    let a11yCount = 0;
+    if (useA11y && lazy.a11yService) {
+      try {
+        const docAccessible = lazy.a11yService.getAccessibleFor(doc);
+        if (docAccessible) {
+          const traverseA11y = (accessible, currentDepth = 0) => {
+            if (!accessible) return "";
+            if (depth != null && currentDepth > depth) return "";
+
+            const role = self._getA11yRole(accessible);
+            const roleName = ROLE_MAP[role] || `unknown(${role})`;
+            const name = accessible.name || "";
+            const domNode = accessible.DOMNode;
+
+            // Filter interactive elements
+            const isInteractiveRole = INTERACTIVE_ROLES.has(roleName) ||
+              roleName.includes("button") ||
+              roleName.includes("link") ||
+              roleName.includes("text") ||
+              roleName.includes("entry") ||
+              roleName.includes("checkbox") ||
+              roleName.includes("radio") ||
+              roleName.includes("combo") ||
+              roleName.includes("list") ||
+              roleName.includes("menu") ||
+              roleName.includes("tab") ||
+              roleName.includes("switch") ||
+              roleName.includes("slider");
+
+            if (interactive && !isInteractiveRole) {
+              // Still traverse children
+              let childContent = "";
+              const childCount = accessible.childCount || 0;
+              for (let i = 0; i < childCount; i++) {
+                try {
+                  const child = accessible.getChildAt(i);
+                  childContent += traverseA11y(child, currentDepth);
+                } catch (e) { /* ignore */ }
+              }
+              return childContent;
+            }
+
+            // Skip if no name and compact mode
+            if (compact && !name && !isInteractiveRole) {
+              let childContent = "";
+              const childCount = accessible.childCount || 0;
+              for (let i = 0; i < childCount; i++) {
+                try {
+                  const child = accessible.getChildAt(i);
+                  childContent += traverseA11y(child, currentDepth);
+                } catch (e) { /* ignore */ }
+              }
+              return childContent;
+            }
+
+            // Mark DOM node as seen
+            if (domNode && domNode.nodeType === 1) {
+              seenElements.add(domNode);
+            }
+
+            const refId = `e${refCounter++}`;
+            a11yCount++;
+
+            // Get bounding box
+            let rect = null;
+            try {
+              if (domNode && domNode.getBoundingClientRect) {
+                const r = domNode.getBoundingClientRect();
+                rect = {
+                  x: Math.round(r.x),
+                  y: Math.round(r.y),
+                  width: Math.round(r.width),
+                  height: Math.round(r.height),
+                };
+              }
+            } catch (e) { /* ignore */ }
+
+            // Get states
+            let states = {};
+            try {
+              const stateObj = {};
+              const state = accessible.state;
+              // Check common states (using bitmasks)
+              stateObj.disabled = !!(state & 0x80); // STATE_UNAVAILABLE
+              stateObj.focused = !!(state & 0x4);   // STATE_FOCUSED
+              stateObj.checked = !!(state & 0x10);  // STATE_CHECKED
+              stateObj.selected = !!(state & 0x2);  // STATE_SELECTED
+              stateObj.expanded = !!(state & 0x200); // STATE_EXPANDED
+              states = stateObj;
+            } catch (e) { /* ignore */ }
+
+            const selector = domNode ? self.generateSelector(domNode) : null;
+
+            // Simplified refs structure: only essential fields for agent interaction
+            refs[refId] = {
+              selector,
+              role: roleName,
+              name: (name || "").slice(0, 50),
+            };
+
+            const indent = "  ".repeat(currentDepth);
+            const nameStr = name ? ` "${name}"` : "";
+            let output = `${indent}- ${roleName}${nameStr} [ref=${refId}]\n`;
+
+            // Traverse children
+            const childCount = accessible.childCount || 0;
+            for (let i = 0; i < childCount; i++) {
+              try {
+                const child = accessible.getChildAt(i);
+                output += traverseA11y(child, currentDepth + 1);
+              } catch (e) { /* ignore */ }
+            }
+
+            return output;
+          };
+
+          // Start from document accessible or root element accessible
+          const rootAccessible = lazy.a11yService.getAccessibleFor(rootEl) || docAccessible;
+          var tree = traverseA11y(rootAccessible);
+        }
+      } catch (e) {
+        console.warn("[NevofluxChild.snapshot] A11y tree traversal failed:", e.message);
       }
+    }
 
-      if (depth !== undefined && currentDepth > depth) {
-        return "";
-      }
+    // ========== DOM Fallback Traversal ==========
+    let domCount = 0;
+    if (domFallback) {
+      // Find cursor:pointer elements not in A11y tree
+      const scanDomFallback = () => {
+        const pointerElements = [];
 
-      const role = self.inferRole(el);
-      const name = self.getAccessibleName(el);
+        // Scan for cursor:pointer elements
+        const textTags = ["span", "div", "li", "p", "label", "td", "a", "button"];
+        for (const tag of textTags) {
+          try {
+            const els = doc.querySelectorAll(tag);
+            for (const el of els) {
+              if (seenElements.has(el)) continue;
+              // Skip hidden elements unless include_hidden is true
+              if (!include_hidden && self._isHiddenElement(el, win)) continue;
 
-      // Filter: only interactive elements if interactive=true
-      if (interactive && !self.isInteractive(el)) {
-        return Array.from(el.children || [])
-          .map(c => buildTree(c, currentDepth))
-          .filter(Boolean)
-          .join("");
-      }
+              try {
+                const style = win.getComputedStyle(el);
+                const hasPointer = style.cursor === "pointer";
+                const hasOnclick = el.hasAttribute("onclick");
+                const hasRole = el.getAttribute("role");
 
-      // Filter: skip empty elements if compact=true
-      if (compact && !self.hasContent(el) && !self.isInteractive(el)) {
-        return Array.from(el.children || [])
-          .map(c => buildTree(c, currentDepth))
-          .filter(Boolean)
-          .join("");
-      }
+                if ((hasPointer || hasOnclick) && !hasRole) {
+                  const text = self.getAccessibleName(el);
+                  if (text) {
+                    pointerElements.push({ el, text, source: hasOnclick ? "dom-onclick" : "dom-pointer" });
+                  }
+                }
+              } catch (e) { /* ignore */ }
+            }
+          } catch (e) { /* ignore */ }
+        }
 
-      const refId = `e${refCounter++}`;
-      refs[refId] = {
-        role,
-        name: name || "",
-        selector: self.generateSelector(el),
-        tagName: el.tagName.toLowerCase(),
+        // Also scan for interactive elements not in A11y tree
+        const interactiveSelectors = [
+          "button", "a[href]", "input:not([type='hidden'])", "textarea", "select",
+          "[role='button']", "[role='link']", "[role='textbox']",
+          "[tabindex]:not([tabindex='-1'])",
+          "[title]"  // Elements with title attribute are often interactive
+        ];
+
+        for (const selector of interactiveSelectors) {
+          try {
+            const els = doc.querySelectorAll(selector);
+            for (const el of els) {
+              if (seenElements.has(el)) continue;
+              // Skip hidden elements unless include_hidden is true
+              if (!include_hidden && self._isHiddenElement(el, win)) continue;
+
+              const text = self.getAccessibleName(el);
+              pointerElements.push({ el, text: text || "", source: "dom-interactive" });
+            }
+          } catch (e) { /* ignore */ }
+        }
+
+        return pointerElements;
       };
 
-      const indent = "  ".repeat(currentDepth);
-      const children = Array.from(el.children || [])
-        .map(c => buildTree(c, currentDepth + 1))
-        .filter(Boolean)
-        .join("");
+      const domElements = scanDomFallback();
+      for (const { el, text, source } of domElements) {
+        seenElements.add(el);
 
-      const nameStr = name ? ` "${name}"` : "";
-      return `${indent}- ${role}${nameStr} [ref=${refId}]\n${children}`;
-    };
+        const refId = `e${refCounter++}`;
+        domCount++;
+
+        const role = self.inferRole(el);
+
+        // Simplified refs structure: only essential fields for agent interaction
+        refs[refId] = {
+          selector: self.generateSelector(el),
+          role,
+          name: (text || "").slice(0, 50),
+        };
+
+        // Append to tree output
+        if (typeof tree === "string") {
+          tree += `- ${role} "${text}" [ref=${refId}] (${source})\n`;
+        }
+      }
+    }
+
+    // ========== Legacy DOM-only fallback (if A11y failed) ==========
+    if (!tree && !useA11y) {
+      const buildTree = (el, currentDepth = 0) => {
+        if (!el || el.nodeType !== 1) return "";
+        if (depth != null && currentDepth > depth) return "";
+
+        const role = self.inferRole(el);
+        const name = self.getAccessibleName(el);
+
+        if (interactive && !self.isInteractive(el)) {
+          return Array.from(el.children || [])
+            .map(c => buildTree(c, currentDepth))
+            .filter(Boolean)
+            .join("");
+        }
+
+        if (compact && !self.hasContent(el) && !self.isInteractive(el)) {
+          return Array.from(el.children || [])
+            .map(c => buildTree(c, currentDepth))
+            .filter(Boolean)
+            .join("");
+        }
+
+        const refId = `e${refCounter++}`;
+        // Simplified refs structure: only essential fields for agent interaction
+        refs[refId] = {
+          selector: self.generateSelector(el),
+          role,
+          name: (name || "").slice(0, 50),
+        };
+
+        const indent = "  ".repeat(currentDepth);
+        const children = Array.from(el.children || [])
+          .map(c => buildTree(c, currentDepth + 1))
+          .filter(Boolean)
+          .join("");
+        const nameStr = name ? ` "${name}"` : "";
+        return `${indent}- ${role}${nameStr} [ref=${refId}]\n${children}`;
+      };
+
+      tree = buildTree(rootEl);
+    }
+
+    const totalCount = Object.keys(refs).length;
+    console.log("[NevofluxChild.snapshot] Done. a11yCount:", a11yCount, "domCount:", domCount, "total refs:", totalCount);
 
     return {
-      tree: buildTree(rootEl),
+      tree: tree || "",
       refs,
+      stats: {
+        total: totalCount,
+        fromA11y: a11yCount,
+        fromDom: domCount,
+      },
+      url: doc.location?.href || "",
+      title: doc.title || "",
     };
+  }
+
+  // Helper to get A11y role number
+  _getA11yRole(accessible) {
+    try {
+      return accessible.role;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // Helper to check if element is explicitly hidden (blacklist approach)
+  // Only filter elements that are definitively hidden, preserve uncertain cases
+  _isHiddenElement(el, win) {
+    try {
+      const style = win.getComputedStyle(el);
+      // Only filter explicitly hidden elements
+      if (style.display === "none") return true;
+      if (style.visibility === "hidden") return true;
+      // Everything else is considered visible (including opacity:0, zero-size, out of viewport)
+      return false;
+    } catch (e) {
+      return false; // On error, assume visible
+    }
   }
 
   async screenshot({ fullPage = false, type = "png", quality = 80 }) {
@@ -265,62 +723,233 @@ export class NevofluxChild extends JSWindowActorChild {
       return { success: false, error: { code: 5001, message: "No document available", recoverable: false } };
     }
 
-    const el = doc.querySelector(selector);
+    // 1. Get the element from selector
+    let el = doc.querySelector(selector);
     if (!el) {
       return { success: false, error: { code: 1001, message: "Element not found", recoverable: true, suggestion: "Use waitForSelector first" } };
     }
 
+    console.log("[NevofluxChild.click] selector:", selector);
+    console.log("[NevofluxChild.click] element:", el.tagName, el.className);
+
+    // Set up click effect detection (DOM changes + network requests)
+    let domChanged = false;
+    let networkRequestMade = false;
+    let observer = null;
+    let perfObserver = null;
+
     try {
+      // 2. Set up MutationObserver to detect DOM changes
+      observer = new win.MutationObserver((mutations) => {
+        // Filter out trivial changes (e.g., style changes from hover)
+        for (const mutation of mutations) {
+          if (mutation.type === "childList" && (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)) {
+            domChanged = true;
+            break;
+          }
+          if (mutation.type === "attributes") {
+            // Ignore style-only and class-only changes that might be hover effects
+            const attr = mutation.attributeName;
+            if (attr !== "style" && attr !== "class") {
+              domChanged = true;
+              break;
+            }
+            // For class changes, check if it's significant (not just hover state)
+            if (attr === "class") {
+              const oldVal = mutation.oldValue || "";
+              const newVal = mutation.target.className || "";
+              // Consider significant if more than just adding/removing hover/active/focus classes
+              const hoverClasses = /\b(hover|active|focus|focused|pressed)\b/gi;
+              const oldClean = oldVal.replace(hoverClasses, "").trim();
+              const newClean = newVal.replace(hoverClasses, "").trim();
+              if (oldClean !== newClean) {
+                domChanged = true;
+                break;
+              }
+            }
+          }
+        }
+      });
+
+      observer.observe(doc.body || doc.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: ["class", "style", "hidden", "disabled", "aria-hidden", "aria-expanded", "data-state"]
+      });
+
+      // 3. Set up PerformanceObserver to detect network requests
+      try {
+        perfObserver = new win.PerformanceObserver((list) => {
+          const entries = list.getEntries();
+          for (const entry of entries) {
+            if (entry.initiatorType === "fetch" || entry.initiatorType === "xmlhttprequest") {
+              networkRequestMade = true;
+              break;
+            }
+          }
+        });
+        perfObserver.observe({ entryTypes: ["resource"] });
+      } catch (e) {
+        // PerformanceObserver might not be available in all contexts
+        console.log("[NevofluxChild.click] PerformanceObserver not available:", e.message);
+      }
+
+      // 4. Ensure element is visible (scroll into view if needed)
       if (!force && !this.isVisible({ selector })) {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
         await this.sleep(300);
 
         if (!this.isVisible({ selector })) {
+          if (observer) observer.disconnect();
+          if (perfObserver) perfObserver.disconnect();
           return { success: false, error: { code: 1002, message: "Element not visible", recoverable: true, suggestion: "Use force: true to click anyway" } };
         }
       }
 
-      const rect = el.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
+      // 5. Click the element directly - background.js already handles child element finding
+      let targetEl = el;
+
+      // 4. Handle pointer-events: none - only case where we need to find alternative
+      try {
+        const style = win.getComputedStyle(targetEl);
+        if (style.pointerEvents === "none") {
+          // Try to find a clickable child that doesn't have pointer-events: none
+          const clickableChild = this._findClickableDescendant(targetEl, win);
+          if (clickableChild) {
+            console.log("[NevofluxChild.click] Bypassing pointer-events:none, using child:", clickableChild.tagName);
+            targetEl = clickableChild;
+          }
+        }
+      } catch (e) { /* ignore style access errors */ }
+
+      // 5. Calculate click coordinates using the actual target element
+      const rect = targetEl.getBoundingClientRect();
       const buttonCode = { left: 0, middle: 1, right: 2 }[button] || 0;
 
-      const eventInit = {
-        bubbles: true,
-        cancelable: true,
-        view: win,
-        clientX: x,
-        clientY: y,
-        button: buttonCode,
-      };
-
-      for (let i = 0; i < clickCount; i++) {
-        el.dispatchEvent(new MouseEvent("mouseover", eventInit));
-        await this.sleep(10);
-        el.dispatchEvent(new MouseEvent("mousedown", eventInit));
-        await this.sleep(50);
-        el.dispatchEvent(new MouseEvent("mouseup", eventInit));
-        el.dispatchEvent(new MouseEvent("click", eventInit));
-
-        if (delay > 0 && i < clickCount - 1) {
-          await this.sleep(delay);
-        }
+      // 6. Try to find an unobstructed click point (multi-point strategy)
+      let clickPoint = this._findUnobstructedPoint(targetEl, doc);
+      if (!clickPoint) {
+        // Fall back to center point if all points are obstructed
+        clickPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        console.log("[NevofluxChild.click] All points obstructed, using center");
       }
+
+      console.log("[NevofluxChild.click] Target:", targetEl.tagName, "coords:", clickPoint, "rect:", { width: rect.width, height: rect.height });
+
+      // 7. Check what element is actually at the click point
+      const elementAtPoint = doc.elementFromPoint(clickPoint.x, clickPoint.y);
+      const isTargetAtPoint = elementAtPoint === targetEl || targetEl.contains(elementAtPoint);
+      console.log("[NevofluxChild.click] elementFromPoint:", elementAtPoint?.tagName, "isTargetAtPoint:", isTargetAtPoint);
+
+      // 8. Try windowUtils for trusted mouse events (best method)
+      const domUtils = this._getWindowUtils();
+      console.log("[NevofluxChild.click] windowUtils available:", !!domUtils, "sendMouseEvent:", typeof domUtils?.sendMouseEvent);
+
+      let windowUtilsUsed = false;
+
+      if (domUtils && typeof domUtils.sendMouseEvent === "function") {
+        console.log("[NevofluxChild.click] Using windowUtils.sendMouseEvent at", clickPoint.x, clickPoint.y);
+        for (let i = 0; i < clickCount; i++) {
+          // Move mouse to element first
+          domUtils.sendMouseEvent("mousemove", clickPoint.x, clickPoint.y, buttonCode, 0, 0);
+          await this.sleep(10);
+          // Mouse down + up = click (synthesized by browser)
+          domUtils.sendMouseEvent("mousedown", clickPoint.x, clickPoint.y, buttonCode, 1, 0);
+          await this.sleep(50);
+          domUtils.sendMouseEvent("mouseup", clickPoint.x, clickPoint.y, buttonCode, 1, 0);
+
+          if (delay > 0 && i < clickCount - 1) {
+            await this.sleep(delay);
+          }
+        }
+        windowUtilsUsed = true;
+      }
+
+      // 9. Always try direct targetEl.click() as a reliable fallback
+      //    This is the most reliable method for many sites (same as F12 console)
+      console.log("[NevofluxChild.click] Executing targetEl.click()");
+      targetEl.scrollIntoView({ behavior: "instant", block: "center" });
+      await this.sleep(50);
+
+      if (typeof targetEl.click === "function") {
+        for (let i = 0; i < clickCount; i++) {
+          targetEl.click();
+          if (delay > 0 && i < clickCount - 1) {
+            await this.sleep(delay);
+          }
+        }
+        console.log("[NevofluxChild.click] targetEl.click() executed");
+      }
+
+      // 10. Dispatch synthetic events to the target element
+      await this.sleep(50);
+      this._dispatchMouseEvents(targetEl, clickPoint.x, clickPoint.y, buttonCode, win);
+
+      // 11. If original element differs from target (pointer-events:none case), also click the original
+      if (el !== targetEl) {
+        console.log("[NevofluxChild.click] Also clicking original element (pointer-events workaround)");
+        if (typeof el.click === "function") {
+          el.click();
+        }
+        const elRect = el.getBoundingClientRect();
+        const elX = elRect.left + elRect.width / 2;
+        const elY = elRect.top + elRect.height / 2;
+        this._dispatchMouseEvents(el, elX, elY, buttonCode, win);
+      }
+
+      // 12. If target wasn't at click point, also try clicking what's actually there
+      if (!isTargetAtPoint && elementAtPoint && elementAtPoint !== targetEl) {
+        console.log("[NevofluxChild.click] Clicking element at point:", elementAtPoint.tagName);
+        if (typeof elementAtPoint.click === "function") {
+          elementAtPoint.click();
+        }
+        this._dispatchMouseEvents(elementAtPoint, clickPoint.x, clickPoint.y, buttonCode, win);
+      }
+
+      // 13. Wait for effects to occur (DOM changes or network requests)
+      await this.sleep(150);
+
+      // 14. Check if element was removed from DOM (e.g., close button clicked)
+      const elementStillExists = doc.body?.contains(el) ?? false;
+      const elementRemoved = !elementStillExists;
+
     } catch (e) {
+      console.error("[NevofluxChild.click] Error:", e.message, e.stack);
+      if (observer) observer.disconnect();
+      if (perfObserver) perfObserver.disconnect();
       return { success: false, error: { code: 5001, message: e.message, recoverable: false } };
     }
 
-    return { success: true };
+    // Cleanup observers
+    if (observer) observer.disconnect();
+    if (perfObserver) perfObserver.disconnect();
+
+    // Determine success based on detected effects
+    const clickEffective = domChanged || networkRequestMade || !doc.body?.contains(el);
+    console.log("[NevofluxChild.click] Complete - domChanged:", domChanged, "networkRequest:", networkRequestMade, "elementRemoved:", !doc.body?.contains(el), "effective:", clickEffective);
+
+    return {
+      success: true,  // Click action was performed
+      effective: clickEffective,  // Whether click had detectable effect
+      domChanged,
+      networkRequestMade,
+      elementRemoved: !doc.body?.contains(el)
+    };
   }
 
   type({ selector, text }) {
+    console.log("[NevofluxChild.type] Starting type, selector:", selector, "text length:", text?.length);
     const doc = this.currentDoc;
     const win = this.currentWin;
     if (!doc || !win) {
+      console.log("[NevofluxChild.type] No doc/win available");
       return { success: false, error: { code: 5001, message: "No document/window available", recoverable: false } };
     }
 
     const el = doc.querySelector(selector);
+    console.log("[NevofluxChild.type] Element found:", !!el, "tagName:", el?.tagName);
     if (!el) {
       return { success: false, error: { code: 1001, message: "Element not found", recoverable: true } };
     }
@@ -328,11 +957,15 @@ export class NevofluxChild extends JSWindowActorChild {
     try {
       // Focus the element first
       el.focus();
+      console.log("[NevofluxChild.type] Focused element");
 
       // Try to use windowUtils for real keyboard simulation
       const domUtils = win.windowUtils;
+      console.log("[NevofluxChild.type] domUtils available:", !!domUtils, "sendKeyEvent:", typeof domUtils?.sendKeyEvent);
+
       if (domUtils && typeof domUtils.sendKeyEvent === "function") {
         // Use Firefox's privileged API for real keyboard events
+        console.log("[NevofluxChild.type] Using windowUtils.sendKeyEvent");
         for (const char of text) {
           const charCode = char.charCodeAt(0);
           // sendKeyEvent(type, keyCode, charCode, modifiers, aAdditionalFlags)
@@ -341,14 +974,18 @@ export class NevofluxChild extends JSWindowActorChild {
           domUtils.sendKeyEvent("keypress", 0, charCode, 0);
           domUtils.sendKeyEvent("keyup", 0, charCode, 0);
         }
+        console.log("[NevofluxChild.type] Finished typing via sendKeyEvent");
       } else {
         // Fallback: direct value manipulation
+        console.log("[NevofluxChild.type] Using fallback value manipulation");
         for (const char of text) {
           el.value += char;
           el.dispatchEvent(new Event("input", { bubbles: true }));
         }
+        console.log("[NevofluxChild.type] Finished typing via value manipulation");
       }
     } catch (e) {
+      console.error("[NevofluxChild.type] Error:", e.message, e.stack);
       return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
     }
 
@@ -439,45 +1076,382 @@ export class NevofluxChild extends JSWindowActorChild {
     return null;
   }
 
+  // Helper to dispatch mouse events with proper bubbling for event delegation
+  _dispatchMouseEvents(el, x, y, buttonCode, win) {
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      view: win,
+      clientX: x,
+      clientY: y,
+      button: buttonCode,
+    };
+
+    // Trigger complete mouse event sequence for event delegation support
+    el.dispatchEvent(new MouseEvent("mouseenter", { ...eventInit, bubbles: false }));
+    el.dispatchEvent(new MouseEvent("mouseover", eventInit));
+    el.dispatchEvent(new MouseEvent("mousemove", eventInit));
+    el.dispatchEvent(new MouseEvent("mousedown", eventInit));
+    el.dispatchEvent(new MouseEvent("mouseup", eventInit));
+    el.dispatchEvent(new MouseEvent("click", eventInit));
+  }
+
+  /**
+   * Check if an element is interactive - uses same logic as isInteractive for snapshot consistency
+   * @param {Element} el - The element to check
+   * @param {Window} win - The window object (unused, kept for API compatibility)
+   * @param {boolean} checkDescendants - Whether to also check if any descendant is interactive
+   */
+  _isClickable(el, win, checkDescendants = false) {
+    if (!el) return false;
+
+    // Use same logic as isInteractive() for snapshot consistency
+    const interactiveTags = ["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA"];
+    const hasClickHandler = el.onclick !== null;
+    const role = el.getAttribute("role");
+    const hasRole = ["button", "link", "textbox", "checkbox", "radio", "combobox", "menuitem", "tab"].includes(role);
+    const isTabFocusable = el.getAttribute("tabindex") !== null;
+
+    if (interactiveTags.includes(el.tagName) || hasClickHandler || hasRole || isTabFocusable) {
+      return true;
+    }
+
+    // Check if any descendant is interactive
+    if (checkDescendants) {
+      try {
+        const descendants = el.querySelectorAll("*");
+        for (const desc of descendants) {
+          if (this.isInteractive(desc)) {
+            return true;
+          }
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if element is explicitly an interactive element (not just cursor:pointer)
+   */
+  _isExplicitlyInteractive(el) {
+    if (!el) return false;
+
+    const interactiveTags = ["BUTTON", "A", "INPUT", "SELECT", "TEXTAREA"];
+    if (interactiveTags.includes(el.tagName)) return true;
+
+    const role = el.getAttribute("role");
+    if (["button", "link", "menuitem", "tab", "checkbox", "radio", "switch"].includes(role)) return true;
+
+    if (el.onclick !== null || el.hasAttribute("onclick")) return true;
+
+    // Also check for real event listeners using InspectorUtils
+    if (this._hasClickEventListener(el)) return true;
+
+    return false;
+  }
+
+  /**
+   * Get InspectorUtils - try multiple access paths
+   * InspectorUtils is a privileged Firefox API for inspecting DOM elements
+   */
+  _getInspectorUtils() {
+    // Try 1: Global InspectorUtils (available in JSWindowActorChild)
+    try {
+      if (typeof InspectorUtils !== "undefined") {
+        return InspectorUtils;
+      }
+    } catch (e) { /* ignore */ }
+
+    // Try 2: From content window's defaultView
+    try {
+      const win = this.contentWindow || this.document?.defaultView;
+      if (win?.InspectorUtils) {
+        return win.InspectorUtils;
+      }
+    } catch (e) { /* ignore */ }
+
+    // Try 3: From Cu (Components.utils)
+    try {
+      if (typeof Cu !== "undefined" && Cu.getGlobalForObject) {
+        const global = Cu.getGlobalForObject(Cu);
+        if (global?.InspectorUtils) {
+          return global.InspectorUtils;
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    return null;
+  }
+
+  /**
+   * Check if an element has click/mousedown/mouseup event listeners
+   * Uses Firefox's InspectorUtils API to detect addEventListener-added listeners
+   */
+  _hasClickEventListener(el) {
+    if (!el) return false;
+
+    try {
+      const inspectorUtils = this._getInspectorUtils();
+      if (inspectorUtils && typeof inspectorUtils.getEventListenerInfoFor === "function") {
+        // Use wrappedJSObject to get the actual content element for InspectorUtils
+        const unwrappedEl = el.wrappedJSObject || el;
+        const listeners = inspectorUtils.getEventListenerInfoFor(unwrappedEl);
+        if (listeners && listeners.length > 0) {
+          // Check for click-related events
+          const clickEvents = ["click", "mousedown", "mouseup", "pointerdown", "pointerup", "touchstart", "touchend"];
+          for (const listener of listeners) {
+            if (clickEvents.includes(listener.type)) {
+              console.log("[_hasClickEventListener] InspectorUtils found click listener:", el.tagName, el.className);
+              return true;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // InspectorUtils not available or access error
+    }
+
+    // Fallback: Check for React/Vue event handlers
+    // Need to use wrappedJSObject to access content object from privileged context
+    try {
+      // Get the unwrapped content object (crosses realm boundary)
+      const unwrapped = el.wrappedJSObject || el;
+      const keys = Object.keys(unwrapped);
+
+      for (const key of keys) {
+        // React 16+ internal properties - check for actual click handlers
+        if (key.startsWith("__reactProps$")) {
+          try {
+            const props = unwrapped[key];
+            if (props && (props.onClick || props.onMouseDown || props.onPointerDown)) {
+              console.log("[_hasClickEventListener] Found React onClick:", el.tagName, el.className);
+              return true;
+            }
+          } catch (e) { /* ignore cross-origin access errors */ }
+        }
+      }
+
+      // Vue 3.x: Check for _vei (Vue Event Invokers) - this contains actual event handlers
+      // Note: __vue__, __vueParentComponent, __vnode are just Vue internals, not event indicators
+      if (unwrapped._vei) {
+        // _vei is an object like { onClick: handler, onMousedown: handler, ... }
+        const vei = unwrapped._vei;
+        if (vei.onClick || vei.onMousedown || vei.onPointerdown ||
+          vei.onclick || vei.onmousedown || vei.onpointerdown) {
+          console.log("[_hasClickEventListener] Found Vue _vei click handler:", el.tagName, el.className);
+          return true;
+        }
+      }
+    } catch (e) {
+      // Cross-origin or other access errors
+    }
+
+    return false;
+  }
+
+  /**
+   * Find a clickable descendant within an element
+   * This handles cases where selector points to a container but the actual
+   * click listener is on a child element.
+   * Uses same interactivity logic as isInteractive() for snapshot consistency.
+   */
+  _findClickableDescendant(el, win) {
+    if (!el || !win) return null;
+
+    // PRIORITY 1: Check direct children for interactive elements (same logic as isInteractive)
+    try {
+      const directChildren = el.children;
+      console.log("[_findClickableDescendant] Checking", directChildren.length, "direct children first");
+
+      for (const child of directChildren) {
+        // Use isInteractive for snapshot consistency
+        if (this.isInteractive(child)) {
+          console.log("[_findClickableDescendant] Found interactive direct child:", child.tagName, child.className);
+          return child;
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    // PRIORITY 2: Use CSS selectors matching isInteractive criteria
+    // These selectors match the same elements isInteractive would return true for
+    const interactiveSelectors = [
+      "a",                    // interactiveTags: A
+      "button",               // interactiveTags: BUTTON
+      "input",                // interactiveTags: INPUT
+      "select",               // interactiveTags: SELECT
+      "textarea",             // interactiveTags: TEXTAREA
+      "[onclick]",            // hasClickHandler
+      "[role='button']",      // hasRole
+      "[role='link']",        // hasRole
+      "[role='textbox']",     // hasRole
+      "[role='checkbox']",    // hasRole
+      "[role='radio']",       // hasRole
+      "[role='combobox']",    // hasRole
+      "[role='menuitem']",    // hasRole
+      "[role='tab']",         // hasRole
+      "[tabindex]",           // isTabFocusable
+    ];
+
+    for (const selector of interactiveSelectors) {
+      try {
+        const child = el.querySelector(selector);
+        if (child && this.isInteractive(child)) {
+          console.log("[_findClickableDescendant] Found interactive element via selector:", selector, child.tagName, child.className);
+          return child;
+        }
+      } catch (e) { /* ignore selector errors */ }
+    }
+
+    // PRIORITY 3: Search all descendants for any interactive element
+    try {
+      const allDescendants = el.querySelectorAll("*");
+      console.log("[_findClickableDescendant] Checking", allDescendants.length, "descendants for interactivity");
+
+      for (const child of allDescendants) {
+        if (this.isInteractive(child)) {
+          console.log("[_findClickableDescendant] Found interactive descendant:", child.tagName, child.className);
+          return child;
+        }
+      }
+      console.log("[_findClickableDescendant] No interactive elements found in descendants");
+    } catch (e) { /* ignore */ }
+
+    return null;
+  }
+
+  /**
+   * Calculate multiple potential click points for an element
+   * Used when center point might be obscured
+   */
+  _getClickPoints(rect) {
+    const margin = 5; // Safety margin from edges
+    return [
+      { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },   // Center
+      { x: rect.left + margin, y: rect.top + margin },                      // Top-left
+      { x: rect.right - margin, y: rect.top + margin },                     // Top-right
+      { x: rect.left + margin, y: rect.bottom - margin },                   // Bottom-left
+      { x: rect.right - margin, y: rect.bottom - margin },                  // Bottom-right
+      { x: rect.left + rect.width / 2, y: rect.top + margin },             // Top-center
+      { x: rect.left + rect.width / 2, y: rect.bottom - margin },          // Bottom-center
+    ];
+  }
+
+  /**
+   * Find the first unobstructed point that hits the target element
+   */
+  _findUnobstructedPoint(el, doc) {
+    const rect = el.getBoundingClientRect();
+    const points = this._getClickPoints(rect);
+
+    for (const point of points) {
+      try {
+        const elementAtPoint = doc.elementFromPoint(point.x, point.y);
+        // Check if the point hits the element or one of its descendants
+        if (elementAtPoint === el || el.contains(elementAtPoint)) {
+          return point;
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    return null; // All points are obstructed
+  }
+
+  /**
+   * Find a clickable ancestor element for event delegation scenarios
+   * Checks for real event listeners using InspectorUtils
+   */
+  _findClickableAncestor(el, win, maxDepth = 15) {
+    let current = el?.parentElement;
+    let depth = 0;
+
+    while (current && current !== current.ownerDocument?.body && depth < maxDepth) {
+      // Priority 1: Check for real click event listeners (most reliable)
+      if (this._hasClickEventListener(current)) {
+        console.log("[_findClickableAncestor] Found ancestor with click listener:", current.tagName, current.className);
+        return current;
+      }
+
+      // Priority 2: Check for various click indicators (attributes/tags)
+      if (
+        current.onclick ||
+        current.hasAttribute("onclick") ||
+        current.hasAttribute("data-click") ||
+        current.hasAttribute("data-action") ||
+        current.tagName === "A" ||
+        current.tagName === "BUTTON" ||
+        current.getAttribute("role") === "button" ||
+        current.getAttribute("role") === "link" ||
+        current.getAttribute("role") === "menuitem"
+      ) {
+        return current;
+      }
+
+      // Priority 3: Check for cursor:pointer (common for event delegation)
+      try {
+        const style = win.getComputedStyle(current);
+        if (style.cursor === "pointer") {
+          return current;
+        }
+      } catch (e) { /* ignore */ }
+
+      current = current.parentElement;
+      depth++;
+    }
+
+    return null;
+  }
+
   async keyPress({ key, modifiers = [], delay = 0 }) {
+    console.log("[NevofluxChild.keyPress] key:", key, "modifiers:", modifiers);
     const win = this.document?.defaultView || this.contentWindow;
-    if (!win) {
+    const doc = this.doc;
+    if (!win || !doc) {
       return { success: false, error: { code: 5001, message: "No window available", recoverable: false } };
     }
 
     try {
-      const domUtils = this._getWindowUtils();
-      if (!domUtils) {
-        return { success: false, error: { code: 5001, message: "windowUtils not available", recoverable: false } };
-      }
-
-      // Check if sendKeyEvent is available
-      if (typeof domUtils.sendKeyEvent !== "function") {
-        // Fallback: use DOM KeyboardEvent dispatch
-        return this._keyPressFallback(key, modifiers, delay);
-      }
-
-      let modifierFlags = 0;
-      if (modifiers.includes("ctrl")) modifierFlags |= 0x02;
-      if (modifiers.includes("alt")) modifierFlags |= 0x01;
-      if (modifiers.includes("shift")) modifierFlags |= 0x04;
-      if (modifiers.includes("meta")) modifierFlags |= 0x08;
-
+      const target = doc.activeElement || doc.body;
       const keyCode = this._getKeyCode(key);
-      const charCode = key.length === 1 ? key.charCodeAt(0) : 0;
 
-      domUtils.sendKeyEvent("keydown", keyCode, charCode, modifierFlags);
-      if (delay > 0) {
-        await this.sleep(delay);
+      const eventInit = {
+        key: key,
+        code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+        keyCode: keyCode,
+        which: keyCode,
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: modifiers.includes("ctrl"),
+        altKey: modifiers.includes("alt"),
+        shiftKey: modifiers.includes("shift"),
+        metaKey: modifiers.includes("meta"),
+      };
+
+      // For special keys like Enter, use simpler event sequence to avoid crashes
+      // during form submission/navigation
+      const isSpecialKey = ["Enter", "Tab", "Escape"].includes(key);
+
+      if (isSpecialKey) {
+        // Just dispatch keydown - most handlers respond to keydown for special keys
+        console.log("[NevofluxChild.keyPress] Special key, dispatching single keydown event");
+        target.dispatchEvent(new win.KeyboardEvent("keydown", eventInit));
+        // Small delay to let event handlers run before we return
+        // Use content window's setTimeout (available in content context)
+        if (win.setTimeout) {
+          await new Promise(r => win.setTimeout(r, 10));
+        }
+      } else {
+        // Full key sequence for regular keys
+        target.dispatchEvent(new win.KeyboardEvent("keydown", eventInit));
+        if (delay > 0) await this.sleep(delay);
+        target.dispatchEvent(new win.KeyboardEvent("keypress", eventInit));
+        if (delay > 0) await this.sleep(delay);
+        target.dispatchEvent(new win.KeyboardEvent("keyup", eventInit));
       }
-      domUtils.sendKeyEvent("keypress", keyCode, charCode, modifierFlags);
-      if (delay > 0) {
-        await this.sleep(delay);
-      }
-      domUtils.sendKeyEvent("keyup", keyCode, charCode, modifierFlags);
 
       return { success: true };
     } catch (e) {
+      console.error("[NevofluxChild.keyPress] Error:", e.message);
       return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
     }
   }
@@ -883,13 +1857,60 @@ export class NevofluxChild extends JSWindowActorChild {
   }
 
   getAccessibleName(el) {
-    return (
-      el.getAttribute("aria-label") ||
-      el.getAttribute("alt") ||
-      el.getAttribute("title") ||
-      (el.tagName === "INPUT" ? el.getAttribute("placeholder") : null) ||
-      (el.textContent?.trim().slice(0, 50) || null)
-    );
+    // 1. Check explicit accessibility attributes first
+    const ariaLabel = el.getAttribute("aria-label");
+    if (ariaLabel) return ariaLabel;
+
+    // 2. Check aria-labelledby
+    const labelledBy = el.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      const labelEl = el.ownerDocument?.getElementById(labelledBy);
+      if (labelEl?.textContent?.trim()) {
+        return labelEl.textContent.trim().slice(0, 50);
+      }
+    }
+
+    // 3. Check title attribute (both getAttribute and property for Vue/React compatibility)
+    const titleAttr = el.getAttribute("title");
+    if (titleAttr) return titleAttr;
+    if (el.title) return el.title;
+
+    // 4. Check alt (for images)
+    const alt = el.getAttribute("alt");
+    if (alt) return alt;
+
+    // 5. Check placeholder for inputs/textareas
+    const tagName = el.tagName?.toUpperCase();
+    if (tagName === "INPUT" || tagName === "TEXTAREA") {
+      const placeholder = el.getAttribute("placeholder") || el.placeholder;
+      if (placeholder) return placeholder;
+    }
+
+    // 6. Check value for buttons and inputs
+    if (tagName === "INPUT") {
+      const inputType = el.type?.toLowerCase();
+      if (inputType === "submit" || inputType === "button" || inputType === "reset") {
+        const value = el.value;
+        if (value) return value;
+      }
+    }
+
+    // 7. Fallback to direct text content (excluding nested element text)
+    // This gets only immediate text children, not deeply nested text
+    let directText = "";
+    for (const node of el.childNodes) {
+      if (node.nodeType === 3) { // Text node
+        directText += node.textContent || "";
+      }
+    }
+    directText = directText.trim();
+    if (directText) return directText.slice(0, 50);
+
+    // 8. Final fallback: full text content
+    const textContent = el.textContent?.trim();
+    if (textContent) return textContent.slice(0, 50);
+
+    return null;
   }
 
   isInteractive(el) {
@@ -1118,8 +2139,8 @@ export class NevofluxChild extends JSWindowActorChild {
       const rect = iframe.getBoundingClientRect();
       const style = doc.defaultView?.getComputedStyle(iframe);
       const visible = rect.width > 0 && rect.height > 0 &&
-                      style?.visibility !== "hidden" &&
-                      style?.display !== "none";
+        style?.visibility !== "hidden" &&
+        style?.display !== "none";
 
       frames.push({
         selector: this.generateSelector(iframe),
@@ -1283,5 +2304,504 @@ export class NevofluxChild extends JSWindowActorChild {
     } catch (e) {
       return { success: false, error: { code: 9001, message: String(e), recoverable: false } };
     }
+  }
+
+  // ========== Markdown Extraction ==========
+
+  getMarkdown({
+    selector = null,
+    includeImages = true,
+    includeLinks = true,
+    includeTables = true,
+    filterNonContent = true,
+  }) {
+    const doc = this.currentDoc;
+    if (!doc) {
+      return { success: false, error: { code: 5001, message: "No document available", recoverable: false } };
+    }
+
+    try {
+      const rootEl = selector ? doc.querySelector(selector) : this._findMainContent(doc);
+      if (!rootEl) {
+        return { success: false, error: { code: 1001, message: "Content not found", recoverable: true } };
+      }
+
+      const markdown = this._convertToMarkdown(rootEl, {
+        includeImages,
+        includeLinks,
+        includeTables,
+        filterNonContent,
+      });
+
+      return {
+        success: true,
+        markdown,
+        title: doc.title || "",
+        url: doc.location?.href || "",
+      };
+    } catch (e) {
+      return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
+    }
+  }
+
+  /**
+   * Find the main content area of the document
+   */
+  _findMainContent(doc) {
+    // Priority order for main content detection
+    const selectors = [
+      "article",
+      "main",
+      "[role='main']",
+      "#content",
+      ".content",
+      "#main",
+      ".main",
+      "#article",
+      ".article",
+      ".post",
+      ".entry-content",
+      ".post-content",
+      ".article-content",
+    ];
+
+    for (const selector of selectors) {
+      const el = doc.querySelector(selector);
+      if (el && el.textContent?.trim().length > 100) {
+        return el;
+      }
+    }
+
+    // Fallback to body
+    return doc.body;
+  }
+
+  /**
+   * Check if an element should be skipped during conversion
+   */
+  _shouldSkipElement(el, filterNonContent) {
+    if (!el || el.nodeType !== 1) return true;
+
+    const tagName = el.tagName.toUpperCase();
+
+    // Always skip these elements
+    const skipTags = ["SCRIPT", "STYLE", "NOSCRIPT", "SVG", "IFRAME", "TEMPLATE"];
+    if (skipTags.includes(tagName)) return true;
+
+    if (!filterNonContent) return false;
+
+    // Skip navigation and structural elements
+    const skipStructural = ["NAV", "HEADER", "FOOTER", "ASIDE"];
+    if (skipStructural.includes(tagName)) return true;
+
+    // Skip by role
+    const role = el.getAttribute("role");
+    const skipRoles = ["navigation", "banner", "contentinfo", "complementary", "search"];
+    if (role && skipRoles.includes(role)) return true;
+
+    // Skip by common ad/non-content class names
+    const className = el.className?.toString().toLowerCase() || "";
+    const id = el.id?.toLowerCase() || "";
+    const skipPatterns = [
+      "nav", "menu", "sidebar", "widget", "ad", "ads", "advertisement",
+      "banner", "promo", "social", "share", "comment", "related",
+      "footer", "header", "breadcrumb", "pagination", "toc",
+    ];
+
+    for (const pattern of skipPatterns) {
+      if (className.includes(pattern) || id.includes(pattern)) {
+        // Don't skip if it's a main content area that happens to have a matching class
+        if (el.textContent?.trim().length > 500) {
+          continue;
+        }
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Convert an element tree to Markdown
+   */
+  _convertToMarkdown(rootEl, options) {
+    const lines = [];
+    this._processElement(rootEl, options, lines, 0);
+    return this._cleanMarkdown(lines.join("\n"));
+  }
+
+  /**
+   * Process a single element and its children
+   */
+  _processElement(el, options, lines, depth) {
+    if (!el) return;
+
+    // Handle text nodes
+    if (el.nodeType === 3) {
+      const text = el.textContent?.trim();
+      if (text) {
+        lines.push(text);
+      }
+      return;
+    }
+
+    // Skip non-element nodes and filtered elements
+    if (el.nodeType !== 1) return;
+    if (this._shouldSkipElement(el, options.filterNonContent)) return;
+
+    const tagName = el.tagName.toUpperCase();
+
+    // Handle specific elements
+    switch (tagName) {
+      case "H1":
+      case "H2":
+      case "H3":
+      case "H4":
+      case "H5":
+      case "H6": {
+        const level = parseInt(tagName.charAt(1), 10);
+        const text = el.textContent?.trim();
+        if (text) {
+          lines.push("");
+          lines.push("#".repeat(level) + " " + text);
+          lines.push("");
+        }
+        return;
+      }
+
+      case "P": {
+        const content = this._getInlineContent(el, options);
+        if (content.trim()) {
+          lines.push("");
+          lines.push(content);
+          lines.push("");
+        }
+        return;
+      }
+
+      case "A": {
+        if (options.includeLinks) {
+          const text = el.textContent?.trim();
+          const href = el.href; // DOM automatically provides absolute URL
+          if (text && href) {
+            lines.push(`[${text}](${href})`);
+          } else if (text) {
+            lines.push(text);
+          }
+        } else {
+          lines.push(el.textContent?.trim() || "");
+        }
+        return;
+      }
+
+      case "IMG": {
+        if (options.includeImages) {
+          const alt = el.alt || el.title || "image";
+          const src = el.src; // DOM automatically provides absolute URL
+          if (src) {
+            lines.push(`![${alt}](${src})`);
+          }
+        }
+        return;
+      }
+
+      case "UL":
+      case "OL": {
+        lines.push("");
+        this._processList(el, options, lines, tagName === "OL", depth);
+        lines.push("");
+        return;
+      }
+
+      case "LI": {
+        const content = this._getInlineContent(el, options);
+        if (content.trim()) {
+          lines.push(content);
+        }
+        // Process nested lists
+        for (const child of el.children) {
+          if (child.tagName === "UL" || child.tagName === "OL") {
+            this._processList(child, options, lines, child.tagName === "OL", depth + 1);
+          }
+        }
+        return;
+      }
+
+      case "BLOCKQUOTE": {
+        lines.push("");
+        const quoteLines = [];
+        for (const child of el.childNodes) {
+          this._processElement(child, options, quoteLines, depth);
+        }
+        for (const line of quoteLines) {
+          if (line.trim()) {
+            lines.push("> " + line);
+          }
+        }
+        lines.push("");
+        return;
+      }
+
+      case "PRE": {
+        const codeEl = el.querySelector("code");
+        const code = codeEl ? codeEl.textContent : el.textContent;
+        const lang = codeEl?.className.match(/language-(\w+)/)?.[1] || "";
+        lines.push("");
+        lines.push("```" + lang);
+        lines.push(code?.trim() || "");
+        lines.push("```");
+        lines.push("");
+        return;
+      }
+
+      case "CODE": {
+        // Inline code (not inside PRE)
+        if (el.parentElement?.tagName !== "PRE") {
+          const text = el.textContent?.trim();
+          if (text) {
+            lines.push("`" + text + "`");
+          }
+        }
+        return;
+      }
+
+      case "TABLE": {
+        if (options.includeTables) {
+          const tableMarkdown = this._convertTable(el);
+          if (tableMarkdown) {
+            lines.push("");
+            lines.push(tableMarkdown);
+            lines.push("");
+          }
+        }
+        return;
+      }
+
+      case "HR": {
+        lines.push("");
+        lines.push("---");
+        lines.push("");
+        return;
+      }
+
+      case "BR": {
+        lines.push("  "); // Two spaces for line break
+        return;
+      }
+
+      case "STRONG":
+      case "B": {
+        const text = el.textContent?.trim();
+        if (text) {
+          lines.push("**" + text + "**");
+        }
+        return;
+      }
+
+      case "EM":
+      case "I": {
+        const text = el.textContent?.trim();
+        if (text) {
+          lines.push("*" + text + "*");
+        }
+        return;
+      }
+
+      case "DIV":
+      case "SECTION":
+      case "ARTICLE":
+      case "MAIN":
+      case "SPAN": {
+        // Container elements - process children
+        for (const child of el.childNodes) {
+          this._processElement(child, options, lines, depth);
+        }
+        return;
+      }
+
+      default: {
+        // For other elements, process children
+        for (const child of el.childNodes) {
+          this._processElement(child, options, lines, depth);
+        }
+      }
+    }
+  }
+
+  /**
+   * Process list elements
+   */
+  _processList(listEl, options, lines, isOrdered, depth) {
+    const indent = "  ".repeat(depth);
+    let counter = 1;
+
+    for (const li of listEl.children) {
+      if (li.tagName !== "LI") continue;
+
+      const prefix = isOrdered ? `${counter}. ` : "- ";
+      const content = this._getInlineContent(li, options);
+
+      if (content.trim()) {
+        lines.push(indent + prefix + content);
+      }
+
+      // Handle nested lists
+      for (const child of li.children) {
+        if (child.tagName === "UL" || child.tagName === "OL") {
+          this._processList(child, options, lines, child.tagName === "OL", depth + 1);
+        }
+      }
+
+      counter++;
+    }
+  }
+
+  /**
+   * Get inline content from an element (text with inline formatting)
+   */
+  _getInlineContent(el, options) {
+    const parts = [];
+
+    for (const node of el.childNodes) {
+      if (node.nodeType === 3) {
+        // Text node
+        const text = node.textContent;
+        if (text) parts.push(text);
+      } else if (node.nodeType === 1) {
+        // Element node
+        const tag = node.tagName.toUpperCase();
+
+        // Skip nested block elements
+        if (["UL", "OL", "DIV", "P", "TABLE", "BLOCKQUOTE", "PRE"].includes(tag)) {
+          continue;
+        }
+
+        switch (tag) {
+          case "A":
+            if (options.includeLinks && node.href) {
+              const text = node.textContent?.trim();
+              if (text) {
+                parts.push(`[${text}](${node.href})`);
+              }
+            } else {
+              parts.push(node.textContent || "");
+            }
+            break;
+
+          case "STRONG":
+          case "B":
+            parts.push("**" + (node.textContent || "") + "**");
+            break;
+
+          case "EM":
+          case "I":
+            parts.push("*" + (node.textContent || "") + "*");
+            break;
+
+          case "CODE":
+            parts.push("`" + (node.textContent || "") + "`");
+            break;
+
+          case "IMG":
+            if (options.includeImages && node.src) {
+              const alt = node.alt || node.title || "image";
+              parts.push(`![${alt}](${node.src})`);
+            }
+            break;
+
+          case "BR":
+            parts.push("  \n");
+            break;
+
+          default:
+            parts.push(node.textContent || "");
+        }
+      }
+    }
+
+    return parts.join("").replace(/\s+/g, " ").trim();
+  }
+
+  /**
+   * Convert a table element to Markdown
+   */
+  _convertTable(tableEl) {
+    const rows = [];
+    const headerRow = [];
+    let hasHeader = false;
+
+    // Process thead
+    const thead = tableEl.querySelector("thead");
+    if (thead) {
+      const headerCells = thead.querySelectorAll("th, td");
+      for (const cell of headerCells) {
+        headerRow.push(cell.textContent?.trim() || "");
+      }
+      hasHeader = true;
+    }
+
+    // Process tbody
+    const tbody = tableEl.querySelector("tbody") || tableEl;
+    const dataRows = tbody.querySelectorAll("tr");
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const tr = dataRows[i];
+      const cells = tr.querySelectorAll("th, td");
+      const rowData = [];
+
+      for (const cell of cells) {
+        rowData.push(cell.textContent?.trim() || "");
+      }
+
+      // If first row is all TH and we don't have header yet
+      if (i === 0 && !hasHeader && tr.querySelector("th")) {
+        headerRow.push(...rowData);
+        hasHeader = true;
+        continue;
+      }
+
+      rows.push(rowData);
+    }
+
+    // Generate markdown
+    if (headerRow.length === 0 && rows.length > 0) {
+      // Use first row as header if no header found
+      headerRow.push(...rows.shift());
+    }
+
+    if (headerRow.length === 0) {
+      return "";
+    }
+
+    const colCount = headerRow.length;
+    const lines = [];
+
+    // Header row
+    lines.push("| " + headerRow.join(" | ") + " |");
+
+    // Separator
+    lines.push("| " + headerRow.map(() => "---").join(" | ") + " |");
+
+    // Data rows
+    for (const row of rows) {
+      // Pad row if needed
+      while (row.length < colCount) row.push("");
+      lines.push("| " + row.slice(0, colCount).join(" | ") + " |");
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Clean up the generated Markdown
+   */
+  _cleanMarkdown(markdown) {
+    return markdown
+      // Remove excessive blank lines (more than 2)
+      .replace(/\n{3,}/g, "\n\n")
+      // Clean up whitespace
+      .replace(/[ \t]+$/gm, "")
+      // Trim
+      .trim();
   }
 }

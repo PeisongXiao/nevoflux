@@ -91,6 +91,11 @@ this.nevoflux = class extends ExtensionAPI {
           return self.executeInTab(resolvedTabId, extension, "screenshot", options);
         },
 
+        async getMarkdown(tabId, options = {}) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTab(resolvedTabId, extension, "getMarkdown", options);
+        },
+
         // ========== State Checking (chat mode) ==========
 
         async isVisible(tabId, selector) {
@@ -425,6 +430,7 @@ this.nevoflux = class extends ExtensionAPI {
           const browser = tab.browser;
           return {
             id: tabId,
+            zenSyncId: nativeTab.id || null,  // Zen Browser's persistent tab ID for session association
             url: browser?.currentURI?.spec || "",
             title: browser?.contentTitle || "",
             active: nativeTab === nativeTab.ownerGlobal.gBrowser.selectedTab,
@@ -1142,15 +1148,28 @@ this.nevoflux = class extends ExtensionAPI {
   }
 
   async executeInTab(tabId, extension, action, params) {
+    console.log(`[ext-nevoflux] executeInTab: action=${action}, tabId=${tabId}, params=`, JSON.stringify(params));
     const tab = extension.tabManager.get(tabId);
     if (!tab?.browser) {
+      console.log("[ext-nevoflux] executeInTab: Tab not found");
       return { success: false, error: { code: 3001, message: "Tab not found", recoverable: false } };
     }
 
     try {
-      const actor = tab.browser.browsingContext.currentWindowGlobal.getActor("Nevoflux");
-      return actor.sendQuery("execute", { action, params });
+      const bc = tab.browser.browsingContext;
+      const cwg = bc?.currentWindowGlobal;
+      console.log(`[ext-nevoflux] executeInTab: bc=${!!bc}, cwg=${!!cwg}`);
+      if (!cwg) {
+        console.log("[ext-nevoflux] executeInTab: No currentWindowGlobal");
+        return { success: false, error: { code: 5002, message: "No currentWindowGlobal available", recoverable: true } };
+      }
+      const actor = cwg.getActor("Nevoflux");
+      console.log(`[ext-nevoflux] executeInTab: actor=${!!actor}, sending query...`);
+      const result = await actor.sendQuery("execute", { action, params });
+      console.log(`[ext-nevoflux] executeInTab: result=`, result);
+      return result;
     } catch (e) {
+      console.error(`[ext-nevoflux] executeInTab: Error - ${e.message}`, e.stack);
       return { success: false, error: { code: 5001, message: e.message, recoverable: false } };
     }
   }

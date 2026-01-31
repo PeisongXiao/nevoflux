@@ -5,11 +5,19 @@
 //! Text input and send button components
 
 use dioxus::prelude::*;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 use crate::context::use_app_context;
 use crate::state::{Message, ImageAttachment};
-use web_sys::HtmlInputElement;
-use shared_protocol::{Attachment, BrowserToolAction, BrowserToolRequestPayload};
+use shared_protocol::{Attachment, BrowserToolAction, BrowserToolRequestPayload, ChatMode};
+
+#[wasm_bindgen]
+extern "C" {
+    /// Query tabs from browser.tabs API
+    #[wasm_bindgen(js_namespace = ["browser", "tabs"], js_name = query, catch)]
+    fn browser_tabs_query(query_info: &JsValue) -> Result<js_sys::Promise, JsValue>;
+}
 
 /// Attached file metadata and content
 #[derive(Debug, Clone, PartialEq)]
@@ -20,10 +28,25 @@ struct AttachedFile {
     file_type: String,
     /// Base64 encoded data (for screenshots or small files)
     data: Option<String>,
+    /// Absolute file path (for files from native picker)
+    file_path: Option<String>,
+    /// Whether this is a directory (from native picker)
+    is_directory: bool,
+    /// Last modified timestamp (from native picker)
+    modified: Option<u64>,
+    // Fields for Tab Context
+    is_tab: bool,
+    tab_id: Option<i64>,
+    fav_icon_url: Option<String>,
+    /// Space/workspace the tab belongs to (for tabs only)
+    tab_space: Option<String>,
 }
 
 impl AttachedFile {
     fn formatted_size(&self) -> String {
+        if self.is_tab {
+            return "Tab".to_string();
+        }
         let size = self.size as f64;
         if size < 1024.0 {
             format!("{} B", size)
@@ -34,8 +57,34 @@ impl AttachedFile {
         }
     }
 
-    /// Returns the icon element - thumbnail for screenshots, SVG for files
+    /// Returns the icon element - thumbnail for screenshots, SVG for files/tabs
     fn icon(&self) -> Element {
+        // Tab icon
+        if self.is_tab {
+            if let Some(ref icon_url) = self.fav_icon_url {
+                return rsx! {
+                    img {
+                        class: "file-chip-thumbnail",
+                        src: "{icon_url}",
+                        alt: "{self.name}",
+                    }
+                };
+            }
+             return rsx! {
+                svg {
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    rect { x: "3", y: "3", width: "18", height: "18", rx: "2", ry: "2" }
+                    line { x1: "3", y1: "9", x2: "21", y2: "9" }
+                    line { x1: "9", y1: "21", x2: "9", y2: "9" }
+                }
+            };
+        }
+
         // For screenshots with base64 data, show actual thumbnail
         if let Some(ref base64_data) = self.data {
             if self.file_type.starts_with("image/") {
@@ -69,10 +118,107 @@ impl AttachedFile {
     }
 }
 
+/// Tab information for the selector
+#[derive(Debug, Clone, PartialEq)]
+struct TabItem {
+    id: i64,
+    title: String,
+    url: String,
+    fav_icon_url: Option<String>,
+    /// The space/workspace this tab belongs to
+    space: String,
+}
+
+/// Fetch open tabs using browser extension API
+async fn fetch_open_tabs() -> Vec<TabItem> {
+    tracing::info!("fetch_open_tabs: starting");
+
+    // Build query object: {currentWindow: true}
+    let query_obj = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &query_obj,
+        &JsValue::from_str("currentWindow"),
+        &JsValue::from_bool(true),
+    );
+
+    // Call browser.tabs.query via wasm_bindgen binding
+    let promise = match browser_tabs_query(&query_obj.into()) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("fetch_open_tabs: browser.tabs.query failed: {:?}", e);
+            return Vec::new();
+        }
+    };
+
+    // Await the promise
+    let result = match JsFuture::from(promise).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("fetch_open_tabs: promise rejected: {:?}", e);
+            return Vec::new();
+        }
+    };
+
+    // Parse the array of tabs
+    let array = match result.dyn_into::<js_sys::Array>() {
+        Ok(a) => a,
+        Err(_) => {
+            tracing::warn!("fetch_open_tabs: result is not an array");
+            return Vec::new();
+        }
+    };
+
+    let mut items = Vec::new();
+    for i in 0..array.length().min(10) {
+        // Limit to 10 tabs
+        let tab = array.get(i);
+        if tab.is_undefined() || tab.is_null() {
+            continue;
+        }
+
+        let id = js_sys::Reflect::get(&tab, &JsValue::from_str("id"))
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0) as i64;
+
+        let title = js_sys::Reflect::get(&tab, &JsValue::from_str("title"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+
+        let url = js_sys::Reflect::get(&tab, &JsValue::from_str("url"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+
+        let fav_icon_url = js_sys::Reflect::get(&tab, &JsValue::from_str("favIconUrl"))
+            .ok()
+            .and_then(|v| v.as_string());
+
+        // Get cookieStoreId as space identifier (Zen Browser uses this for workspaces)
+        let space = js_sys::Reflect::get(&tab, &JsValue::from_str("cookieStoreId"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_else(|| "default".to_string());
+
+        items.push(TabItem {
+            id,
+            title,
+            url,
+            fav_icon_url,
+            space,
+        });
+    }
+
+    tracing::info!("fetch_open_tabs: returning {} tabs", items.len());
+    items
+}
+
+
 /// Text input component with auto-expand
 #[component]
 pub fn TextInput(disabled: bool) -> Element {
-    tracing::info!("TextInput component rendered (v4 - Screenshot)");
+    tracing::info!("TextInput component rendered (v5 - Tab Selection)");
     let mut ctx = use_app_context();
     let mut input_text = use_signal(String::new);
     let mut rows = use_signal(|| 1usize);
@@ -81,58 +227,96 @@ pub fn TextInput(disabled: bool) -> Element {
     // File attachment state
     let mut attached_files = use_signal(|| Vec::<AttachedFile>::new());
     
+    // Tab selection state
+    let mut show_tab_selector = use_signal(|| false);
+    let mut available_tabs = use_signal(|| Vec::<TabItem>::new());
+    
     let has_text = !input_text.read().trim().is_empty();
     let has_files = !attached_files.read().is_empty();
     let can_send = !disabled && (has_text || has_files);
 
-    // Handle file selection - just store file metadata (no content reading)
-    let handle_file_change = move |evt: Event<FormData>| {
-        let files = evt.files();
-        if files.is_empty() {
+    // Watch for files picked via native file dialog
+    use_effect(move || {
+        let picked = ctx.picked_files.read().clone();
+        if !picked.is_empty() {
+            tracing::info!("Processing {} picked files from native dialog", picked.len());
+            for file in picked {
+                let mime_type = file.mime_type.clone().unwrap_or_else(|| get_mime_type(&file.path));
+                attached_files.write().push(AttachedFile {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: file.name().to_string(),
+                    size: file.size.unwrap_or(0),
+                    file_type: mime_type,
+                    data: None, // Native files don't need inline data
+                    file_path: Some(file.path.clone()),
+                    is_directory: file.is_directory,
+                    modified: file.modified,
+                    is_tab: false,
+                    tab_id: None,
+                    fav_icon_url: None,
+                    tab_space: None,
+                });
+            }
+            // Clear picked files after processing
+            ctx.picked_files.write().clear();
+        }
+    });
+
+    // Fetch tabs logic
+    let refresh_tabs = move || {
+        tracing::info!("refresh_tabs: triggered");
+        spawn(async move {
+            let tabs = fetch_open_tabs().await;
+            tracing::info!("refresh_tabs: got {} tabs", tabs.len());
+            available_tabs.set(tabs);
+        });
+    };
+
+    // Handle file attachment via native file picker
+    let handle_attach_click = move |_| {
+        // Check if already waiting for file picker
+        if ctx.pending_file_pick.read().is_some() {
+            tracing::warn!("File picker already pending");
             return;
         }
 
-        let mut new_files = attached_files.read().clone();
-        for file_data in files.iter() {
-            let file_name = file_data.name();
-            let mime_type = get_mime_type(&file_name);
-
-            new_files.push(AttachedFile {
-                id: uuid::Uuid::new_v4().to_string(),
-                name: file_name,
-                size: file_data.size() as u64,
-                file_type: mime_type,
-                data: None, // Files don't need base64 data, just metadata
-            });
-        }
-        attached_files.set(new_files);
-    };
-
-    // Helper to trigger file input click
-    let handle_attach_click = move |_| {
-        if let Some(window) = web_sys::window() {
-            if let Some(document) = window.document() {
-                if let Some(element) = document.get_element_by_id("hidden-file-input") {
-                    if let Some(input) = element.dyn_ref::<HtmlInputElement>() {
-                        input.click();
-                    }
+        spawn(async move {
+            match crate::messaging::send_pick_files_request(
+                "both", // mode: files, directories, or both
+                true,   // multiple
+                Some("Select files".to_string()),
+            ).await {
+                Ok(request_id) => {
+                    tracing::info!("File picker request sent: {}", request_id);
+                    ctx.pending_file_pick.write().replace(crate::state::PendingFilePick { request_id });
+                }
+                Err(e) => {
+                    tracing::error!("Failed to send pick files request: {}", e);
                 }
             }
-        }
+        });
     };
 
-    // Handle screenshot click
     let handle_screenshot_click = move |_| {
-        let session_id = ctx.session.read().id.clone();
-        let tab_id = ctx.tab_context.read().tab_id;
+        web_sys::console::log_1(&"[NevoFlux] Screenshot button clicked".into());
 
-        // Check if tab exists (tab_id should be > 0 for valid tabs)
+        let tab_context = ctx.tab_context.read();
+        let session_id = tab_context.zen_sync_id.clone()
+            .unwrap_or_else(|| ctx.session.read().id.clone());
+        let tab_id = tab_context.tab_id;
+        drop(tab_context);
+
+        web_sys::console::log_1(&format!("[NevoFlux] Screenshot: tab_id={}, session_id={}", tab_id, session_id).into());
+
         if tab_id == 0 {
+            web_sys::console::warn_1(&"[NevoFlux] Cannot take screenshot: no active tab (tab_id=0)".into());
             tracing::warn!("Cannot take screenshot: no active tab");
             return;
         }
 
         spawn(async move {
+            web_sys::console::log_1(&"[NevoFlux] Sending screenshot request...".into());
+
             let request = BrowserToolRequestPayload {
                 request_id: uuid::Uuid::new_v4().to_string(),
                 session_id,
@@ -142,22 +326,21 @@ pub fn TextInput(disabled: bool) -> Element {
                 timeout_ms: 10000,
             };
 
-            tracing::info!("Requesting screenshot for tab {}...", tab_id);
             match crate::messaging::exec_browser_tool(request).await {
                 Ok(response) => {
+                    web_sys::console::log_1(&format!("[NevoFlux] Screenshot response: success={}", response.success).into());
+
                     if response.success {
                         if let Some(result) = response.result {
-                            // Extract base64 data from various formats
+                            web_sys::console::log_1(&format!("[NevoFlux] Screenshot result type: {:?}", result).into());
+
                             let base64_data = if let Some(s) = result.as_str() {
-                                // Direct string (either base64 or data URL)
                                 if s.starts_with("data:image/") {
-                                    // data URL format: data:image/png;base64,<data>
                                     s.split(',').nth(1).map(|d| d.to_string())
                                 } else {
                                     Some(s.to_string())
                                 }
                             } else if let Some(obj) = result.as_object() {
-                                // Object format: try "data_url", "data", or "dataUrl"
                                 obj.get("data_url")
                                     .or_else(|| obj.get("dataUrl"))
                                     .or_else(|| obj.get("data"))
@@ -170,33 +353,45 @@ pub fn TextInput(disabled: bool) -> Element {
                                         }
                                     })
                             } else {
+                                web_sys::console::warn_1(&"[NevoFlux] Screenshot result is neither string nor object".into());
                                 None
                             };
 
                             if let Some(data) = base64_data {
                                 let timestamp = js_sys::Date::now() as u64;
-                                // Estimate size from base64 (base64 is ~4/3 of original)
                                 let size = (data.len() * 3 / 4) as u64;
 
-                                let file = AttachedFile {
+                                web_sys::console::log_1(&format!("[NevoFlux] Screenshot captured: {} bytes", size).into());
+
+                                attached_files.write().push(AttachedFile {
                                     id: uuid::Uuid::new_v4().to_string(),
                                     name: format!("Screenshot_{}.png", timestamp),
                                     size,
                                     file_type: "image/png".to_string(),
                                     data: Some(data),
-                                };
-
-                                attached_files.write().push(file);
-                                tracing::info!("Screenshot added to list, size: {} bytes", size);
+                                    file_path: None,
+                                    is_directory: false,
+                                    modified: None,
+                                    is_tab: false,
+                                    tab_id: None,
+                                    fav_icon_url: None,
+                                    tab_space: None,
+                                });
                             } else {
-                                tracing::warn!("Screenshot result format unknown: {:?}", result);
+                                web_sys::console::warn_1(&"[NevoFlux] Could not extract base64 data from screenshot result".into());
                             }
+                        } else {
+                            web_sys::console::warn_1(&"[NevoFlux] Screenshot response has no result".into());
                         }
                     } else {
-                        tracing::error!("Screenshot failed: {:?}", response.error);
+                        let error_msg = response.error.map(|e| e.message).unwrap_or_else(|| "Unknown error".to_string());
+                        web_sys::console::error_1(&format!("[NevoFlux] Screenshot failed: {}", error_msg).into());
                     }
                 },
-                Err(e) => tracing::error!("Failed to execute screenshot tool: {}", e),
+                Err(e) => {
+                    web_sys::console::error_1(&format!("[NevoFlux] exec_browser_tool failed: {}", e).into());
+                    tracing::error!("Failed to execute screenshot tool: {}", e);
+                }
             }
         });
     };
@@ -207,53 +402,99 @@ pub fn TextInput(disabled: bool) -> Element {
         attached_files.set(files);
     };
 
+    let mut handle_select_tab = move |tab: TabItem| {
+        // Remove trailing @ from input
+        let current_text = input_text.read().clone();
+        if current_text.ends_with('@') {
+            input_text.set(current_text[..current_text.len() - 1].to_string());
+        }
+
+        // Add tab as attachment (no caching, just store tab info)
+        attached_files.write().push(AttachedFile {
+             id: uuid::Uuid::new_v4().to_string(),
+             name: tab.title.clone(),
+             size: 0,
+             file_type: "tab/reference".to_string(),
+             data: None,
+             file_path: None,
+             is_directory: false,
+             modified: None,
+             is_tab: true,
+             tab_id: Some(tab.id),
+             fav_icon_url: tab.fav_icon_url.clone(),
+             tab_space: Some(tab.space.clone()),
+        });
+
+        show_tab_selector.set(false);
+    };
+
     let mut handle_send = move |_: ()| {
         let text = input_text.read().trim().to_string();
         if text.is_empty() && attached_files.read().is_empty() {
             return;
         }
 
-        // Clear input and reset rows
         input_text.set(String::new());
         rows.set(1);
+        show_tab_selector.set(false);
 
-        // Prepare attachment info for display and sending
         let files = attached_files.read().clone();
-        attached_files.set(Vec::new()); // Clear attachments
+        attached_files.set(Vec::new());
 
-        let mut protocol_attachments = Vec::new();
-        let mut message_attachments = Vec::new();
+        // Separate images (attachments), local files, and tab references
+        let mut protocol_attachments = Vec::new(); // For images (base64)
+        let mut local_files = Vec::new(); // For files from native picker
+        let mut tab_ids = Vec::new(); // For tab references
+        let mut message_attachments = Vec::new(); // For UI display
 
         for file in files {
-            // For display in message bubble (all files, with or without data)
+            // Add to UI display list
             message_attachments.push(ImageAttachment {
                 id: file.id.clone(),
                 name: file.name.clone(),
                 mime_type: file.file_type.clone(),
-                data: file.data.clone().unwrap_or_default(), // Empty string for files without data
+                data: file.data.clone().unwrap_or_default(),
             });
 
-            // For sending to agent (only files with actual data)
-            if let Some(ref data) = file.data {
-                protocol_attachments.push(Attachment {
-                    name: file.name,
-                    mime_type: file.file_type,
-                    data: data.clone(),
-                });
+            if file.is_tab {
+                // Tab reference: add to tab_ids
+                if let Some(tab_id) = file.tab_id {
+                    tab_ids.push(shared_protocol::chat::TabReference {
+                        space: file.tab_space.clone().unwrap_or_else(|| "default".to_string()),
+                        tab_id,
+                        tab_title: file.name.clone(),
+                    });
+                }
+            } else if file.file_type.starts_with("image/") {
+                // Image: send as base64 attachment
+                if let Some(ref data) = file.data {
+                    protocol_attachments.push(Attachment {
+                        name: file.name,
+                        mime_type: file.file_type,
+                        data: Some(data.clone()),
+                        file_path: None,
+                    });
+                }
+            } else {
+                // Local file from native picker: send as local_files entry
+                if let Some(ref path) = file.file_path {
+                    local_files.push(shared_protocol::FileInfo {
+                        path: path.clone(),
+                        is_directory: file.is_directory,
+                        size: Some(file.size),
+                        modified: file.modified,
+                        mime_type: Some(file.file_type.clone()),
+                    });
+                }
             }
         }
 
-        // Display text
         let display_text = if text.is_empty() && !message_attachments.is_empty() {
-            String::from("") // Empty text, just attachments
+            String::from("") 
         } else {
             text.clone()
         };
 
-        // Debug: log attachment info
-        tracing::info!("handle_send: message_attachments count = {}", message_attachments.len());
-
-        // Add user message with attachments
         let message = if message_attachments.is_empty() {
             Message::user(&display_text)
         } else {
@@ -261,23 +502,24 @@ pub fn TextInput(disabled: bool) -> Element {
         };
         ctx.messages.write().push(message);
 
-        // Send message (let mock_send_message handle status)
-        let session_id = ctx.session.read().id.clone();
-        let tab_id = ctx.tab_context.read().tab_id;
+        let tab_context = ctx.tab_context.read();
+        let session_id = tab_context.zen_sync_id.clone()
+            .unwrap_or_else(|| ctx.session.read().id.clone());
+        let tab_id = tab_context.tab_id;
+        drop(tab_context);
         let mock_enabled = ctx.mock_enabled;
+        let mode = ctx.chat_mode.read().clone();
 
         wasm_bindgen_futures::spawn_local(async move {
             if mock_enabled {
                 crate::mock::mock_send_message(ctx, display_text).await;
             } else {
-                // For real mode, set thinking before sending
                 ctx.agent_status.write().set_thinking();
-                let _ = crate::messaging::send_chat_message(&session_id, text, protocol_attachments, Some(tab_id)).await;
+                let _ = crate::messaging::send_chat_message(&session_id, text, mode, protocol_attachments, local_files, Some(tab_id), tab_ids).await;
             }
         });
     };
 
-    // Helper to calculate rows from text
     let calculate_rows = |text: &str| -> usize {
         let line_count = text.lines().count().max(1);
         let trailing = if text.ends_with('\n') { 1 } else { 0 };
@@ -289,6 +531,20 @@ pub fn TextInput(disabled: bool) -> Element {
 
     let handle_input = move |evt: Event<FormData>| {
         let value = evt.value();
+
+        // Check for @ trigger
+        if value.ends_with('@') {
+            tracing::info!("handle_input: @ detected, showing tab selector");
+            refresh_tabs();
+            show_tab_selector.set(true);
+        } else if !value.contains('@') {
+             // Close if @ is removed
+             if show_tab_selector() {
+                 tracing::info!("handle_input: @ removed, hiding tab selector");
+             }
+             show_tab_selector.set(false);
+        }
+
         input_text.set(value.clone());
         rows.set(calculate_rows(&value));
     };
@@ -299,9 +555,13 @@ pub fn TextInput(disabled: bool) -> Element {
                 let current = input_text.read().clone();
                 let new_rows = calculate_rows(&format!("{}\n", current));
                 rows.set(new_rows);
-            } else if can_send {
+            } else if can_send && !show_tab_selector() {
                 evt.prevent_default();
                 handle_send(());
+            }
+        } else if evt.key() == Key::Escape {
+            if show_tab_selector() {
+                show_tab_selector.set(false);
             }
         }
     };
@@ -310,57 +570,77 @@ pub fn TextInput(disabled: bool) -> Element {
 
     rsx! {
         div { class: "text-input-wrapper",
-            // Hidden file input
-            input {
-                r#type: "file",
-                id: "hidden-file-input",
-                multiple: true,
-                style: "display: none;",
-                onchange: handle_file_change,
+            // Tab Selector Popup
+            if show_tab_selector() {
+                div { class: "tab-selector-popup",
+                    for tab in available_tabs.read().iter().cloned() {
+                        {
+                            let tab_item = tab.clone();
+                            let title = tab.title.clone();
+                            let url = tab.url.clone();
+                            let icon = tab.fav_icon_url.clone().unwrap_or_default();
+                            rsx! {
+                                div { class: "tab-selector-item",
+                                    onclick: move |_| handle_select_tab(tab_item.clone()),
+                                    if !icon.is_empty() {
+                                        img { class: "tab-selector-icon", src: "{icon}" }
+                                    } else {
+                                        svg { class: "tab-selector-icon",
+                                            view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2",
+                                            rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                                        }
+                                    }
+                                    div { class: "tab-selector-info",
+                                        span { class: "tab-selector-title", "{title}" }
+                                        span { class: "tab-selector-url", "{url}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if available_tabs.read().is_empty() {
+                        div { class: "tab-selector-item", style: "cursor: default;",
+                            span { class: "tab-selector-url", "No tabs found..." }
+                        }
+                    }
+                }
             }
 
             // File Attachment List
-            {
-                let files_list = attached_files.read().clone();
-                if !files_list.is_empty() {
-                    rsx! {
-                        div { class: "file-attachment-list",
-                            for file in files_list.iter() {
-                                {
-                                    let file_id = file.id.clone();
-                                    let file_name = file.name.clone();
-                                    let file_icon = file.icon();
-                                    rsx! {
-                                        div { class: "file-chip", key: "{file_id}",
-                                            span { class: "file-chip-icon",
-                                                {file_icon}
-                                            }
-                                            div { class: "file-chip-info",
-                                                span { class: "file-chip-name", "{file_name}" }
-                                            }
-                                            button {
-                                                class: "file-chip-remove",
-                                                onclick: move |_| handle_remove_file(file_id.clone()),
-                                                aria_label: "Remove file",
-                                                svg {
-                                                    view_box: "0 0 24 24",
-                                                    fill: "none",
-                                                    stroke: "currentColor",
-                                                    stroke_width: "2",
-                                                    stroke_linecap: "round",
-                                                    stroke_linejoin: "round",
-                                                    line { x1: "18", y1: "6", x2: "6", y2: "18" }
-                                                    line { x1: "6", y1: "6", x2: "18", y2: "18" }
-                                                }
-                                            }
+            if !attached_files.read().is_empty() {
+                div { class: "file-attachment-list",
+                    for file in attached_files.read().iter().cloned() {
+                        {
+                            let file_id = file.id.clone();
+                            let file_name = file.name.clone();
+                            let file_icon = file.icon();
+                            rsx! {
+                                div { class: "file-chip", key: "{file_id}",
+                                    span { class: "file-chip-icon",
+                                        {file_icon}
+                                    }
+                                    div { class: "file-chip-info",
+                                        span { class: "file-chip-name", "{file_name}" }
+                                    }
+                                    button {
+                                        class: "file-chip-remove",
+                                        onclick: move |_| handle_remove_file(file_id.clone()),
+                                        aria_label: "Remove file",
+                                        svg {
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                            line { x1: "6", y1: "6", x2: "18", y2: "18" }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                } else {
-                    rsx! {}
                 }
             }
 
@@ -368,7 +648,7 @@ pub fn TextInput(disabled: bool) -> Element {
             textarea {
                 class: "text-input",
                 class: if current_rows > 1 { "expanded" },
-                placeholder: "Message Agentic Chat...",
+                placeholder: "Message Agentic Chat... (Type @ to add tab)",
                 disabled: disabled,
                 value: "{input_text}",
                 oninput: handle_input,
@@ -379,14 +659,10 @@ pub fn TextInput(disabled: bool) -> Element {
 
             // Input toolbar
             div { class: "input-toolbar",
-                // Left side: mode selector buttons
                 ModeSelector {}
 
-                // Right side: action icons + char count + voice/send button
                 div { class: "toolbar-right",
-                    // Action icons
                     div { class: "action-icons",
-                        // Attachment button
                         button {
                             class: "input-action-btn",
                             disabled: disabled,
@@ -408,7 +684,6 @@ pub fn TextInput(disabled: bool) -> Element {
                             }
                         }
 
-                        // Screenshot button
                         button {
                             class: "input-action-btn",
                             disabled: disabled,
@@ -424,14 +699,12 @@ pub fn TextInput(disabled: bool) -> Element {
                                 stroke_width: "2",
                                 stroke_linecap: "round",
                                 stroke_linejoin: "round",
-                                // Camera/Screenshot icon
                                 path { d: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" }
                                 circle { cx: "12", cy: "13", r: "4" }
                             }
                         }
                     }
 
-                    // Combined voice/send button
                     VoiceSendButton {
                         has_text: has_text || has_files,
                         is_recording: is_recording(),
@@ -439,7 +712,6 @@ pub fn TextInput(disabled: bool) -> Element {
                         on_send: move |_| handle_send(()),
                         on_voice_toggle: move |_| {
                             is_recording.set(!is_recording());
-                            // TODO: Implement actual voice recording
                         },
                     }
                 }
@@ -448,30 +720,21 @@ pub fn TextInput(disabled: bool) -> Element {
     }
 }
 
-/// Agent mode enum
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub enum AgentMode {
-    #[default]
-    Chat,
-    BrowserUse,
-    Agent,
-}
-
 /// Mode selector component - Chat, Browser Use, Agent buttons
+/// Connects to ctx.chat_mode to persist the selected mode for outgoing messages
 #[component]
 fn ModeSelector() -> Element {
-    let mut selected_mode = use_signal(|| AgentMode::Chat);
+    let mut ctx = use_app_context();
+    let current_mode = ctx.chat_mode.read().clone();
 
     rsx! {
         div { class: "mode-selector",
-            // Chat mode button
             button {
                 class: "mode-btn",
-                class: if selected_mode() == AgentMode::Chat { "active" },
-                onclick: move |_| selected_mode.set(AgentMode::Chat),
+                class: if current_mode == ChatMode::Chat { "active" },
+                onclick: move |_| ctx.chat_mode.set(ChatMode::Chat),
                 title: "Chat mode",
                 aria_label: "Chat mode",
-                // Chat/search icon
                 svg {
                     width: "16",
                     height: "16",
@@ -486,14 +749,12 @@ fn ModeSelector() -> Element {
                 }
             }
 
-            // Browser Use mode button
             button {
                 class: "mode-btn",
-                class: if selected_mode() == AgentMode::BrowserUse { "active" },
-                onclick: move |_| selected_mode.set(AgentMode::BrowserUse),
+                class: if current_mode == ChatMode::Browser { "active" },
+                onclick: move |_| ctx.chat_mode.set(ChatMode::Browser),
                 title: "Browser Use mode",
                 aria_label: "Browser Use mode",
-                // Cursor/pointer icon
                 svg {
                     width: "16",
                     height: "16",
@@ -508,14 +769,12 @@ fn ModeSelector() -> Element {
                 }
             }
 
-            // Agent mode button
             button {
                 class: "mode-btn",
-                class: if selected_mode() == AgentMode::Agent { "active" },
-                onclick: move |_| selected_mode.set(AgentMode::Agent),
+                class: if current_mode == ChatMode::Agent { "active" },
+                onclick: move |_| ctx.chat_mode.set(ChatMode::Agent),
                 title: "Agent mode",
                 aria_label: "Agent mode",
-                // Grid/workflow icon
                 svg {
                     width: "16",
                     height: "16",
@@ -536,7 +795,6 @@ fn ModeSelector() -> Element {
 }
 
 /// Combined voice/send button component
-/// Shows voice icon when no text, send icon when has text
 #[component]
 fn VoiceSendButton(
     has_text: bool,
@@ -546,7 +804,6 @@ fn VoiceSendButton(
     on_voice_toggle: EventHandler<()>, 
 ) -> Element {
     if has_text {
-        // Show send button when there's text
         rsx! {
             button {
                 class: "voice-send-button send-mode",
@@ -554,8 +811,6 @@ fn VoiceSendButton(
                 onclick: move |_| on_send.call(()),
                 aria_label: "Send message",
                 title: "Send message",
-
-                // Send icon (arrow up)
                 svg {
                     width: "20",
                     height: "20",
@@ -568,7 +823,6 @@ fn VoiceSendButton(
             }
         }
     } else {
-        // Show voice button when no text
         rsx! {
             button {
                 class: "voice-send-button voice-mode",
@@ -577,8 +831,6 @@ fn VoiceSendButton(
                 onclick: move |_| on_voice_toggle.call(()),
                 aria_label: if is_recording { "Stop recording" } else { "Start voice input" },
                 title: if is_recording { "Stop recording" } else { "Voice input" },
-
-                // Microphone icon
                 svg {
                     width: "20",
                     height: "20",
@@ -602,7 +854,6 @@ fn VoiceSendButton(
 fn get_mime_type(filename: &str) -> String {
     let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
-        // Images
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
@@ -610,7 +861,6 @@ fn get_mime_type(filename: &str) -> String {
         "svg" => "image/svg+xml",
         "ico" => "image/x-icon",
         "bmp" => "image/bmp",
-        // Documents
         "pdf" => "application/pdf",
         "doc" => "application/msword",
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -618,7 +868,6 @@ fn get_mime_type(filename: &str) -> String {
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "ppt" => "application/vnd.ms-powerpoint",
         "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        // Text
         "txt" => "text/plain",
         "html" | "htm" => "text/html",
         "css" => "text/css",
@@ -626,7 +875,6 @@ fn get_mime_type(filename: &str) -> String {
         "json" => "application/json",
         "xml" => "application/xml",
         "md" => "text/markdown",
-        // Code
         "rs" => "text/x-rust",
         "py" => "text/x-python",
         "java" => "text/x-java",
@@ -634,13 +882,11 @@ fn get_mime_type(filename: &str) -> String {
         "cpp" | "hpp" => "text/x-c++",
         "ts" => "text/typescript",
         "tsx" | "jsx" => "text/javascript",
-        // Archives
         "zip" => "application/zip",
         "tar" => "application/x-tar",
         "gz" => "application/gzip",
         "rar" => "application/vnd.rar",
         "7z" => "application/x-7z-compressed",
-        // Default
         _ => "application/octet-stream",
     }.to_string()
 }

@@ -328,13 +328,59 @@ export class NevofluxChild extends JSWindowActorChild {
   }
 
   getAccessibleName(el) {
-    return (
-      el.getAttribute("aria-label") ||
-      el.getAttribute("alt") ||
-      el.getAttribute("title") ||
-      (el.tagName === "INPUT" ? el.getAttribute("placeholder") : null) ||
-      (el.textContent?.trim().slice(0, 50) || null)
-    );
+    // 1. Check explicit accessibility attributes first
+    const ariaLabel = el.getAttribute("aria-label");
+    if (ariaLabel) return ariaLabel;
+
+    // 2. Check aria-labelledby
+    const labelledBy = el.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      const labelEl = el.ownerDocument?.getElementById(labelledBy);
+      if (labelEl?.textContent?.trim()) {
+        return labelEl.textContent.trim().slice(0, 50);
+      }
+    }
+
+    // 3. Check title attribute (both getAttribute and property for Vue/React compatibility)
+    const titleAttr = el.getAttribute("title");
+    if (titleAttr) return titleAttr;
+    if (el.title) return el.title;
+
+    // 4. Check alt (for images)
+    const alt = el.getAttribute("alt");
+    if (alt) return alt;
+
+    // 5. Check placeholder for inputs/textareas
+    const tagName = el.tagName?.toUpperCase();
+    if (tagName === "INPUT" || tagName === "TEXTAREA") {
+      const placeholder = el.getAttribute("placeholder") || el.placeholder;
+      if (placeholder) return placeholder;
+    }
+
+    // 6. Check value for buttons and inputs
+    if (tagName === "INPUT") {
+      const inputType = el.type?.toLowerCase();
+      if (inputType === "submit" || inputType === "button" || inputType === "reset") {
+        const value = el.value;
+        if (value) return value;
+      }
+    }
+
+    // 7. Fallback to direct text content (excluding nested element text)
+    let directText = "";
+    for (const node of el.childNodes) {
+      if (node.nodeType === 3) { // Text node
+        directText += node.textContent || "";
+      }
+    }
+    directText = directText.trim();
+    if (directText) return directText.slice(0, 50);
+
+    // 8. Final fallback: full text content
+    const textContent = el.textContent?.trim();
+    if (textContent) return textContent.slice(0, 50);
+
+    return null;
   }
 
   isInteractive(el) {

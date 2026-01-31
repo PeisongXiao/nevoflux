@@ -24,6 +24,23 @@ if [ ! -d "$EXTENSION_DIR" ]; then
   exit 1
 fi
 
+# Copy WASM build output from dist/ to wasm/ (if dist exists)
+DIOXUS_DIST="$EXTENSION_DIR/dioxus-ui/dist/chat-sidebar"
+WASM_DIR="$EXTENSION_DIR/wasm/chat-sidebar"
+FIX_CSP_SCRIPT="$EXTENSION_DIR/dioxus-ui/scripts/fix-csp.py"
+
+if [ -d "$DIOXUS_DIST" ]; then
+  # Run CSP fix on dist directory first
+  if [ -f "$FIX_CSP_SCRIPT" ]; then
+    echo "Fixing CSP issues in dist/..."
+    python3 "$FIX_CSP_SCRIPT" "$DIOXUS_DIST"
+  fi
+
+  echo "Copying WASM build output from dist/ to wasm/..."
+  cp -r "$DIOXUS_DIST/"* "$WASM_DIR/"
+  echo "✓ WASM files copied"
+fi
+
 # Create output directory
 mkdir -p "$BUILD_DIR"
 

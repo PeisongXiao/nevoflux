@@ -2,18 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-//! Dioxus UI components for the Chat Sidebar
+//! UI components for the Chat Sidebar
 
-mod agent_status;
 mod header;
+mod message_area;
 mod input_area;
-mod message_bubble;
-mod message_list;
-mod status_bar;
+mod agent_status;
+mod permission_dialog;
+mod mcp_config;
+mod ask_user_dialog;
 
-pub use agent_status::{AgentStatus, AgentStatusDisplay, AgentStatusIndicator};
 pub use header::Header;
+pub use message_area::{MessageArea, MessageBubble, WelcomeScreen};
 pub use input_area::InputArea;
-pub use message_bubble::MessageBubble;
-pub use message_list::MessageList;
-pub use status_bar::StatusBar;
+pub use agent_status::AgentStatusBar;
+pub use permission_dialog::PermissionDialog;
+pub use mcp_config::McpConfigModal;
+pub use ask_user_dialog::AskUserDialog;
