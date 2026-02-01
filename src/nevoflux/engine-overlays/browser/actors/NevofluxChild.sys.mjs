@@ -258,6 +258,12 @@ export class NevofluxChild extends JSWindowActorChild {
     if (name === "getSelection") {
       return this.getCurrentSelection();
     }
+    if (name === "lockPage") {
+      return this.lockPage(data);
+    }
+    if (name === "unlockPage") {
+      return this.unlockPage();
+    }
     return null;
   }
 
@@ -3081,5 +3087,108 @@ export class NevofluxChild extends JSWindowActorChild {
         title: this.doc.title,
       },
     };
+  }
+
+  // ========== Page Lock ==========
+
+  lockPage({ showOverlay = true, message = "" }) {
+    if (this._pageLocked) return { success: true };
+
+    this._pageLocked = true;
+
+    // Event locking
+    this._lockHandler = (event) => {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    };
+
+    const events = [
+      "mousedown", "mouseup", "click", "dblclick", "contextmenu",
+      "keydown", "keyup", "keypress",
+      "touchstart", "touchend", "touchmove",
+      "wheel", "scroll",
+    ];
+
+    events.forEach(type => {
+      this.doc.addEventListener(type, this._lockHandler, { capture: true });
+    });
+
+    this._lockEvents = events;
+
+    // Visual overlay
+    if (showOverlay) {
+      this._createLockOverlay(message);
+    }
+
+    return { success: true };
+  }
+
+  unlockPage() {
+    if (!this._pageLocked) return { success: true };
+
+    this._pageLocked = false;
+
+    if (this._lockHandler && this._lockEvents) {
+      this._lockEvents.forEach(type => {
+        this.doc.removeEventListener(type, this._lockHandler, { capture: true });
+      });
+    }
+    this._lockHandler = null;
+    this._lockEvents = null;
+
+    this._removeLockOverlay();
+
+    return { success: true };
+  }
+
+  _createLockOverlay(message) {
+    if (this._lockOverlay) return;
+
+    this._lockOverlay = this.doc.createElement("div");
+    this._lockOverlay.id = "nevoflux-lock-overlay";
+    this._lockOverlay.innerHTML = `
+      <div style="
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+      ">
+        <div style="
+          width: 48px;
+          height: 48px;
+          border: 3px solid rgba(255,255,255,0.3);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: nevoflux-spin 1s linear infinite;
+        "></div>
+        <div style="
+          color: white;
+          font-size: 14px;
+          font-family: system-ui, sans-serif;
+        ">${message || "Agent working..."}</div>
+      </div>
+      <style>
+        @keyframes nevoflux-spin {
+          to { transform: rotate(360deg); }
+        }
+      </style>
+    `;
+    this._lockOverlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      z-index: 2147483646;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+
+    this.doc.body.appendChild(this._lockOverlay);
+  }
+
+  _removeLockOverlay() {
+    this._lockOverlay?.remove();
+    this._lockOverlay = null;
   }
 }
