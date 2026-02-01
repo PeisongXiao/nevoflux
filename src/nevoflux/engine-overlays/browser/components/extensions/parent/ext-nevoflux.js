@@ -100,8 +100,23 @@ this.nevoflux = class extends ExtensionAPI {
         },
 
         async getMarkdown(tabId, options = {}) {
-          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "getMarkdown", options);
+          // Delegate to getTabContent for unified logic (auto-restore, etc.)
+          const result = await this.getTabContent(tabId, {
+            ...options,
+            format: "markdown",
+          });
+
+          // Convert to original return format for backward compatibility
+          if (result.success === false) {
+            return result;
+          }
+
+          return {
+            success: true,
+            markdown: result.content,
+            title: result.title,
+            url: result.url,
+          };
         },
 
         // ========== State Checking (chat mode) ==========
