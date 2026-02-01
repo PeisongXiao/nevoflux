@@ -64,17 +64,17 @@ this.nevoflux = class extends ExtensionAPI {
 
         async getText(tabId, selector) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "getText", { selector: selector || "body" });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "getText", { selector: selector || "body" });
         },
 
         async getHtml(tabId, selector) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "getHtml", { selector: selector || "body" });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "getHtml", { selector: selector || "body" });
         },
 
         async getValue(tabId, selector) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "getValue", { selector });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "getValue", { selector });
         },
 
         async getUrl(tabId) {
@@ -91,12 +91,12 @@ this.nevoflux = class extends ExtensionAPI {
 
         async snapshot(tabId, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "snapshot", options);
+          return self.executeInTabWithRestore(resolvedTabId, extension, "snapshot", options);
         },
 
         async screenshot(tabId, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "screenshot", options);
+          return self.executeInTabWithRestore(resolvedTabId, extension, "screenshot", options);
         },
 
         async getMarkdown(tabId, options = {}) {
@@ -123,29 +123,29 @@ this.nevoflux = class extends ExtensionAPI {
 
         async isVisible(tabId, selector) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "isVisible", { selector });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "isVisible", { selector });
         },
 
         async exists(tabId, selector) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "exists", { selector });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "exists", { selector });
         },
 
         // ========== Interaction (browser_use mode) ==========
 
         async click(tabId, selector, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "click", { selector, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "click", { selector, ...options });
         },
 
         async type(tabId, selector, text, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "type", { selector, text, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "type", { selector, text, ...options });
         },
 
         async fill(tabId, selector, text) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "fill", { selector, text });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "fill", { selector, text });
         },
 
         // ========== Navigation (browser_use mode) ==========
@@ -616,7 +616,7 @@ this.nevoflux = class extends ExtensionAPI {
 
         async waitForSelector(tabId, selector, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "waitForSelector", { selector, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "waitForSelector", { selector, ...options });
         },
 
         async waitForTimeout(ms) {
@@ -632,57 +632,57 @@ this.nevoflux = class extends ExtensionAPI {
 
         async keyPress(tabId, key, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "keyPress", { key, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "keyPress", { key, ...options });
         },
 
         async keyDown(tabId, key, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "keyDown", { key, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "keyDown", { key, ...options });
         },
 
         async keyUp(tabId, key) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "keyUp", { key });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "keyUp", { key });
         },
 
         async mouseMove(tabId, x, y, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "mouseMove", { x, y, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "mouseMove", { x, y, ...options });
         },
 
         async mouseDown(tabId, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "mouseDown", options);
+          return self.executeInTabWithRestore(resolvedTabId, extension, "mouseDown", options);
         },
 
         async mouseUp(tabId, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "mouseUp", options);
+          return self.executeInTabWithRestore(resolvedTabId, extension, "mouseUp", options);
         },
 
         async wheel(tabId, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "wheel", options);
+          return self.executeInTabWithRestore(resolvedTabId, extension, "wheel", options);
         },
 
         async dblclick(tabId, selector, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "dblclick", { selector, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "dblclick", { selector, ...options });
         },
 
         async drag(tabId, fromSelector, toSelector, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "drag", { fromSelector, toSelector, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "drag", { fromSelector, toSelector, ...options });
         },
 
         async focus(tabId, selector) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "focus", { selector });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "focus", { selector });
         },
 
         async clear(tabId, selector) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "clear", { selector });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "clear", { selector });
         },
 
         // ========== Privacy (all modes) ==========
@@ -824,42 +824,42 @@ this.nevoflux = class extends ExtensionAPI {
 
         async getLocalStorage(tabId, key) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "getLocalStorage", { key });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "getLocalStorage", { key });
         },
 
         async setLocalStorage(tabId, key, value) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "setLocalStorage", { key, value });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "setLocalStorage", { key, value });
         },
 
         async removeLocalStorage(tabId, key) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "removeLocalStorage", { key });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "removeLocalStorage", { key });
         },
 
         async clearLocalStorage(tabId) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "clearLocalStorage", {});
+          return self.executeInTabWithRestore(resolvedTabId, extension, "clearLocalStorage", {});
         },
 
         async getSessionStorage(tabId, key) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "getSessionStorage", { key });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "getSessionStorage", { key });
         },
 
         async setSessionStorage(tabId, key, value) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "setSessionStorage", { key, value });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "setSessionStorage", { key, value });
         },
 
         async removeSessionStorage(tabId, key) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "removeSessionStorage", { key });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "removeSessionStorage", { key });
         },
 
         async clearSessionStorage(tabId) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "clearSessionStorage", {});
+          return self.executeInTabWithRestore(resolvedTabId, extension, "clearSessionStorage", {});
         },
 
         // ========== Network ==========
@@ -1012,34 +1012,34 @@ this.nevoflux = class extends ExtensionAPI {
             return { success: false, error: { code: 9002, message: "Missing or invalid required parameter: script", recoverable: false } };
           }
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "eval", { script, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "eval", { script, ...options });
         },
 
         async addScript(tabId, script, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "addScript", { script, ...options });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "addScript", { script, ...options });
         },
 
         async removeScript(tabId, handle) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "removeScript", { handle });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "removeScript", { handle });
         },
 
         // ========== Frame Management ==========
 
         async listFrames(tabId) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "listFrames", {});
+          return self.executeInTabWithRestore(resolvedTabId, extension, "listFrames", {});
         },
 
         async switchFrame(tabId, selector) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "switchFrame", { selector });
+          return self.executeInTabWithRestore(resolvedTabId, extension, "switchFrame", { selector });
         },
 
         async frameMain(tabId) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
-          return self.executeInTab(resolvedTabId, extension, "frameMain", {});
+          return self.executeInTabWithRestore(resolvedTabId, extension, "frameMain", {});
         },
 
         // ========== Dialog Handling ==========
@@ -1491,6 +1491,45 @@ this.nevoflux = class extends ExtensionAPI {
         resolve(false);
       }
     });
+  }
+
+  /**
+   * Execute action in tab with auto-restore for discarded tabs
+   * @param {number} tabId - The tab ID
+   * @param {object} extension - The extension context
+   * @param {string} action - The action to execute
+   * @param {object} params - Action parameters
+   * @param {object} options - Options including autoRestore and timeout
+   * @returns {Promise<object>} Result from executeInTab
+   */
+  async executeInTabWithRestore(tabId, extension, action, params, options = {}) {
+    const { autoRestore = true, timeout = DEFAULT_RESTORE_TIMEOUT } = options;
+
+    const tab = extension.tabManager.get(tabId);
+    if (!tab) {
+      return { success: false, error: { code: 3001, message: "Tab not found", recoverable: false } };
+    }
+
+    const nativeTab = tab.nativeTab;
+
+    // Auto-restore discarded tabs if needed
+    if (autoRestore && this.isTabDiscarded(nativeTab)) {
+      console.log(`[ext-nevoflux] executeInTabWithRestore: Tab ${tabId} is discarded, restoring...`);
+      const restored = await this.restoreTabIfNeeded(nativeTab, timeout);
+      if (!restored) {
+        return { success: false, error: { code: 5005, message: "Failed to restore discarded tab", recoverable: true } };
+      }
+
+      // Wait for browsingContext to be ready
+      const browser = tab.browser || nativeTab.linkedBrowser;
+      const bc = await this.waitForBrowsingContext(browser, 2000);
+      if (!bc?.currentWindowGlobal) {
+        return { success: false, error: { code: 5006, message: "Tab restored but browsingContext not ready", recoverable: true } };
+      }
+      console.log(`[ext-nevoflux] executeInTabWithRestore: Tab ${tabId} restored successfully`);
+    }
+
+    return this.executeInTab(tabId, extension, action, params);
   }
 
   async executeInTab(tabId, extension, action, params) {
