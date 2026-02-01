@@ -53,6 +53,15 @@ def fix_csp(dist_dir):
     new_content = new_content.replace('href=/', 'href=./')
     new_content = new_content.replace('src=/', 'src=./')
 
+    # Add bridge.js before init.js for NevofluxBridge API
+    bridge_script = '<script src="bridge.js"></script>'
+    if bridge_script not in new_content:
+        new_content = new_content.replace(
+            f'<script type="module" src="init.js?v={timestamp}"></script>',
+            f'{bridge_script}<script type="module" src="init.js?v={timestamp}"></script>'
+        )
+        print(f"Added bridge.js script before init.js")
+
     with open(html_file, 'w') as f:
         f.write(new_content)
 
