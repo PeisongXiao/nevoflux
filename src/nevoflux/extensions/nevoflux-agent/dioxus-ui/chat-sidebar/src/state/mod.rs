@@ -23,3 +23,22 @@ pub use history::*;
 pub use mcp::*;
 pub use ask_user::*;
 pub use file_picker::*;
+
+/// Skill information for the skill selector
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillItem {
+    pub name: String,
+    pub description: String,
+    pub tags: Vec<String>,
+}
+
+/// Maximize state for sidebar <-> tab mode switching
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MaximizeState {
+    /// Whether we're in maximized (tab) mode
+    pub is_maximized: bool,
+    /// The tab ID where the sidebar was opened from (for restore)
+    pub source_tab_id: Option<i32>,
+    /// The tab ID that the AI agent operates on
+    pub target_tab_id: Option<i32>,
+}

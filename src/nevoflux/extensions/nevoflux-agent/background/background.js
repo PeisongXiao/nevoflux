@@ -52,6 +52,10 @@ const BackgroundAPI = {
 
   // Tab context
   GET_TAB_CONTEXT: "bg:get_tab_context",
+
+  // Sidebar control
+  SIDEBAR_CLOSE: "bg:sidebar_close",
+  SIDEBAR_OPEN: "bg:sidebar_open",
 };
 
 // =============================================================================
@@ -720,11 +724,25 @@ async function getActiveTabId() {
 }
 
 /**
- * Get active tab context
+ * Get tab context for a specific tab or the active tab
+ * @param {number|null} tabId - Optional tab ID. If null, gets active tab.
  */
-async function getActiveTabContext() {
-  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-  const tab = tabs[0];
+async function getTabContext(tabId = null) {
+  let tab;
+
+  if (tabId != null) {
+    // Get specific tab by ID
+    try {
+      tab = await browser.tabs.get(tabId);
+    } catch (e) {
+      console.warn("[NevoFlux] Failed to get tab by ID:", tabId, e);
+      tab = null;
+    }
+  } else {
+    // Get active tab
+    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    tab = tabs[0];
+  }
 
   if (!tab) {
     return {
@@ -754,6 +772,11 @@ async function getActiveTabContext() {
     favicon_url: tab.favIconUrl || null,
     status: tab.status || "complete",
   };
+}
+
+// Legacy alias for backward compatibility
+async function getActiveTabContext() {
+  return getTabContext(null);
 }
 
 // =============================================================================
@@ -1266,7 +1289,15 @@ async function getElementSelector(tabId, elementId, getChildren = false) {
   // Look up from stored snapshot refs
   const tabData = snapshotRefs.get(tabId);
 
-  console.log(`[NevoFlux] getElementSelector called: tabId=${tabId}, elementId=${elementId}, getChildren=${getChildren}`);
+  // Normalize elementId: strip "e" prefix if present (e.g., "e34" -> 34)
+  let normalizedId = elementId;
+  if (typeof elementId === "string" && elementId.startsWith("e")) {
+    normalizedId = parseInt(elementId.substring(1), 10);
+  } else if (typeof elementId === "string") {
+    normalizedId = parseInt(elementId, 10);
+  }
+
+  console.log(`[NevoFlux] getElementSelector called: tabId=${tabId}, elementId=${elementId} (normalized: ${normalizedId}), getChildren=${getChildren}`);
   console.log(`[NevoFlux] snapshotRefs has keys:`, Array.from(snapshotRefs.keys()));
 
   if (!tabData) {
@@ -1278,18 +1309,18 @@ async function getElementSelector(tabId, elementId, getChildren = false) {
   console.log(`[NevoFlux] tabData.refs has ${Object.keys(tabData.refs).length} elements`);
   console.log(`[NevoFlux] Available element IDs (first 20):`, Object.keys(tabData.refs).slice(0, 20).join(", "));
 
-  const elementRef = tabData.refs[elementId];
+  const elementRef = tabData.refs[normalizedId];
 
   if (!elementRef) {
-    console.warn(`[NevoFlux] Element ID ${elementId} not found in snapshot refs.`);
+    console.warn(`[NevoFlux] Element ID ${elementId} (normalized: ${normalizedId}) not found in snapshot refs.`);
     // Log nearby IDs to help debug
     const allIds = Object.keys(tabData.refs).map(Number).sort((a, b) => a - b);
-    const nearbyIds = allIds.filter(id => Math.abs(id - elementId) <= 5);
+    const nearbyIds = allIds.filter(id => Math.abs(id - normalizedId) <= 5);
     console.warn(`[NevoFlux] Nearby IDs: ${nearbyIds.join(", ")}`);
     return null;
   }
 
-  console.log(`[NevoFlux] Found element ${elementId}:`, JSON.stringify(elementRef).substring(0, 300));
+  console.log(`[NevoFlux] Found element ${elementId} (normalized: ${normalizedId}):`, JSON.stringify(elementRef).substring(0, 300));
 
   // If getChildren is true, return array with parent and all direct children
   if (getChildren) {
@@ -2734,9 +2765,33 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
       return true; // Keep sendResponse valid for async
 
     case BackgroundAPI.GET_TAB_CONTEXT:
-      getActiveTabContext()
-        .then((ctx) => sendResponse(ctx))
+      // Support optional tab_id parameter to get specific tab context
+      const requestedTabId = message.tab_id ?? null;
+      console.log("[NevoFlux] GET_TAB_CONTEXT requested, tab_id:", requestedTabId, "full message:", message);
+      getTabContext(requestedTabId)
+        .then((ctx) => {
+          console.log("[NevoFlux] GET_TAB_CONTEXT returning:", ctx);
+          sendResponse(ctx);
+        })
         .catch(() => sendResponse(null));
+      return true; // Keep sendResponse valid for async
+
+    case BackgroundAPI.SIDEBAR_CLOSE:
+      browser.sidebarAction.close()
+        .then(() => sendResponse({ success: true }))
+        .catch((err) => {
+          console.warn("[NevoFlux] Failed to close sidebar:", err);
+          sendResponse({ success: false, error: err.message });
+        });
+      return true; // Keep sendResponse valid for async
+
+    case BackgroundAPI.SIDEBAR_OPEN:
+      browser.sidebarAction.open()
+        .then(() => sendResponse({ success: true }))
+        .catch((err) => {
+          console.warn("[NevoFlux] Failed to open sidebar:", err);
+          sendResponse({ success: false, error: err.message });
+        });
       return true; // Keep sendResponse valid for async
 
     default:

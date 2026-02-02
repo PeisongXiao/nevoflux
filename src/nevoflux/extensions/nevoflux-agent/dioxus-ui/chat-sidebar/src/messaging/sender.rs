@@ -249,6 +249,17 @@ pub async fn send_mcp_list() -> Result<(), String> {
     send_to_agent(message).await
 }
 
+/// Send skill.list command to agent
+/// Returns list of available skills
+pub async fn send_skill_list() -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "skill.list".to_string(),
+        params: None,
+    });
+    send_to_agent(message).await
+}
+
 /// Send mcp.add command to agent
 /// Adds a new MCP server configuration
 pub async fn send_mcp_add(
@@ -472,17 +483,42 @@ pub async fn send_internal(message: InternalMessage) -> Result<(), String> {
     Ok(())
 }
 
-/// Request current tab context via bg:get_tab_context
-pub async fn request_tab_context() -> Result<(), String> {
-    let request = BackgroundRequest::GetTabContext;
+/// Request tab context via bg:get_tab_context and return the response
+/// If tab_id is None, gets the active tab. If specified, gets that specific tab.
+pub async fn request_tab_context_for_tab(tab_id: Option<i32>) -> Result<Option<TabContextPayload>, String> {
+    // Build request with optional tab_id
+    let request = if let Some(id) = tab_id {
+        serde_json::json!({
+            "type": "bg:get_tab_context",
+            "tab_id": id
+        })
+    } else {
+        serde_json::json!({
+            "type": "bg:get_tab_context"
+        })
+    };
+
     let js_value = to_js_value(&request)
         .map_err(|e| format!("Serialize error: {:?}", e))?;
 
-    JsFuture::from(runtime_send_message(js_value))
+    let response = JsFuture::from(runtime_send_message(js_value))
         .await
         .map_err(|e| format!("Send failed: {:?}", e))?;
 
-    Ok(())
+    // Parse the response
+    if response.is_null() || response.is_undefined() {
+        return Ok(None);
+    }
+
+    let tab_context: TabContextPayload = from_js_value(response)
+        .map_err(|e| format!("Parse tab context error: {:?}", e))?;
+
+    Ok(Some(tab_context))
+}
+
+/// Request current active tab context via bg:get_tab_context
+pub async fn request_tab_context() -> Result<Option<TabContextPayload>, String> {
+    request_tab_context_for_tab(None).await
 }
 
 /// Request connection to native agent via bg:connect

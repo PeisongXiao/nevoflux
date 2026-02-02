@@ -10,8 +10,8 @@
 use dioxus::prelude::*;
 
 use crate::state::{
-    AgentStatusState, AskUserState, ConnectionState, HistoryState, McpConfigState, Message,
-    PendingFilePick, PermissionRequestState, PickedFile, SessionState, StreamingState, TabContext,
+    AgentStatusState, AskUserState, ConnectionState, HistoryState, MaximizeState, McpConfigState, Message,
+    PendingFilePick, PermissionRequestState, PickedFile, SessionState, SkillItem, StreamingState, TabContext,
 };
 use shared_protocol::ChatMode;
 
@@ -49,6 +49,10 @@ pub struct AppContext {
     pub pending_file_pick: Signal<Option<PendingFilePick>>,
     /// Current chat mode (chat, browser, agent)
     pub chat_mode: Signal<ChatMode>,
+    /// Available skills for skill selector
+    pub available_skills: Signal<Vec<SkillItem>>,
+    /// Maximize state (sidebar <-> tab mode)
+    pub maximize: Signal<MaximizeState>,
     /// Whether mock mode is enabled
     pub mock_enabled: bool,
 }
@@ -74,6 +78,8 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
     let picked_files = use_signal(Vec::<PickedFile>::new);
     let pending_file_pick = use_signal(|| None::<PendingFilePick>);
     let chat_mode = use_signal(ChatMode::default);
+    let available_skills = use_signal(Vec::<SkillItem>::new);
+    let maximize = use_signal(parse_maximize_params);
 
     // Build context
     let mut ctx = AppContext {
@@ -91,6 +97,8 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
         picked_files,
         pending_file_pick,
         chat_mode,
+        available_skills,
+        maximize,
         mock_enabled,
     };
 
@@ -107,14 +115,64 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
         } else {
             // Real mode: set up message listener and connect
             crate::messaging::init_message_listener(ctx);
+
+            // Check if we're in maximized mode and need to request source tab context
+            let maximize_state = ctx.maximize.read().clone();
+
             spawn(async move {
-                // Send ping and request tab context
+                // Send ping
                 let _ = crate::messaging::send_ping().await;
-                let _ = crate::messaging::request_tab_context().await;
+
+                // Request tab context - use source_tab_id if in maximized mode
+                let tab_context_result = if maximize_state.is_maximized {
+                    if let Some(source_tab_id) = maximize_state.source_tab_id {
+                        tracing::info!("Maximized mode: requesting source tab context for tab {}", source_tab_id);
+                        crate::messaging::request_tab_context_for_tab(Some(source_tab_id)).await
+                    } else {
+                        // Fallback to active tab if no source_tab_id
+                        crate::messaging::request_tab_context().await
+                    }
+                } else {
+                    // Normal sidebar mode - get active tab
+                    crate::messaging::request_tab_context().await
+                };
+
+                // Update tab context from response
+                if let Ok(Some(tab_payload)) = tab_context_result {
+                    tracing::info!("Got tab context: tab_id={}, url={}", tab_payload.tab_id, tab_payload.url);
+                    ctx.tab_context.set(crate::state::TabContext {
+                        tab_id: tab_payload.tab_id,
+                        zen_sync_id: tab_payload.zen_sync_id,
+                        url: tab_payload.url,
+                        title: tab_payload.title,
+                        favicon_url: tab_payload.favicon_url,
+                    });
+                }
+
                 // Request session list for history
                 ctx.history.write().set_loading();
                 let _ = crate::messaging::send_session_list(50, 0).await;
             });
+        }
+    });
+
+    // Sync session_id and target_tab_id to window globals for JS maximize handler
+    use_effect(move || {
+        let session_id = ctx.session.read().id.clone();
+        let target_tab_id = ctx.tab_context.read().tab_id;
+
+        // Set window globals that JS can read
+        if let Some(window) = web_sys::window() {
+            let _ = js_sys::Reflect::set(
+                &window,
+                &wasm_bindgen::JsValue::from_str("__nevoflux_session_id"),
+                &wasm_bindgen::JsValue::from_str(&session_id),
+            );
+            let _ = js_sys::Reflect::set(
+                &window,
+                &wasm_bindgen::JsValue::from_str("__nevoflux_target_tab_id"),
+                &wasm_bindgen::JsValue::from_f64(target_tab_id as f64),
+            );
         }
     });
 
@@ -126,6 +184,37 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
 /// Must be called from within a component that is a descendant of `ContextProvider`.
 pub fn use_app_context() -> AppContext {
     use_context::<AppContext>()
+}
+
+/// Parse URL parameters for maximize mode
+pub fn parse_maximize_params() -> MaximizeState {
+    let search = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .unwrap_or_default();
+
+    let is_maximized = search.contains("mode=maximized");
+
+    let source_tab_id = extract_url_param(&search, "source_tab_id")
+        .and_then(|s| s.parse::<i32>().ok());
+
+    let target_tab_id = extract_url_param(&search, "target_tab_id")
+        .and_then(|s| s.parse::<i32>().ok());
+
+    MaximizeState {
+        is_maximized,
+        source_tab_id,
+        target_tab_id,
+    }
+}
+
+/// Extract a single URL parameter value
+fn extract_url_param(search: &str, param: &str) -> Option<String> {
+    let prefix = format!("{}=", param);
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .find(|s| s.starts_with(&prefix))
+        .map(|s| s.trim_start_matches(&prefix).to_string())
 }
 
 /// Check if mock mode is enabled from URL parameters

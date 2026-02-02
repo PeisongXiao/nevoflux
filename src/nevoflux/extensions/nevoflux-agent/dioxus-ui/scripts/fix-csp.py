@@ -5,6 +5,12 @@ import sys
 import time
 
 def fix_csp(dist_dir):
+    # Check if files are in staging directory (trunk behavior)
+    stage_dir = os.path.join(dist_dir, '.stage')
+    if os.path.exists(os.path.join(stage_dir, 'index.html')):
+        dist_dir = stage_dir
+        print(f"Using staging directory: {stage_dir}")
+
     html_file = os.path.join(dist_dir, 'index.html')
     init_js = os.path.join(dist_dir, 'init.js')
 
@@ -66,12 +72,92 @@ def fix_csp(dist_dir):
     if os.path.exists(init_js):
         with open(init_js, 'r') as f:
             js_content = f.read()
-        
+
         # Simple string replacements for common trunk patterns
         js_content = js_content.replace("from '/", "from './")
         js_content = js_content.replace('from "/', 'from "./')
         js_content = js_content.replace("module_or_path: '/", "module_or_path: './")
         js_content = js_content.replace('module_or_path: "/', 'module_or_path: "./')
+
+        # Add maximize/restore button click handlers to preserve user gesture for sidebarAction
+        # This must run before WASM to intercept clicks with proper user gesture context
+        # CRITICAL: sidebarAction.open/close MUST be called synchronously before any await
+        maximize_handler = '''
+// Maximize button click handler - MUST be synchronous to preserve user gesture
+(function() {
+    document.addEventListener('click', function(event) {
+        const button = event.target.closest('.maximize-btn');
+        if (!button) return;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('mode') === 'maximized') return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        console.log('[NevoFlux] Maximize clicked - synchronous handler');
+
+        // Get data SYNCHRONOUSLY from window globals (set by WASM)
+        const sessionId = window.__nevoflux_session_id || '';
+        const targetTabId = window.__nevoflux_target_tab_id || 0;
+
+        // Build URL synchronously
+        const baseUrl = window.location.href.split('?')[0];
+        const newUrl = `${baseUrl}?mode=maximized&session_id=${sessionId}&target_tab_id=${targetTabId}&source_tab_id=${targetTabId}`;
+
+        console.log('[NevoFlux] Opening maximized view:', newUrl);
+
+        // Open tab FIRST using window.open (synchronous, executes before close destroys context)
+        window.open(newUrl, '_blank');
+
+        // Then close sidebar (user gesture still valid since no await yet)
+        if (browser.sidebarAction && browser.sidebarAction.close) {
+            browser.sidebarAction.close().catch(e => console.warn('[NevoFlux] close failed:', e));
+        }
+    }, true); // capture phase
+})();
+
+// Restore button click handler - MUST be synchronous to preserve user gesture
+(function() {
+    document.addEventListener('click', function(event) {
+        const button = event.target.closest('.restore-btn');
+        if (!button) return;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('mode') !== 'maximized') return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        console.log('[NevoFlux] Restore clicked - synchronous handler');
+
+        // Get source_tab_id from URL params
+        const sourceTabId = parseInt(urlParams.get('source_tab_id')) || 0;
+
+        // Open sidebar FIRST - this requires user gesture
+        if (browser.sidebarAction && browser.sidebarAction.open) {
+            browser.sidebarAction.open().catch(e => console.warn('[NevoFlux] open failed:', e));
+        }
+
+        // Then activate source tab and close this tab (no user gesture needed)
+        if (sourceTabId > 0) {
+            browser.tabs.update(sourceTabId, { active: true }).catch(e => console.warn('[NevoFlux] activate tab failed:', e));
+        }
+
+        // Close current maximized tab
+        browser.tabs.getCurrent().then(tab => {
+            if (tab && tab.id) {
+                browser.tabs.remove(tab.id).catch(e => console.warn('[NevoFlux] close tab failed:', e));
+            }
+        }).catch(e => console.warn('[NevoFlux] get current tab failed:', e));
+    }, true); // capture phase
+})();
+
+'''
+        # Only add if not already present
+        if 'maximize-btn' not in js_content:
+            js_content = maximize_handler + js_content
+            print("Added maximize button click handler to init.js")
 
         with open(init_js, 'w') as f:
             f.write(js_content)

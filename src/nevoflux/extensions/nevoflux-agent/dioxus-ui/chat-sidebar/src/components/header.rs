@@ -6,7 +6,8 @@
 
 use dioxus::prelude::*;
 use wasm_bindgen_futures::spawn_local;
-use crate::context::use_app_context;
+use crate::bindings::nevoflux_api;
+use crate::context::{use_app_context, AppContext};
 use crate::state::SessionSummary;
 
 /// Header component with History, Maximize and More buttons
@@ -15,6 +16,9 @@ pub fn Header() -> Element {
     let mut show_menu = use_signal(|| false);
     let mut show_history = use_signal(|| false);
     let mut ctx = use_app_context();
+
+    // Read maximize state
+    let is_maximized = ctx.maximize.read().is_maximized;
 
     // User info (Mock data for now, P2: fetch from account status)
     let username = "User";
@@ -25,16 +29,19 @@ pub fn Header() -> Element {
         show_history.set(false);
     };
 
-    let toggle_history = move |_| {
-        show_history.set(!show_history());
-        show_menu.set(false);
+    let toggle_history = {
+        let mut ctx = ctx.clone();
+        move |_| {
+            show_history.set(!show_history());
+            show_menu.set(false);
 
-        // Refresh history when opening
-        if !show_history() {
-            ctx.history.write().set_loading();
-            spawn_local(async move {
-                let _ = crate::messaging::send_session_list(50, 0).await;
-            });
+            // Refresh history when opening
+            if !show_history() {
+                ctx.history.write().set_loading();
+                spawn_local(async move {
+                    let _ = crate::messaging::send_session_list(50, 0).await;
+                });
+            }
         }
     };
 
@@ -46,9 +53,36 @@ pub fn Header() -> Element {
         show_history.set(false);
     };
 
-    let handle_maximize = move |_| {
-        tracing::info!("Maximize requested");
-        // P2: Implement maximize logic (e.g. open in new tab or expand sidebar)
+    // Handle maximize: open in new tab, close sidebar
+    let handle_maximize = {
+        let ctx = ctx.clone();
+        move |_| {
+            tracing::info!("Maximize requested");
+
+            // Try to close sidebar IMMEDIATELY (sync) to preserve user gesture context
+            nevoflux_api::try_close_sidebar_sync();
+
+            let ctx = ctx.clone();
+            spawn_local(async move {
+                if let Err(e) = do_maximize(ctx).await {
+                    tracing::error!("Failed to maximize: {}", e);
+                }
+            });
+        }
+    };
+
+    // Handle restore: close tab, activate source tab, open sidebar
+    let handle_restore = {
+        let ctx = ctx.clone();
+        move |_| {
+            tracing::info!("Restore requested");
+            let ctx = ctx.clone();
+            spawn_local(async move {
+                if let Err(e) = do_restore(ctx).await {
+                    tracing::error!("Failed to restore: {}", e);
+                }
+            });
+        }
     };
 
     let handle_config_mcp = move |_| {
@@ -107,26 +141,52 @@ pub fn Header() -> Element {
 
             // Right side: Action buttons
             div { class: "header-right",
-                // Maximize button
-                button {
-                    class: "header-btn maximize-btn",
-                    aria_label: "Maximize",
-                    title: "Maximize",
-                    onclick: handle_maximize,
-                    // Box with arrow pointing out icon
-                    svg {
-                        width: "16",
-                        height: "16",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M15 3h6v6" }
-                        path { d: "M9 21H3v-6" }
-                        path { d: "M21 3l-7 7" }
-                        path { d: "M3 21l7-7" }
+                // Maximize/Restore button
+                if is_maximized {
+                    // Restore button (in tab mode)
+                    button {
+                        class: "header-btn restore-btn",
+                        aria_label: "Restore to sidebar",
+                        title: "Restore to sidebar",
+                        onclick: handle_restore,
+                        // Arrows pointing inward icon (restore)
+                        svg {
+                            width: "16",
+                            height: "16",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M4 14h6v6" }
+                            path { d: "M20 10h-6V4" }
+                            path { d: "M14 10l7-7" }
+                            path { d: "M3 21l7-7" }
+                        }
+                    }
+                } else {
+                    // Maximize button (in sidebar mode)
+                    button {
+                        class: "header-btn maximize-btn",
+                        aria_label: "Open in new tab",
+                        title: "Open in new tab",
+                        onclick: handle_maximize,
+                        // Arrows pointing outward icon (maximize)
+                        svg {
+                            width: "16",
+                            height: "16",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M15 3h6v6" }
+                            path { d: "M9 21H3v-6" }
+                            path { d: "M21 3l-7 7" }
+                            path { d: "M3 21l7-7" }
+                        }
                     }
                 }
 
@@ -340,4 +400,75 @@ fn HistoryDropdownItem(
             }
         }
     }
+}
+
+// ==================== Maximize/Restore Logic ====================
+
+/// Maximize: open chat in new tab, close sidebar
+async fn do_maximize(ctx: AppContext) -> Result<(), String> {
+    // Get session_id from current session
+    let session_id = ctx.session.read().id.clone();
+
+    // Get target_tab_id from tab_context (the tab AI operates on)
+    let target_tab_id = ctx.tab_context.read().tab_id;
+
+    // Get source_tab_id (current active tab where sidebar is shown)
+    let source_tab = nevoflux_api::get_active_tab().await?;
+    let source_tab_id = source_tab.id as i32;
+
+    // Build URL with parameters
+    let base_url = web_sys::window()
+        .and_then(|w| w.location().href().ok())
+        .unwrap_or_else(|| "moz-extension://unknown/wasm/chat-sidebar/index.html".to_string());
+
+    // Extract base path (remove any existing query params)
+    let base_path = base_url.split('?').next().unwrap_or(&base_url);
+
+    let url = format!(
+        "{}?mode=maximized&session_id={}&target_tab_id={}&source_tab_id={}",
+        base_path,
+        session_id,
+        target_tab_id,
+        source_tab_id
+    );
+
+    tracing::info!("Opening maximized view: {}", url);
+
+    // Create new tab with the URL
+    // Note: sidebar close is attempted synchronously in the click handler
+    // to preserve user gesture context (Firefox security requirement)
+    nevoflux_api::create_tab(&url, true).await?;
+
+    Ok(())
+}
+
+/// Restore: close current tab, activate source tab, open sidebar
+async fn do_restore(ctx: AppContext) -> Result<(), String> {
+    let maximize_state = ctx.maximize.read();
+    let source_tab_id = maximize_state.source_tab_id;
+    drop(maximize_state);
+
+    // Get current tab ID (we're in a tab, not sidebar)
+    let current_tab = nevoflux_api::get_current_tab().await?
+        .ok_or_else(|| "Could not get current tab".to_string())?;
+    let current_tab_id = current_tab.id as i32;
+
+    // Activate source tab (if it still exists)
+    if let Some(source_id) = source_tab_id {
+        if let Err(e) = nevoflux_api::update_tab(source_id, true).await {
+            tracing::warn!("Failed to activate source tab {}: {}", source_id, e);
+            // Tab might have been closed - continue anyway
+        }
+    }
+
+    // Open the sidebar
+    if let Err(e) = nevoflux_api::open_sidebar().await {
+        tracing::warn!("Failed to open sidebar: {}", e);
+        // Continue anyway
+    }
+
+    // Close current tab
+    nevoflux_api::remove_tab(current_tab_id).await?;
+
+    Ok(())
 }
