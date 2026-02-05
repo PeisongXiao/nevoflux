@@ -842,6 +842,10 @@ async function executeBrowserTool(request, caller = "unknown") {
       case "scroll":
         return await executeScrollViaApi(targetTabId, params);
 
+      // Page stability
+      case "wait_for_stable":
+        return await executeWaitForStableViaApi(targetTabId, params);
+
       // Element queries
       case "get_element":
         return await executeGetElementViaApi(targetTabId, params);
@@ -1117,19 +1121,21 @@ async function executeWaitForViaApi(tabId, params, timeout_ms) {
  * Scroll via browser.nevoflux.wheel()
  */
 async function executeScrollViaApi(tabId, params) {
-  const { direction = "down", amount = 300 } = params;
-
-  const deltaMap = {
-    up: { deltaX: 0, deltaY: -amount },
-    down: { deltaX: 0, deltaY: amount },
-    left: { deltaX: -amount, deltaY: 0 },
-    right: { deltaX: amount, deltaY: 0 },
-  };
-
-  const delta = deltaMap[direction] || deltaMap.down;
+  const { direction = "down", amount = "page" } = params;
 
   try {
-    const result = await browser.nevoflux.wheel(tabId, delta);
+    const result = await browser.nevoflux.scroll(tabId, { direction, amount: String(amount) });
+    return result.success !== undefined ? result : { success: true, result };
+  } catch (error) {
+    return { success: false, error: { code: -1, message: error.message, recoverable: true } };
+  }
+}
+
+async function executeWaitForStableViaApi(tabId, params) {
+  const { strategy = "interaction", maxWait = 3000 } = params;
+
+  try {
+    const result = await browser.nevoflux.waitForStable(tabId, { strategy, maxWait });
     return result.success !== undefined ? result : { success: true, result };
   } catch (error) {
     return { success: false, error: { code: -1, message: error.message, recoverable: true } };
