@@ -424,6 +424,14 @@
           "direction": { "type": "string", "enum": ["up", "down"], "optional": true },
           "amount": { "type": "string", "optional": true, "description": "page, half, or pixel amount" }
         }
+      },
+      {
+        "id": "StabilityOptions",
+        "type": "object",
+        "properties": {
+          "strategy": { "type": "string", "enum": ["navigation", "interaction", "scroll"], "optional": true },
+          "maxWait": { "type": "integer", "optional": true }
+        }
       }
     ],
     "functions": [
@@ -1260,6 +1268,17 @@
         "parameters": [
           { "name": "tabId", "type": "integer", "optional": true },
           { "name": "options", "$ref": "ScrollOptions", "optional": true }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "waitForStable",
+        "type": "function",
+        "async": "promise",
+        "description": "Wait for page to stabilize after an action",
+        "parameters": [
+          { "name": "tabId", "type": "integer", "optional": true },
+          { "name": "options", "$ref": "StabilityOptions", "optional": true }
         ],
         "returns": { "$ref": "ApiResult" }
       }

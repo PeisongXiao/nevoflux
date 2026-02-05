@@ -294,6 +294,7 @@ export class NevofluxChild extends JSWindowActorChild {
       mouseUp: () => this.mouseUp(safeParams),
       wheel: () => this.wheel(safeParams),
       scroll: () => this.scroll(safeParams),
+      waitForStable: () => this.waitForStable(safeParams),
       dblclick: () => this.dblclick(safeParams),
       drag: () => this.drag(safeParams),
       focus: () => this.focus(safeParams),
@@ -1749,6 +1750,96 @@ export class NevofluxChild extends JSWindowActorChild {
     } catch (e) {
       return { success: false, error: { code: 5001, message: String(e), recoverable: false } };
     }
+  }
+
+  async waitForStable({ strategy = "interaction", maxWait = 3000 }) {
+    const startTime = Date.now();
+
+    if (strategy === "scroll") {
+      // Scroll: short fixed wait
+      await this.sleep(200);
+      return { stable: true, strategy, duration_ms: Date.now() - startTime };
+    }
+
+    if (strategy === "navigation") {
+      // Navigation: wait for load event, up to maxWait
+      const doc = this.currentDoc;
+      if (doc && doc.readyState !== "complete") {
+        await new Promise((resolve) => {
+          const win = this.currentWin;
+          const timeout = win?.setTimeout?.(() => resolve(), maxWait) || null;
+          const onLoad = () => {
+            if (timeout && win?.clearTimeout) win.clearTimeout(timeout);
+            resolve();
+          };
+          if (win) {
+            win.addEventListener("load", onLoad, { once: true });
+          } else {
+            resolve();
+          }
+        });
+      }
+      // Extra 300ms for post-load scripts
+      await this.sleep(300);
+      return { stable: true, strategy, duration_ms: Date.now() - startTime };
+    }
+
+    // Default: interaction strategy
+    // 300ms baseline
+    await this.sleep(300);
+
+    // Then monitor for DOM stability using MutationObserver
+    const doc = this.currentDoc;
+    if (doc?.body) {
+      const remaining = maxWait - (Date.now() - startTime);
+      if (remaining > 0) {
+        await new Promise((resolve) => {
+          let lastMutationTime = Date.now();
+          const quiescenceMs = 200; // Consider stable after 200ms of no mutations
+
+          const observer = new doc.defaultView.MutationObserver(() => {
+            lastMutationTime = Date.now();
+          });
+
+          observer.observe(doc.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ["class", "style", "hidden", "disabled", "aria-expanded", "aria-hidden"],
+          });
+
+          const checkStable = () => {
+            const elapsed = Date.now() - startTime;
+            if (elapsed >= maxWait) {
+              observer.disconnect();
+              resolve();
+              return;
+            }
+            if (Date.now() - lastMutationTime >= quiescenceMs) {
+              observer.disconnect();
+              resolve();
+              return;
+            }
+            const win = this.currentWin || doc.defaultView;
+            if (win?.setTimeout) {
+              win.setTimeout(checkStable, 50);
+            } else {
+              resolve();
+            }
+          };
+
+          const win = this.currentWin || doc.defaultView;
+          if (win?.setTimeout) {
+            win.setTimeout(checkStable, quiescenceMs);
+          } else {
+            observer.disconnect();
+            resolve();
+          }
+        });
+      }
+    }
+
+    return { stable: true, strategy, duration_ms: Date.now() - startTime };
   }
 
   async dblclick({ selector, button = "left", delay = 0 }) {

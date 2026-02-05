@@ -670,6 +670,11 @@ this.nevoflux = class extends ExtensionAPI {
           return self.executeInTabWithRestore(resolvedTabId, extension, "scroll", options);
         },
 
+        async waitForStable(tabId, options = {}) {
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTabWithRestore(resolvedTabId, extension, "waitForStable", options);
+        },
+
         async dblclick(tabId, selector, options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
           return self.executeInTabWithRestore(resolvedTabId, extension, "dblclick", { selector, ...options });
