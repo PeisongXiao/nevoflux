@@ -571,10 +571,10 @@ export class NevofluxChild extends JSWindowActorChild {
   _isHiddenElement(el, win) {
     try {
       const style = win.getComputedStyle(el);
+      // Only filter explicitly hidden elements
       if (style.display === "none") return true;
       if (style.visibility === "hidden") return true;
-      if (style.opacity === "0") return true;
-      if (el.getAttribute("aria-hidden") === "true") return true;
+      // Everything else is considered visible (including opacity:0, zero-size, out of viewport)
       return false;
     } catch (e) {
       return false; // On error, assume visible
@@ -619,19 +619,6 @@ export class NevofluxChild extends JSWindowActorChild {
     } catch (e) {
       return false;
     }
-  }
-
-  // Check if a bounding rect overlaps with the viewport
-  _isInViewport(rect, win) {
-    if (!rect || !win) return true; // If no rect, assume visible
-    const vw = win.innerWidth;
-    const vh = win.innerHeight;
-    // Element is outside viewport if entirely above, below, left, or right
-    if (rect.x + rect.width <= 0) return false;  // entirely left of viewport
-    if (rect.y + rect.height <= 0) return false;  // entirely above viewport
-    if (rect.x >= vw) return false;                // entirely right of viewport
-    if (rect.y >= vh) return false;                // entirely below viewport
-    return true;
   }
 
   async screenshot({ fullPage = false, type = "jpeg", quality = 60, maxWidth = 1280 }) {
