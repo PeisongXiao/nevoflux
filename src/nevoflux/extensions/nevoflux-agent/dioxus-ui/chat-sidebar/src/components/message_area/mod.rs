@@ -9,12 +9,17 @@ mod message_list;
 mod message_bubble;
 mod error_card;
 mod code_block;
+mod activity_feed;
+mod live_tool_feed;
 
 pub use welcome_screen::WelcomeScreen;
 pub use message_list::MessageList;
 pub use message_bubble::MessageBubble;
+pub use message_bubble::render_simple_markdown;
 pub use error_card::ErrorCard;
 pub use code_block::CodeBlock;
+pub use activity_feed::ActivityFeed;
+pub use live_tool_feed::LiveToolFeed;
 
 use dioxus::prelude::*;
 use crate::context::use_app_context;

@@ -8,13 +8,11 @@ use dioxus::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use crate::bindings::nevoflux_api;
 use crate::context::{use_app_context, AppContext};
-use crate::state::SessionSummary;
 
 /// Header component with History, Maximize and More buttons
 #[component]
 pub fn Header() -> Element {
     let mut show_menu = use_signal(|| false);
-    let mut show_history = use_signal(|| false);
     let mut ctx = use_app_context();
 
     // Read maximize state
@@ -26,17 +24,18 @@ pub fn Header() -> Element {
 
     let toggle_menu = move |_| {
         show_menu.set(!show_menu());
-        show_history.set(false);
+        ctx.show_history_panel.set(false);
     };
 
     let toggle_history = {
         let mut ctx = ctx.clone();
         move |_| {
-            show_history.set(!show_history());
+            let current = *ctx.show_history_panel.read();
+            ctx.show_history_panel.set(!current);
             show_menu.set(false);
 
             // Refresh history when opening
-            if !show_history() {
+            if !current {
                 ctx.history.write().set_loading();
                 spawn_local(async move {
                     let _ = crate::messaging::send_session_list(50, 0).await;
@@ -47,10 +46,6 @@ pub fn Header() -> Element {
 
     let close_menu = move |_| {
         show_menu.set(false);
-    };
-
-    let close_history = move |_| {
-        show_history.set(false);
     };
 
     // Handle maximize: open in new tab, close sidebar
@@ -103,15 +98,6 @@ pub fn Header() -> Element {
         tracing::info!("Configure Skills requested");
         show_menu.set(false);
         // P2: Open Skills settings
-    };
-
-    let handle_new_chat = move |_| {
-        tracing::info!("New chat requested");
-        show_history.set(false);
-        // Clear current messages to start fresh
-        ctx.messages.set(Vec::new());
-        ctx.streaming.set(None);
-        ctx.agent_status.write().hide();
     };
 
     rsx! {
@@ -213,25 +199,6 @@ pub fn Header() -> Element {
                 }
             }
 
-            // History Dropdown
-            if show_history() {
-                div {
-                    class: "menu-overlay",
-                    onclick: close_history,
-                    onkeydown: move |evt: KeyboardEvent| {
-                        if evt.key() == Key::Escape {
-                            show_history.set(false);
-                        }
-                    },
-                    tabindex: "-1",
-                }
-
-                HistoryDropdown {
-                    on_close: move |_| show_history.set(false),
-                    on_new_chat: handle_new_chat,
-                }
-            }
-
             // Dropdown Menu Overlay (to close on click outside or Escape)
             if show_menu() {
                 div {
@@ -280,123 +247,6 @@ pub fn Header() -> Element {
                         "Configure Skills"
                     }
                 }
-            }
-        }
-    }
-}
-
-/// History dropdown component
-#[component]
-fn HistoryDropdown(
-    on_close: EventHandler<()>,
-    on_new_chat: EventHandler<MouseEvent>,
-) -> Element {
-    let ctx = use_app_context();
-    let history = ctx.history.read();
-
-    rsx! {
-        div {
-            class: "dropdown-menu history-dropdown",
-            role: "menu",
-            aria_label: "Conversation history",
-            onkeydown: move |evt: KeyboardEvent| {
-                if evt.key() == Key::Escape {
-                    on_close.call(());
-                }
-            },
-
-            // Header with New Chat button
-            div { class: "history-dropdown-header",
-                span { class: "history-dropdown-title", "History" }
-                button {
-                    class: "new-chat-btn",
-                    onclick: on_new_chat,
-                    // Plus icon
-                    svg {
-                        width: "14",
-                        height: "14",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M12 5v14" }
-                        path { d: "M5 12h14" }
-                    }
-                    span { "New" }
-                }
-            }
-
-            div { class: "menu-separator", role: "separator" }
-
-            // Content
-            if history.loading {
-                div { class: "history-dropdown-loading",
-                    span { class: "loading-spinner" }
-                    span { "Loading..." }
-                }
-            } else if let Some(ref error) = history.error {
-                div { class: "history-dropdown-error",
-                    "Error: {error}"
-                }
-            } else if history.sessions.is_empty() {
-                div { class: "history-dropdown-empty",
-                    "No conversations yet"
-                }
-            } else {
-                div { class: "history-dropdown-list",
-                    for session in history.sessions.iter().take(10) {
-                        HistoryDropdownItem {
-                            session: session.clone(),
-                            on_select: move |_| on_close.call(()),
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Single history dropdown item
-#[component]
-fn HistoryDropdownItem(
-    session: SessionSummary,
-    on_select: EventHandler<()>,
-) -> Element {
-    let ctx = use_app_context();
-    let session_id = session.id.clone();
-    let display_title = session.display_title();
-    let relative_time = session.relative_time();
-
-    let handle_click = move |_| {
-        let source_id = session_id.clone();
-        let tab_context = ctx.tab_context.read();
-        let target_id = tab_context.zen_sync_id.clone();
-        drop(tab_context);
-
-        if let Some(target_id) = target_id {
-            tracing::info!("Cloning session {} to {}", source_id, target_id);
-            spawn_local(async move {
-                if let Err(e) = crate::messaging::send_session_clone(&source_id, &target_id).await {
-                    tracing::error!("Failed to clone session: {}", e);
-                }
-            });
-            on_select.call(());
-        } else {
-            tracing::warn!("No zen_sync_id for current tab, cannot restore session");
-        }
-    };
-
-    rsx! {
-        button {
-            class: "menu-item history-dropdown-item",
-            role: "menuitem",
-            onclick: handle_click,
-
-            div { class: "history-dropdown-item-content",
-                span { class: "history-dropdown-item-title", "{display_title}" }
-                span { class: "history-dropdown-item-time", "{relative_time}" }
             }
         }
     }

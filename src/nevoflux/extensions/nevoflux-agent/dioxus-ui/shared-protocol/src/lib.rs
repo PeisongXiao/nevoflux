@@ -29,11 +29,16 @@ pub use chat::{
     // File picker (native dialog)
     PickerMode, PickFilesRequestPayload, FileInfo, PickFilesResponsePayload,
     // Agent -> Sidebar
-    StreamChunkPayload, StreamEndPayload, StreamMetadata,
+    StreamChunkPayload, ToolCallInfo, StreamEndPayload, StreamMetadata,
     ContentBlockPayload, PermissionRequestPayload, AgentStatePayload,
     StepInfo, ToolInfo, ErrorPayload, AccountStatusPayload, AccountInfo,
     PlanInfo, QuotaInfo, UsageQuota, SystemResponsePayload, SystemError,
     BrowserToolRequestPayload,
+    // Plan proposal/response
+    PlanStep, PlanProposalPayload, PlanResponse, PlanResponsePayload,
+    // Tool events & authorization
+    ToolEvent, ToolEventStatus, ToolAuthRequest, AuthOption, AuthScope,
+    ToolAuthResponsePayload,
 };
 
 // Re-export MCP types

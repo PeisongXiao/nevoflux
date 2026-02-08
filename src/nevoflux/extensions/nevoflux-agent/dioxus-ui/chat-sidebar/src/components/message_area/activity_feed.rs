@@ -1,0 +1,140 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+//! Activity feed component showing tool calls above message content
+
+use dioxus::prelude::*;
+use crate::state::{ToolCallData, ToolCallStatus};
+
+/// Collapsible activity feed showing tool calls with duration and status
+#[component]
+pub fn ActivityFeed(tool_calls: Vec<ToolCallData>) -> Element {
+    let mut expanded = use_signal(|| false);
+    let count = tool_calls.len();
+    let suffix = if count != 1 { "s" } else { "" };
+
+    // Calculate total duration from tools that have timing data
+    let total_ms: u64 = tool_calls.iter()
+        .filter_map(|tc| tc.duration_ms)
+        .sum();
+    let has_timing = total_ms > 0;
+
+    rsx! {
+        div {
+            class: "activity-feed",
+            class: if expanded() { "expanded" },
+
+            // Header (clickable to toggle)
+            button {
+                class: "activity-feed-header",
+                onclick: move |_| expanded.set(!expanded()),
+                aria_expanded: "{expanded}",
+                span { class: "activity-feed-icon", "\u{26A1}" }
+                span { class: "activity-feed-label",
+                    "{count} action{suffix}"
+                }
+                if has_timing {
+                    span { class: "activity-feed-timing",
+                        "(total: {format_duration(total_ms)})"
+                    }
+                }
+                span {
+                    class: "activity-feed-chevron",
+                    if expanded() { "\u{25B4}" } else { "\u{25BE}" }
+                }
+            }
+
+            // Expandable tool list
+            if expanded() {
+                div { class: "activity-feed-list",
+                    for tc in tool_calls.iter() {
+                        ToolCallChip {
+                            key: "{tc.id}",
+                            tool_call: tc.clone(),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Individual tool call chip with status, duration, and expandable details
+#[component]
+fn ToolCallChip(tool_call: ToolCallData) -> Element {
+    let mut detail_expanded = use_signal(|| false);
+    let has_args = !tool_call.arguments.is_empty();
+
+    // Status icon
+    let status_icon = match &tool_call.status {
+        Some(ToolCallStatus::Success) => "\u{2705}",   // ✅
+        Some(ToolCallStatus::Failed) => "\u{274C}",    // ❌
+        None => "\u{2699}\u{FE0F}",                    // ⚙️
+    };
+
+    let status_class = match &tool_call.status {
+        Some(ToolCallStatus::Success) => "status-success",
+        Some(ToolCallStatus::Failed) => "status-failed",
+        None => "status-unknown",
+    };
+
+    rsx! {
+        div {
+            class: "tool-call-chip {status_class}",
+            class: if detail_expanded() { "detail-expanded" },
+
+            // Chip row (clickable if has args)
+            button {
+                class: "tool-call-row",
+                onclick: move |_| {
+                    if has_args {
+                        detail_expanded.set(!detail_expanded());
+                    }
+                },
+                span { class: "tool-call-status", "{status_icon}" }
+                span { class: "tool-call-icon", "{tool_call.icon}" }
+                span { class: "tool-call-name", "{tool_call.name}" }
+                if let Some(ref target) = tool_call.display_target {
+                    span { class: "tool-call-target", "{target}" }
+                }
+                if let Some(ms) = tool_call.duration_ms {
+                    span { class: "tool-call-duration", "{format_duration(ms)}" }
+                }
+                if has_args {
+                    span {
+                        class: "tool-call-expand",
+                        if detail_expanded() { "\u{25B4}" } else { "\u{25B8}" }
+                    }
+                }
+            }
+
+            // Expanded arguments
+            if detail_expanded() && has_args {
+                div { class: "tool-call-detail",
+                    pre { class: "tool-call-args",
+                        "{format_json_args(&tool_call.arguments)}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Format JSON arguments for display (pretty-print if valid JSON)
+fn format_json_args(args: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(args) {
+        serde_json::to_string_pretty(&value).unwrap_or_else(|_| args.to_string())
+    } else {
+        args.to_string()
+    }
+}
+
+/// Format duration for display (ms → human readable)
+fn format_duration(ms: u64) -> String {
+    if ms < 1000 {
+        format!("{}ms", ms)
+    } else {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    }
+}

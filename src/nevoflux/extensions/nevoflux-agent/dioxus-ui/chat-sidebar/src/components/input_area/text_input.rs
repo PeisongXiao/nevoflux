@@ -9,7 +9,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use crate::context::use_app_context;
-use crate::state::{Message, ImageAttachment};
+use crate::state::{Message, ImageAttachment, SkillItem};
 use shared_protocol::{Attachment, BrowserToolAction, BrowserToolRequestPayload, ChatMode};
 
 #[wasm_bindgen]
@@ -230,7 +230,12 @@ pub fn TextInput(disabled: bool) -> Element {
     // Tab selection state
     let mut show_tab_selector = use_signal(|| false);
     let mut available_tabs = use_signal(|| Vec::<TabItem>::new());
-    
+
+    // Skill selection state
+    let mut show_skill_selector = use_signal(|| false);
+    let mut skill_filter = use_signal(String::new);
+    let mut selected_skill_index = use_signal(|| 0usize);
+
     let has_text = !input_text.read().trim().is_empty();
     let has_files = !attached_files.read().is_empty();
     let can_send = !disabled && (has_text || has_files);
@@ -271,6 +276,42 @@ pub fn TextInput(disabled: bool) -> Element {
             available_tabs.set(tabs);
         });
     };
+
+    // Fetch skills logic
+    let fetch_skills = move || {
+        web_sys::console::log_1(&"[NevoFlux] fetch_skills: triggered, sending skill.list".into());
+        spawn(async move {
+            web_sys::console::log_1(&"[NevoFlux] Calling send_skill_list()...".into());
+            match crate::messaging::send_skill_list().await {
+                Ok(_) => {
+                    web_sys::console::log_1(&"[NevoFlux] send_skill_list() succeeded".into());
+                }
+                Err(e) => {
+                    web_sys::console::error_1(&format!("[NevoFlux] Failed to fetch skills: {}", e).into());
+                }
+            }
+        });
+    };
+
+    // Filtered skills based on input (uses ctx.available_skills from handler)
+    let filtered_skills = use_memo(move || {
+        let filter = skill_filter.read().to_lowercase();
+        let skills = ctx.available_skills.read();
+
+        if filter.is_empty() {
+            skills.clone()
+        } else {
+            skills
+                .iter()
+                .filter(|s| {
+                    s.name.to_lowercase().starts_with(&filter)
+                        || s.name.to_lowercase().contains(&filter)
+                        || s.description.to_lowercase().contains(&filter)
+                })
+                .cloned()
+                .collect()
+        }
+    });
 
     // Handle file attachment via native file picker
     let handle_attach_click = move |_| {
@@ -428,6 +469,16 @@ pub fn TextInput(disabled: bool) -> Element {
         show_tab_selector.set(false);
     };
 
+    let mut handle_select_skill = move |skill: SkillItem| {
+        // Set input to /skillname (with space for easy arg typing)
+        input_text.set(format!("/{} ", skill.name));
+
+        // Close skill selector
+        show_skill_selector.set(false);
+        skill_filter.set(String::new());
+        selected_skill_index.set(0);
+    };
+
     let mut handle_send = move |_: ()| {
         let text = input_text.read().trim().to_string();
         if text.is_empty() && attached_files.read().is_empty() {
@@ -532,11 +583,12 @@ pub fn TextInput(disabled: bool) -> Element {
     let handle_input = move |evt: Event<FormData>| {
         let value = evt.value();
 
-        // Check for @ trigger
+        // Check for @ trigger (tab selector)
         if value.ends_with('@') {
             tracing::info!("handle_input: @ detected, showing tab selector");
             refresh_tabs();
             show_tab_selector.set(true);
+            show_skill_selector.set(false);
         } else if !value.contains('@') {
              // Close if @ is removed
              if show_tab_selector() {
@@ -545,11 +597,80 @@ pub fn TextInput(disabled: bool) -> Element {
              show_tab_selector.set(false);
         }
 
+        // Check for / trigger (skill selector)
+        // Only trigger if starts with / and no space yet (still typing skill name)
+        if value.starts_with('/') && !value.contains(' ') {
+            // Extract filter text: "/s" -> "s", "/" -> ""
+            let filter = if value.len() > 1 {
+                value[1..].to_lowercase()
+            } else {
+                String::new()
+            };
+
+            skill_filter.set(filter);
+
+            // First time entering / - fetch skills
+            if value == "/" {
+                web_sys::console::log_1(&"[NevoFlux] handle_input: / detected, calling fetch_skills()".into());
+                fetch_skills();
+            }
+
+            show_skill_selector.set(true);
+            selected_skill_index.set(0);
+            show_tab_selector.set(false);
+        } else if show_skill_selector() {
+            // Close skill selector if no longer typing /skillname
+            show_skill_selector.set(false);
+        }
+
         input_text.set(value.clone());
         rows.set(calculate_rows(&value));
     };
 
     let handle_keydown = move |evt: KeyboardEvent| {
+        // Skill selector keyboard navigation
+        if show_skill_selector() {
+            let skills = filtered_skills.read();
+            let current_index = selected_skill_index();
+
+            match evt.key() {
+                Key::ArrowDown => {
+                    evt.prevent_default();
+                    if current_index < skills.len().saturating_sub(1) {
+                        selected_skill_index.set(current_index + 1);
+                    }
+                }
+                Key::ArrowUp => {
+                    evt.prevent_default();
+                    if current_index > 0 {
+                        selected_skill_index.set(current_index - 1);
+                    }
+                }
+                Key::Enter | Key::Tab => {
+                    evt.prevent_default();
+                    if let Some(skill) = skills.get(current_index) {
+                        handle_select_skill(skill.clone());
+                    }
+                }
+                Key::Escape => {
+                    evt.prevent_default();
+                    show_skill_selector.set(false);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Tab selector keyboard navigation
+        if show_tab_selector() {
+            if evt.key() == Key::Escape {
+                evt.prevent_default();
+                show_tab_selector.set(false);
+                return;
+            }
+        }
+
+        // Normal input handling
         if evt.key() == Key::Enter {
             if evt.modifiers().shift() {
                 let current = input_text.read().clone();
@@ -606,6 +727,60 @@ pub fn TextInput(disabled: bool) -> Element {
                 }
             }
 
+            // Skill Selector Popup
+            if show_skill_selector() {
+                div { class: "skill-selector-popup",
+                    div { class: "skill-selector-header",
+                        span { class: "skill-selector-title", "Skills" }
+                        span { class: "skill-selector-hint", "↑↓ to navigate, Enter to select" }
+                    }
+
+                    div { class: "skill-selector-list",
+                        for (index, skill) in filtered_skills.read().iter().enumerate() {
+                            {
+                                let skill_item = skill.clone();
+                                let is_selected = index == selected_skill_index();
+                                let name = skill.name.clone();
+                                let description = skill.description.clone();
+
+                                rsx! {
+                                    div {
+                                        class: if is_selected { "skill-selector-item selected" } else { "skill-selector-item" },
+                                        onclick: move |_| handle_select_skill(skill_item.clone()),
+                                        onmouseenter: move |_| selected_skill_index.set(index),
+
+                                        div { class: "skill-selector-icon",
+                                            svg {
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "2",
+                                                path { d: "M13 2L3 14h9l-1 8 10-12h-9l1-8z" }
+                                            }
+                                        }
+
+                                        div { class: "skill-selector-info",
+                                            span { class: "skill-selector-name", "/{name}" }
+                                            span { class: "skill-selector-desc", "{description}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if filtered_skills.read().is_empty() {
+                            div { class: "skill-selector-empty",
+                                if ctx.available_skills.read().is_empty() {
+                                    "Loading skills..."
+                                } else {
+                                    "No matching skills"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // File Attachment List
             if !attached_files.read().is_empty() {
                 div { class: "file-attachment-list",
@@ -648,7 +823,7 @@ pub fn TextInput(disabled: bool) -> Element {
             textarea {
                 class: "text-input",
                 class: if current_rows > 1 { "expanded" },
-                placeholder: "Message Agentic Chat... (Type @ to add tab)",
+                placeholder: "Message Agentic Chat... (/ skills, @ tabs)",
                 disabled: disabled,
                 value: "{input_text}",
                 oninput: handle_input,
@@ -794,16 +969,62 @@ fn ModeSelector() -> Element {
     }
 }
 
-/// Combined voice/send button component
+/// Combined voice/send/stop button component
+///
+/// Shows a Stop button while the agent is actively working (thinking, executing,
+/// or streaming), a Send button when there is text input, and a Voice button
+/// otherwise.
 #[component]
 fn VoiceSendButton(
     has_text: bool,
     is_recording: bool,
     disabled: bool,
-    on_send: EventHandler<()>, 
-    on_voice_toggle: EventHandler<()>, 
+    on_send: EventHandler<()>,
+    on_voice_toggle: EventHandler<()>,
 ) -> Element {
-    if has_text {
+    let mut ctx = use_app_context();
+    let agent_active = ctx.agent_status.read().is_active();
+    let is_streaming = ctx.streaming.read().is_some();
+    let show_stop = agent_active || is_streaming;
+
+    if show_stop {
+        // Stop button mode: agent is working
+        let handle_stop = move |_| {
+            if ctx.mock_enabled {
+                crate::mock::stop_mock_streaming();
+            } else {
+                let session_id = ctx.tab_context.read().zen_sync_id.clone()
+                    .unwrap_or_else(|| ctx.session.read().id.clone());
+                spawn(async move {
+                    let _ = crate::messaging::send_stop_generation(&session_id).await;
+                });
+                ctx.agent_status.write().hide();
+                ctx.streaming.set(None);
+            }
+        };
+
+        rsx! {
+            button {
+                class: "voice-send-button stop-mode",
+                onclick: handle_stop,
+                aria_label: "Stop generation",
+                title: "Stop generation",
+                svg {
+                    width: "20",
+                    height: "20",
+                    view_box: "0 0 24 24",
+                    fill: "currentColor",
+                    rect {
+                        x: "6",
+                        y: "6",
+                        width: "12",
+                        height: "12",
+                        rx: "2",
+                    }
+                }
+            }
+        }
+    } else if has_text {
         rsx! {
             button {
                 class: "voice-send-button send-mode",

@@ -148,6 +148,9 @@ pub struct StreamChunkPayload {
     /// Session title (only present when title is generated for first message)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_title: Option<String>,
+    /// Real-time tool execution event
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<ToolEvent>,
 }
 
 /// Tool call information from agent
@@ -393,6 +396,120 @@ pub struct PickFilesResponsePayload {
 }
 
 // =============================================================================
+// Plan Proposal (Agent → Sidebar) & Plan Response (Sidebar → Agent)
+// =============================================================================
+
+/// A single step in a plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanStep {
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// A proposed plan with summary and ordered steps (Agent → Sidebar).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanProposalPayload {
+    pub summary: String,
+    pub steps: Vec<PlanStep>,
+}
+
+/// User response to a plan proposal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanResponse {
+    Confirmed,
+    Cancelled,
+}
+
+/// Plan response payload with session_id (Sidebar → Agent).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanResponsePayload {
+    pub session_id: String,
+    pub response: PlanResponse,
+}
+
+// =============================================================================
+// Tool Events (Real-time tool execution state)
+// =============================================================================
+
+/// Tool execution event for real-time status in stream chunks
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolEvent {
+    /// Tool started executing
+    #[serde(rename = "tool_start")]
+    Start {
+        tool_id: String,
+        tool_name: String,
+        icon: String,
+        summary: String,
+    },
+    /// Tool waiting for authorization
+    #[serde(rename = "tool_auth")]
+    Auth {
+        tool_id: String,
+        request: ToolAuthRequest,
+    },
+    /// Tool finished executing
+    #[serde(rename = "tool_end")]
+    End {
+        tool_id: String,
+        status: ToolEventStatus,
+        duration_ms: u64,
+        summary: String,
+    },
+}
+
+/// Tool event completion status
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolEventStatus {
+    Success,
+    Failed,
+}
+
+/// Authorization request for a tool execution
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolAuthRequest {
+    /// Tool name ("read", "grep", "bash")
+    pub tool: String,
+    /// Unique tool call ID (for correlating response)
+    pub tool_id: String,
+    /// Human-readable path or command
+    pub detail: String,
+    /// Authorization granularity options
+    pub options: Vec<AuthOption>,
+}
+
+/// A single authorization option presented to the user
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AuthOption {
+    /// Display text, e.g. "Always allow cargo *"
+    pub label: String,
+    /// Authorization scope
+    pub scope: AuthScope,
+}
+
+/// Authorization scope
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthScope {
+    Once,
+    Session,
+    Always,
+    Deny,
+}
+
+/// Tool authorization response from user (Sidebar → Agent)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolAuthResponsePayload {
+    pub tool_id: String,
+    pub option_index: u32,
+    pub scope: AuthScope,
+}
+
+// =============================================================================
 // Chat Message Enum
 // =============================================================================
 
@@ -426,6 +543,10 @@ pub enum ChatMessage {
     BrowserToolResponse(BrowserToolResponsePayload),
     /// Pick files request (open native file dialog)
     PickFilesRequest(PickFilesRequestPayload),
+    /// Plan response (confirm/cancel)
+    PlanResponse(PlanResponsePayload),
+    /// Tool authorization response
+    ToolAuthResponse(ToolAuthResponsePayload),
 
     // ========== Agent → Sidebar ==========
     /// Stream chunk
@@ -448,6 +569,8 @@ pub enum ChatMessage {
     BrowserToolRequest(BrowserToolRequestPayload),
     /// Pick files response (from native file dialog)
     PickFilesResponse(PickFilesResponsePayload),
+    /// Plan proposal from agent
+    PlanProposal(PlanProposalPayload),
 }
 
 impl ChatMessage {
@@ -463,7 +586,9 @@ impl ChatMessage {
             Self::PluginCommand(_) |
             Self::SystemCommand(_) |
             Self::BrowserToolResponse(_) |
-            Self::PickFilesRequest(_) => MessageDirection::ToAgent,
+            Self::PickFilesRequest(_) |
+            Self::PlanResponse(_) |
+            Self::ToolAuthResponse(_) => MessageDirection::ToAgent,
 
             // Agent → Sidebar
             Self::StreamChunk(_) |
@@ -475,7 +600,8 @@ impl ChatMessage {
             Self::AccountStatus(_) |
             Self::SystemResponse(_) |
             Self::BrowserToolRequest(_) |
-            Self::PickFilesResponse(_) => MessageDirection::ToSidebar,
+            Self::PickFilesResponse(_) |
+            Self::PlanProposal(_) => MessageDirection::ToSidebar,
         }
     }
 
@@ -491,6 +617,8 @@ impl ChatMessage {
             Self::SystemCommand(_) => None,
             Self::BrowserToolResponse(p) => Some(&p.session_id),
             Self::PickFilesRequest(_) => None,
+            Self::PlanResponse(p) => Some(&p.session_id),
+            Self::ToolAuthResponse(_) => None,
             Self::StreamChunk(_) => None, // New protocol doesn't include session_id
             Self::StreamEnd(p) => Some(&p.session_id),
             Self::ContentBlock(p) => Some(&p.session_id),
@@ -501,6 +629,7 @@ impl ChatMessage {
             Self::SystemResponse(_) => None,
             Self::BrowserToolRequest(p) => Some(&p.session_id),
             Self::PickFilesResponse(_) => None,
+            Self::PlanProposal(_) => None,
         }
     }
 }

@@ -7,7 +7,7 @@
 use dioxus::prelude::*;
 use crate::context::use_app_context;
 use crate::state::{Message, MessageContent, MessageRole, MessageStatus};
-use super::{CodeBlock, ErrorCard};
+use super::{ActivityFeed, CodeBlock, ErrorCard};
 
 /// Single message bubble component
 #[component]
@@ -29,6 +29,7 @@ pub fn MessageBubble(
         MessageContent::Markdown(md) => md.clone(),
         MessageContent::Code { code, .. } => code.clone(),
         MessageContent::Error { message, .. } => message.clone(),
+        MessageContent::Plan(plan) => plan.summary.clone(),
     };
 
     rsx! {
@@ -141,6 +142,11 @@ pub fn MessageBubble(
                         }
                     }
 
+                    // Activity feed (tool calls) for assistant messages
+                    if !is_user && !message.tool_calls.is_empty() {
+                        ActivityFeed { tool_calls: message.tool_calls.clone() }
+                    }
+
                     // Text content
                     div { class: "bubble-content",
                         match &message.content {
@@ -166,6 +172,7 @@ pub fn MessageBubble(
                                     recoverable: *recoverable,
                                 }
                             },
+                            MessageContent::Plan(_) => rsx! {},
                         }
                     }
 
@@ -379,29 +386,74 @@ fn AssistantMessageToolbar(content: String) -> Element {
 }
 
 /// Simple markdown to HTML conversion
-/// P2: Replace with proper markdown renderer
-fn render_simple_markdown(md: &str) -> String {
+///
+/// Supports: code blocks, headings, horizontal rules, unordered/ordered lists,
+/// bold, italic, inline code, and links.
+pub fn render_simple_markdown(md: &str) -> String {
     let mut html = String::new();
     let lines: Vec<&str> = md.lines().collect();
     let mut i = 0;
     let mut in_paragraph = false;
+    let mut in_ul = false;
+    let mut in_ol = false;
 
     while i < lines.len() {
         let line = lines[i];
+        let trimmed = line.trim();
 
-        // Check for code block start (```)
-        if line.trim().starts_with("```") {
-            // Close any open paragraph
-            if in_paragraph {
-                html.push_str("</p>");
-                in_paragraph = false;
+        // Table: | col | col |
+        if trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.contains(" | ") {
+            close_open_blocks(&mut html, &mut in_paragraph, &mut in_ul, &mut in_ol);
+
+            html.push_str("<table>");
+            // Parse header row
+            let header_cells: Vec<&str> = trimmed
+                .trim_matches('|')
+                .split('|')
+                .map(|c| c.trim())
+                .collect();
+            html.push_str("<thead><tr>");
+            for cell in &header_cells {
+                html.push_str(&format!("<th>{}</th>", render_inline_markdown(cell)));
+            }
+            html.push_str("</tr></thead>");
+
+            // Skip separator row (e.g., |---|---|)
+            if i + 1 < lines.len() {
+                let next = lines[i + 1].trim();
+                if next.starts_with('|') && next.contains("---") {
+                    i += 1;
+                }
             }
 
-            // Extract language
-            let lang = line.trim().trim_start_matches('`').trim();
+            // Parse body rows
+            html.push_str("<tbody>");
+            while i + 1 < lines.len() {
+                let next = lines[i + 1].trim();
+                if !(next.starts_with('|') && next.ends_with('|')) {
+                    break;
+                }
+                i += 1;
+                let cells: Vec<&str> = next
+                    .trim_matches('|')
+                    .split('|')
+                    .map(|c| c.trim())
+                    .collect();
+                html.push_str("<tr>");
+                for cell in &cells {
+                    html.push_str(&format!("<td>{}</td>", render_inline_markdown(cell)));
+                }
+                html.push_str("</tr>");
+            }
+            html.push_str("</tbody></table>");
+        }
+        // Fenced code block
+        else if trimmed.starts_with("```") {
+            close_open_blocks(&mut html, &mut in_paragraph, &mut in_ul, &mut in_ol);
+
+            let lang = trimmed.trim_start_matches('`').trim();
             let lang_display = if lang.is_empty() { "code" } else { lang };
 
-            // Collect code lines until closing ```
             let mut code_lines = Vec::new();
             i += 1;
             while i < lines.len() && !lines[i].trim().starts_with("```") {
@@ -409,7 +461,6 @@ fn render_simple_markdown(md: &str) -> String {
                 i += 1;
             }
 
-            // Generate code block HTML with copy button
             let code_id = format!("code-{}", i);
             let code_content = code_lines.join("\n");
             html.push_str(&format!(
@@ -418,14 +469,49 @@ fn render_simple_markdown(md: &str) -> String {
                 id = code_id,
                 code = code_content
             ));
-        } else if line.is_empty() {
-            // Empty line - paragraph break
-            if in_paragraph {
-                html.push_str("</p>");
-                in_paragraph = false;
-            }
-        } else {
-            // Regular text line
+        }
+        // Horizontal rule
+        else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+            close_open_blocks(&mut html, &mut in_paragraph, &mut in_ul, &mut in_ol);
+            html.push_str("<hr>");
+        }
+        // Headings
+        else if trimmed.starts_with("### ") {
+            close_open_blocks(&mut html, &mut in_paragraph, &mut in_ul, &mut in_ol);
+            html.push_str(&format!("<h3>{}</h3>", render_inline_markdown(&trimmed[4..])));
+        } else if trimmed.starts_with("## ") {
+            close_open_blocks(&mut html, &mut in_paragraph, &mut in_ul, &mut in_ol);
+            html.push_str(&format!("<h2>{}</h2>", render_inline_markdown(&trimmed[3..])));
+        } else if trimmed.starts_with("# ") {
+            close_open_blocks(&mut html, &mut in_paragraph, &mut in_ul, &mut in_ol);
+            html.push_str(&format!("<h1>{}</h1>", render_inline_markdown(&trimmed[2..])));
+        }
+        // Unordered list item
+        else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+            // Close paragraph/ol if open
+            if in_paragraph { html.push_str("</p>"); in_paragraph = false; }
+            if in_ol { html.push_str("</ol>"); in_ol = false; }
+            if !in_ul { html.push_str("<ul>"); in_ul = true; }
+            html.push_str(&format!("<li>{}</li>", render_inline_markdown(&trimmed[2..])));
+        }
+        // Ordered list item (e.g. "1. item")
+        else if is_ordered_list_item(trimmed) {
+            if in_paragraph { html.push_str("</p>"); in_paragraph = false; }
+            if in_ul { html.push_str("</ul>"); in_ul = false; }
+            if !in_ol { html.push_str("<ol>"); in_ol = true; }
+            let content = trimmed.splitn(2, ". ").nth(1).unwrap_or("");
+            html.push_str(&format!("<li>{}</li>", render_inline_markdown(content)));
+        }
+        // Empty line
+        else if trimmed.is_empty() {
+            close_open_blocks(&mut html, &mut in_paragraph, &mut in_ul, &mut in_ol);
+        }
+        // Regular text (paragraph)
+        else {
+            // Close list contexts if we hit regular text
+            if in_ul { html.push_str("</ul>"); in_ul = false; }
+            if in_ol { html.push_str("</ol>"); in_ol = false; }
+
             if !in_paragraph {
                 html.push_str("<p>");
                 in_paragraph = true;
@@ -438,59 +524,126 @@ fn render_simple_markdown(md: &str) -> String {
         i += 1;
     }
 
-    // Close any open paragraph
-    if in_paragraph {
-        html.push_str("</p>");
-    }
-
+    close_open_blocks(&mut html, &mut in_paragraph, &mut in_ul, &mut in_ol);
     html
 }
 
-/// Render inline markdown (bold, italic, inline code)
+/// Close any open block-level elements (paragraph, ul, ol)
+fn close_open_blocks(html: &mut String, in_paragraph: &mut bool, in_ul: &mut bool, in_ol: &mut bool) {
+    if *in_paragraph { html.push_str("</p>"); *in_paragraph = false; }
+    if *in_ul { html.push_str("</ul>"); *in_ul = false; }
+    if *in_ol { html.push_str("</ol>"); *in_ol = false; }
+}
+
+/// Check if a line is an ordered list item (e.g., "1. ", "12. ")
+fn is_ordered_list_item(line: &str) -> bool {
+    if let Some(dot_pos) = line.find(". ") {
+        let prefix = &line[..dot_pos];
+        !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit())
+    } else {
+        false
+    }
+}
+
+/// Render inline markdown (bold, italic, inline code, links)
 fn render_inline_markdown(text: &str) -> String {
     let mut result = String::new();
-    let mut chars = text.chars().peekable();
+    let chars_vec: Vec<char> = text.chars().collect();
+    let len = chars_vec.len();
+    let mut i = 0;
 
-    while let Some(ch) = chars.next() {
-        if ch == '*' {
-            if chars.peek() == Some(&'*') {
-                chars.next();
-                let mut bold_text = String::new();
-                while let Some(c) = chars.next() {
-                    if c == '*' && chars.peek() == Some(&'*') {
-                        chars.next();
-                        break;
-                    }
-                    bold_text.push(c);
-                }
-                result.push_str(&format!("<strong>{}</strong>", html_escape(&bold_text)));
-            } else {
-                let mut italic_text = String::new();
-                while let Some(c) = chars.next() {
-                    if c == '*' {
-                        break;
-                    }
-                    italic_text.push(c);
-                }
-                result.push_str(&format!("<em>{}</em>", html_escape(&italic_text)));
-            }
-        } else if ch == '`' {
-            let mut code_text = String::new();
-            while let Some(c) = chars.next() {
-                if c == '`' {
+    while i < len {
+        let ch = chars_vec[i];
+
+        // Bold: **text**
+        if ch == '*' && i + 1 < len && chars_vec[i + 1] == '*' {
+            i += 2;
+            let mut bold_text = String::new();
+            while i < len {
+                if chars_vec[i] == '*' && i + 1 < len && chars_vec[i + 1] == '*' {
+                    i += 2;
                     break;
                 }
-                code_text.push(c);
+                bold_text.push(chars_vec[i]);
+                i += 1;
+            }
+            result.push_str(&format!("<strong>{}</strong>", html_escape(&bold_text)));
+        }
+        // Italic: *text*
+        else if ch == '*' {
+            i += 1;
+            let mut italic_text = String::new();
+            while i < len {
+                if chars_vec[i] == '*' {
+                    i += 1;
+                    break;
+                }
+                italic_text.push(chars_vec[i]);
+                i += 1;
+            }
+            result.push_str(&format!("<em>{}</em>", html_escape(&italic_text)));
+        }
+        // Inline code: `text`
+        else if ch == '`' {
+            i += 1;
+            let mut code_text = String::new();
+            while i < len {
+                if chars_vec[i] == '`' {
+                    i += 1;
+                    break;
+                }
+                code_text.push(chars_vec[i]);
+                i += 1;
             }
             result.push_str(&format!("<code>{}</code>", html_escape(&code_text)));
-        } else {
-            // Escape HTML special chars
+        }
+        // Link: [text](url)
+        else if ch == '[' {
+            let start = i;
+            i += 1;
+            let mut link_text = String::new();
+            let mut found_link = false;
+
+            // Collect link text up to ]
+            while i < len && chars_vec[i] != ']' {
+                link_text.push(chars_vec[i]);
+                i += 1;
+            }
+
+            // Check for ](url)
+            if i < len && chars_vec[i] == ']' && i + 1 < len && chars_vec[i + 1] == '(' {
+                i += 2; // skip ](
+                let mut url = String::new();
+                while i < len && chars_vec[i] != ')' {
+                    url.push(chars_vec[i]);
+                    i += 1;
+                }
+                if i < len && chars_vec[i] == ')' {
+                    i += 1; // skip )
+                    result.push_str(&format!(
+                        "<a href=\"{}\" target=\"_blank\" rel=\"noopener\">{}</a>",
+                        html_escape(&url),
+                        html_escape(&link_text)
+                    ));
+                    found_link = true;
+                }
+            }
+
+            if !found_link {
+                // Not a valid link, output as literal text
+                let literal: String = chars_vec[start..i.min(len)].iter().collect();
+                result.push_str(&html_escape(&literal));
+            }
+        }
+        // HTML special chars
+        else {
             match ch {
                 '<' => result.push_str("&lt;"),
                 '>' => result.push_str("&gt;"),
                 '&' => result.push_str("&amp;"),
                 _ => result.push(ch),
             }
+            i += 1;
         }
     }
 

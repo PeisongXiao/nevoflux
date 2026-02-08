@@ -76,8 +76,8 @@ with open(init_js, 'r') as f:
     init_content = f.read()
 
 # Change absolute paths like '/foo.js' to relative './foo.js'
-init_content = re.sub(r"from\s+['"]/([\w-]+)", r"from './\1", init_content)
-init_content = re.sub(r"module_or_path:\s+['"]/([\w-]+)", r"module_or_path: './\1", init_content)
+init_content = re.sub(r'''from\s+(?:'|")/([\w-]+)''', r"from './\1", init_content)
+init_content = re.sub(r'''module_or_path:\s+(?:'|")/([\w-]+)''', r"module_or_path: './\1", init_content)
 
 with open(init_js, 'w') as f:
     f.write(init_content)

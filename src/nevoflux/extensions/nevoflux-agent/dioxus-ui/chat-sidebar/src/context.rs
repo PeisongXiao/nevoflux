@@ -10,9 +10,11 @@
 use dioxus::prelude::*;
 
 use crate::state::{
-    AgentStatusState, AskUserState, ConnectionState, HistoryState, MaximizeState, McpConfigState, Message,
-    PendingFilePick, PermissionRequestState, PickedFile, SessionState, SkillItem, StreamingState, TabContext,
+    AgentStatusState, AskUserState, ConnectionState, HistoryState, LiveToolEntry, MaximizeState,
+    McpConfigState, Message, PendingFilePick, PermissionRequestState, PickedFile, SessionState,
+    SkillItem, StreamingState, TabContext,
 };
+use shared_protocol::ToolAuthRequest;
 use shared_protocol::ChatMode;
 
 /// Global application context
@@ -53,6 +55,14 @@ pub struct AppContext {
     pub available_skills: Signal<Vec<SkillItem>>,
     /// Maximize state (sidebar <-> tab mode)
     pub maximize: Signal<MaximizeState>,
+    /// Whether a plan proposal is pending user response
+    pub pending_plan: Signal<bool>,
+    /// Whether to show the history panel
+    pub show_history_panel: Signal<bool>,
+    /// Live tool execution entries (real-time during streaming)
+    pub live_tools: Signal<Vec<LiveToolEntry>>,
+    /// Pending tool authorization request
+    pub pending_tool_auth: Signal<Option<ToolAuthRequest>>,
     /// Whether mock mode is enabled
     pub mock_enabled: bool,
 }
@@ -80,6 +90,10 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
     let chat_mode = use_signal(ChatMode::default);
     let available_skills = use_signal(Vec::<SkillItem>::new);
     let maximize = use_signal(parse_maximize_params);
+    let pending_plan = use_signal(|| false);
+    let show_history_panel = use_signal(|| false);
+    let live_tools = use_signal(Vec::<LiveToolEntry>::new);
+    let pending_tool_auth = use_signal(|| None::<ToolAuthRequest>);
 
     // Build context
     let mut ctx = AppContext {
@@ -99,6 +113,10 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
         chat_mode,
         available_skills,
         maximize,
+        pending_plan,
+        show_history_panel,
+        live_tools,
+        pending_tool_auth,
         mock_enabled,
     };
 
@@ -122,6 +140,22 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
             spawn(async move {
                 // Send ping
                 let _ = crate::messaging::send_ping().await;
+
+                // Resolve window-session binding
+                match crate::bindings::nevoflux_api::get_window_session().await {
+                    Ok(Some(session_id)) => {
+                        tracing::info!("Restored window session: {}", session_id);
+                        ctx.session.write().id = session_id.clone();
+                        // Load session messages from backend
+                        let _ = crate::messaging::send_session_resolve(&session_id).await;
+                    }
+                    Ok(None) => {
+                        tracing::info!("No window session found, using fresh session");
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to get window session: {}", e);
+                    }
+                }
 
                 // Request tab context - use source_tab_id if in maximized mode
                 let tab_context_result = if maximize_state.is_maximized {

@@ -19,8 +19,8 @@ Design for integrating JSWindowActors with WebExtension to provide high-performa
 ### Non-Goals
 
 - Full browser chrome integration (deferred to reduce maintenance)
-- Custom protocol (`nevoflux://`) implementation (future phase)
-- Canvas/Artifacts rendering (future phase)
+- Custom protocol (`nevoflux://`) — see `2026-02-08-nevoflux-protocol-design.md`
+- Canvas/Artifacts rendering — see `2026-02-08-nevoflux-protocol-design.md`
 
 ---
 
@@ -498,9 +498,9 @@ await browser.nevoflux.unlockPage(0);
 
 ## Future Considerations
 
-1. **Custom Protocol (`nevoflux://`)** - For dashboard, settings, canvas pages
-2. **Canvas/Artifacts Rendering** - Live HTML/React/Markdown rendering
-3. **Plan Viewer** - Visual execution plan tracking
-4. **ContentStore Data Bus** - Global state synchronization
+> Custom Protocol (`nevoflux://`) 和 Canvas/Artifacts Rendering 的设计已整合到 `2026-02-08-nevoflux-protocol-design.md`。
+
+1. **Plan Viewer** - Visual execution plan tracking
+2. **ContentStore Data Bus** - Global state synchronization
 
 These can be added incrementally without changing the core architecture.

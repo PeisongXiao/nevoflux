@@ -11,11 +11,17 @@ mod agent_status;
 mod permission_dialog;
 mod mcp_config;
 mod ask_user_dialog;
+mod plan_card;
+mod history_panel;
+mod tool_auth_dialog;
 
 pub use header::Header;
-pub use message_area::{MessageArea, MessageBubble, WelcomeScreen};
+pub use message_area::{ActivityFeed, LiveToolFeed, MessageArea, MessageBubble, WelcomeScreen};
 pub use input_area::InputArea;
 pub use agent_status::AgentStatusBar;
 pub use permission_dialog::PermissionDialog;
 pub use mcp_config::McpConfigModal;
 pub use ask_user_dialog::AskUserDialog;
+pub use plan_card::PlanCard;
+pub use history_panel::HistoryPanel;
+pub use tool_auth_dialog::ToolAuthDialog;

@@ -6,6 +6,32 @@
 
 use shared_protocol::StreamFormat;
 
+/// Tool call data for display in activity feed
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolCallData {
+    /// Tool call ID from the agent
+    pub id: String,
+    /// Tool name (e.g., "Read", "Bash", "click")
+    pub name: String,
+    /// Display icon (emoji or string from daemon)
+    pub icon: String,
+    /// Extracted human-readable target (e.g., file path, command)
+    pub display_target: Option<String>,
+    /// Raw JSON arguments for expanded view
+    pub arguments: String,
+    /// Execution duration in milliseconds
+    pub duration_ms: Option<u64>,
+    /// Completion status
+    pub status: Option<ToolCallStatus>,
+}
+
+/// Tool call completion status for activity feed display
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolCallStatus {
+    Success,
+    Failed,
+}
+
 /// Image attachment for messages
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageAttachment {
@@ -30,6 +56,8 @@ pub struct Message {
     pub content: MessageContent,
     /// Image attachments (displayed above text)
     pub attachments: Vec<ImageAttachment>,
+    /// Tool calls from agent (displayed as activity feed)
+    pub tool_calls: Vec<ToolCallData>,
     /// Timestamp in milliseconds
     pub timestamp: u64,
     /// Message status
@@ -59,6 +87,8 @@ pub enum MessageContent {
         message: String,
         recoverable: bool,
     },
+    /// Plan proposal from agent
+    Plan(PlanData),
 }
 
 /// Message delivery status
@@ -73,6 +103,22 @@ pub enum MessageStatus {
     Error,
 }
 
+/// A single step in a plan
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanStepData {
+    pub description: String,
+    pub model: Option<String>,
+}
+
+/// Plan data for display
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanData {
+    pub summary: String,
+    pub steps: Vec<PlanStepData>,
+    /// Whether this plan is the active (latest) one awaiting user response
+    pub is_active: bool,
+}
+
 impl Message {
     /// Create a new user message
     pub fn user(text: impl Into<String>) -> Self {
@@ -81,6 +127,7 @@ impl Message {
             role: MessageRole::User,
             content: MessageContent::Text(text.into()),
             attachments: Vec::new(),
+            tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
         }
@@ -93,6 +140,7 @@ impl Message {
             role: MessageRole::User,
             content: MessageContent::Text(text.into()),
             attachments: images,
+            tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
         }
@@ -105,6 +153,7 @@ impl Message {
             role: MessageRole::Assistant,
             content: MessageContent::Text(text.into()),
             attachments: Vec::new(),
+            tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
         }
@@ -117,6 +166,7 @@ impl Message {
             role: MessageRole::Assistant,
             content: MessageContent::Markdown(content.into()),
             attachments: Vec::new(),
+            tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
         }
@@ -133,6 +183,7 @@ impl Message {
                 recoverable,
             },
             attachments: Vec::new(),
+            tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
         }
@@ -148,6 +199,40 @@ impl Message {
                 code: code.into(),
             },
             attachments: Vec::new(),
+            tool_calls: Vec::new(),
+            timestamp: js_sys::Date::now() as u64,
+            status: MessageStatus::Sent,
+        }
+    }
+
+    /// Create a plan proposal message
+    pub fn plan(summary: impl Into<String>, steps: Vec<PlanStepData>, is_active: bool) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: MessageRole::Assistant,
+            content: MessageContent::Plan(PlanData {
+                summary: summary.into(),
+                steps,
+                is_active,
+            }),
+            attachments: Vec::new(),
+            tool_calls: Vec::new(),
+            timestamp: js_sys::Date::now() as u64,
+            status: MessageStatus::Sent,
+        }
+    }
+
+    /// Create an assistant message with activity feed (tool calls + filtered content)
+    pub fn assistant_with_activity(
+        content: impl Into<String>,
+        tool_calls: Vec<ToolCallData>,
+    ) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: MessageRole::Assistant,
+            content: MessageContent::Markdown(content.into()),
+            attachments: Vec::new(),
+            tool_calls,
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
         }

@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
 // ==================== Type Definitions ====================
@@ -136,6 +137,58 @@ fn get_tabs_api() -> Option<js_sys::Object> {
     }
 
     tabs.dyn_into::<js_sys::Object>().ok()
+}
+
+/// Get the browser.sidebarAction object
+fn get_sidebar_action_api() -> Option<js_sys::Object> {
+    let global = js_sys::global();
+
+    let browser = js_sys::Reflect::get(&global, &JsValue::from_str("browser")).ok()?;
+    if browser.is_undefined() || browser.is_null() {
+        return None;
+    }
+
+    let sidebar = js_sys::Reflect::get(&browser, &JsValue::from_str("sidebarAction")).ok()?;
+    if sidebar.is_undefined() || sidebar.is_null() {
+        return None;
+    }
+
+    sidebar.dyn_into::<js_sys::Object>().ok()
+}
+
+/// Call a method on browser.sidebarAction dynamically
+async fn call_sidebar_action_method(method: &str, args: &[JsValue]) -> Result<JsValue, String> {
+    let sidebar = get_sidebar_action_api()
+        .ok_or_else(|| "browser.sidebarAction API not available".to_string())?;
+
+    let func = js_sys::Reflect::get(&sidebar, &JsValue::from_str(method))
+        .map_err(|_| format!("Method {} not found", method))?;
+
+    if func.is_undefined() || func.is_null() {
+        return Err(format!("Method {} not found on browser.sidebarAction", method));
+    }
+
+    let func: js_sys::Function = func.dyn_into()
+        .map_err(|_| format!("{} is not a function", method))?;
+
+    let args_array = js_sys::Array::new();
+    for arg in args {
+        args_array.push(arg);
+    }
+
+    let promise = func.apply(&sidebar, &args_array)
+        .map_err(|e| format!("Failed to call {}: {:?}", method, e))?;
+
+    if !promise.is_instance_of::<js_sys::Promise>() {
+        return Ok(promise);
+    }
+
+    let promise: js_sys::Promise = promise.dyn_into()
+        .map_err(|_| "Result is not a Promise".to_string())?;
+
+    JsFuture::from(promise)
+        .await
+        .map_err(|e| format!("Promise rejected: {:?}", e))
 }
 
 /// Call a method on browser.nevoflux dynamically
@@ -393,4 +446,299 @@ pub async fn unlock_page(tab_id: u32) -> Result<(), String> {
     let tab_id_js = JsValue::from_f64(tab_id as f64);
     call_nevoflux_method("unlockPage", &[tab_id_js]).await?;
     Ok(())
+}
+
+// ==================== Sidebar Action API ====================
+
+/// Try to close sidebar synchronously (call this immediately in click handler)
+/// This attempts to preserve user gesture context by avoiding async operations
+pub fn try_close_sidebar_sync() {
+    // Call JavaScript directly without async/await to preserve user gesture
+    let code = r#"
+        (function() {
+            try {
+                if (typeof browser !== 'undefined' && browser.sidebarAction && browser.sidebarAction.close) {
+                    browser.sidebarAction.close();
+                    return true;
+                }
+            } catch (e) {
+                console.warn('[NevoFlux] Sync sidebar close failed:', e);
+            }
+            return false;
+        })()
+    "#;
+
+    if let Ok(result) = js_sys::eval(code) {
+        tracing::info!("Sync sidebar close attempted: {:?}", result);
+    }
+}
+
+/// Get the browser.runtime object
+fn get_runtime_api() -> Option<js_sys::Object> {
+    let global = js_sys::global();
+
+    let browser = js_sys::Reflect::get(&global, &JsValue::from_str("browser")).ok()?;
+    if browser.is_undefined() || browser.is_null() {
+        return None;
+    }
+
+    let runtime = js_sys::Reflect::get(&browser, &JsValue::from_str("runtime")).ok()?;
+    if runtime.is_undefined() || runtime.is_null() {
+        return None;
+    }
+
+    runtime.dyn_into::<js_sys::Object>().ok()
+}
+
+/// Send a raw JsValue message to the background script
+async fn send_to_background_raw(message: JsValue) -> Result<JsValue, String> {
+    let runtime = get_runtime_api()
+        .ok_or_else(|| "browser.runtime API not available".to_string())?;
+
+    let func = js_sys::Reflect::get(&runtime, &JsValue::from_str("sendMessage"))
+        .map_err(|_| "sendMessage not found".to_string())?;
+
+    let func: js_sys::Function = func.dyn_into()
+        .map_err(|_| "sendMessage is not a function".to_string())?;
+
+    let args_array = js_sys::Array::new();
+    args_array.push(&message);
+
+    let promise = func.apply(&runtime, &args_array)
+        .map_err(|e| format!("Failed to call sendMessage: {:?}", e))?;
+
+    let promise: js_sys::Promise = promise.dyn_into()
+        .map_err(|_| "Result is not a Promise".to_string())?;
+
+    JsFuture::from(promise)
+        .await
+        .map_err(|e| format!("Promise rejected: {:?}", e))
+}
+
+/// Send a message to the background script
+async fn send_to_background(msg_type: &str) -> Result<JsValue, String> {
+    let runtime = get_runtime_api()
+        .ok_or_else(|| "browser.runtime API not available".to_string())?;
+
+    let func = js_sys::Reflect::get(&runtime, &JsValue::from_str("sendMessage"))
+        .map_err(|_| "sendMessage not found".to_string())?;
+
+    let func: js_sys::Function = func.dyn_into()
+        .map_err(|_| "sendMessage is not a function".to_string())?;
+
+    // Build message object
+    let message = js_sys::Object::new();
+    js_sys::Reflect::set(&message, &JsValue::from_str("type"), &JsValue::from_str(msg_type))
+        .map_err(|_| "Failed to set type")?;
+
+    let args_array = js_sys::Array::new();
+    args_array.push(&message.into());
+
+    let promise = func.apply(&runtime, &args_array)
+        .map_err(|e| format!("Failed to call sendMessage: {:?}", e))?;
+
+    let promise: js_sys::Promise = promise.dyn_into()
+        .map_err(|_| "Result is not a Promise".to_string())?;
+
+    JsFuture::from(promise)
+        .await
+        .map_err(|e| format!("Promise rejected: {:?}", e))
+}
+
+/// Close the sidebar (via background script)
+pub async fn close_sidebar() -> Result<(), String> {
+    let result = send_to_background("bg:sidebar_close").await?;
+
+    // Check if success
+    if let Ok(obj) = result.dyn_into::<js_sys::Object>() {
+        if let Ok(success) = js_sys::Reflect::get(&obj, &JsValue::from_str("success")) {
+            if success == JsValue::TRUE {
+                return Ok(());
+            }
+        }
+        if let Ok(error) = js_sys::Reflect::get(&obj, &JsValue::from_str("error")) {
+            if let Some(err_str) = error.as_string() {
+                return Err(err_str);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Open the sidebar (via background script)
+pub async fn open_sidebar() -> Result<(), String> {
+    let result = send_to_background("bg:sidebar_open").await?;
+
+    // Check if success
+    if let Ok(obj) = result.dyn_into::<js_sys::Object>() {
+        if let Ok(success) = js_sys::Reflect::get(&obj, &JsValue::from_str("success")) {
+            if success == JsValue::TRUE {
+                return Ok(());
+            }
+        }
+        if let Ok(error) = js_sys::Reflect::get(&obj, &JsValue::from_str("error")) {
+            if let Some(err_str) = error.as_string() {
+                return Err(err_str);
+            }
+        }
+    }
+    Ok(())
+}
+
+// ==================== Tab Management API ====================
+
+/// Create a new tab
+pub async fn create_tab(url: &str, active: bool) -> Result<TabInfo, String> {
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &JsValue::from_str("url"), &JsValue::from_str(url))
+        .map_err(|_| "Failed to set url")?;
+    js_sys::Reflect::set(&options, &JsValue::from_str("active"), &JsValue::from_bool(active))
+        .map_err(|_| "Failed to set active")?;
+
+    let result = call_tabs_method("create", &[options.into()]).await?;
+
+    let tab: serde_json::Value = parse_js_value(result)?;
+    Ok(TabInfo {
+        id: tab.get("id").and_then(|v| v.as_u64()).ok_or("No tab id")? as u32,
+        url: tab.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        title: tab.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        active: tab.get("active").and_then(|v| v.as_bool()).unwrap_or(false),
+        discarded: tab.get("discarded").and_then(|v| v.as_bool()).unwrap_or(false),
+        fav_icon_url: tab.get("favIconUrl").and_then(|v| v.as_str()).map(|s| s.to_string()),
+    })
+}
+
+/// Update a tab (e.g., activate it)
+pub async fn update_tab(tab_id: i32, active: bool) -> Result<(), String> {
+    let tab_id_js = JsValue::from_f64(tab_id as f64);
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &JsValue::from_str("active"), &JsValue::from_bool(active))
+        .map_err(|_| "Failed to set active")?;
+
+    call_tabs_method("update", &[tab_id_js, options.into()]).await?;
+    Ok(())
+}
+
+/// Remove (close) a tab
+pub async fn remove_tab(tab_id: i32) -> Result<(), String> {
+    let tab_id_js = JsValue::from_f64(tab_id as f64);
+    call_tabs_method("remove", &[tab_id_js]).await?;
+    Ok(())
+}
+
+/// Get the current tab (only works in extension pages, not sidebar)
+pub async fn get_current_tab() -> Result<Option<TabInfo>, String> {
+    let result = call_tabs_method("getCurrent", &[]).await?;
+
+    if result.is_undefined() || result.is_null() {
+        return Ok(None);
+    }
+
+    let tab: serde_json::Value = parse_js_value(result)?;
+    Ok(Some(TabInfo {
+        id: tab.get("id").and_then(|v| v.as_u64()).ok_or("No tab id")? as u32,
+        url: tab.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        title: tab.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        active: tab.get("active").and_then(|v| v.as_bool()).unwrap_or(false),
+        discarded: tab.get("discarded").and_then(|v| v.as_bool()).unwrap_or(false),
+        fav_icon_url: tab.get("favIconUrl").and_then(|v| v.as_str()).map(|s| s.to_string()),
+    }))
+}
+
+// ==================== Window Session API ====================
+
+/// Get the session ID for the current browser window
+pub async fn get_window_session() -> Result<Option<String>, String> {
+    // Step 1: Get current window ID via browser.windows.getCurrent()
+    let browser = js_sys::Reflect::get(
+        &js_sys::global(),
+        &wasm_bindgen::JsValue::from_str("browser"),
+    ).map_err(|e| format!("No browser API: {:?}", e))?;
+
+    let windows = js_sys::Reflect::get(&browser, &wasm_bindgen::JsValue::from_str("windows"))
+        .map_err(|e| format!("No windows API: {:?}", e))?;
+
+    let get_current = js_sys::Reflect::get(&windows, &wasm_bindgen::JsValue::from_str("getCurrent"))
+        .map_err(|e| format!("No getCurrent: {:?}", e))?;
+
+    let get_current_fn: js_sys::Function = get_current.dyn_into()
+        .map_err(|_| "getCurrent is not a function".to_string())?;
+
+    let promise = get_current_fn.call0(&windows)
+        .map_err(|e| format!("getCurrent failed: {:?}", e))?;
+
+    let win_info = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise))
+        .await
+        .map_err(|e| format!("getCurrent await failed: {:?}", e))?;
+
+    let window_id = js_sys::Reflect::get(&win_info, &wasm_bindgen::JsValue::from_str("id"))
+        .ok()
+        .and_then(|v| v.as_f64())
+        .map(|v| v as i32);
+
+    let Some(window_id) = window_id else {
+        return Ok(None);
+    };
+
+    // Step 2: Ask background.js for the session mapped to this window
+    let message = serde_json::json!({
+        "type": "bg:get_window_session",
+        "windowId": window_id
+    });
+
+    let js_msg = to_js_value(&message)?;
+
+    let result = send_to_background_raw(js_msg).await?;
+
+    let session_id = js_sys::Reflect::get(&result, &wasm_bindgen::JsValue::from_str("sessionId"))
+        .ok()
+        .and_then(|v| v.as_string());
+
+    Ok(session_id)
+}
+
+/// Create a new session for the current browser window
+pub async fn new_window_session() -> Result<String, String> {
+    let browser = js_sys::Reflect::get(
+        &js_sys::global(),
+        &wasm_bindgen::JsValue::from_str("browser"),
+    ).map_err(|e| format!("No browser API: {:?}", e))?;
+
+    let windows = js_sys::Reflect::get(&browser, &wasm_bindgen::JsValue::from_str("windows"))
+        .map_err(|e| format!("No windows API: {:?}", e))?;
+
+    let get_current = js_sys::Reflect::get(&windows, &wasm_bindgen::JsValue::from_str("getCurrent"))
+        .map_err(|e| format!("No getCurrent: {:?}", e))?;
+
+    let get_current_fn: js_sys::Function = get_current.dyn_into()
+        .map_err(|_| "getCurrent is not a function".to_string())?;
+
+    let promise = get_current_fn.call0(&windows)
+        .map_err(|e| format!("getCurrent failed: {:?}", e))?;
+
+    let win_info = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise))
+        .await
+        .map_err(|e| format!("getCurrent await failed: {:?}", e))?;
+
+    let window_id = js_sys::Reflect::get(&win_info, &wasm_bindgen::JsValue::from_str("id"))
+        .ok()
+        .and_then(|v| v.as_f64())
+        .map(|v| v as i32)
+        .ok_or_else(|| "Could not get window ID".to_string())?;
+
+    let message = serde_json::json!({
+        "type": "bg:new_session",
+        "windowId": window_id
+    });
+
+    let js_msg = to_js_value(&message)?;
+
+    let result = send_to_background_raw(js_msg).await?;
+
+    let session_id = js_sys::Reflect::get(&result, &wasm_bindgen::JsValue::from_str("sessionId"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| "No sessionId in response".to_string())?;
+
+    Ok(session_id)
 }

@@ -104,6 +104,9 @@ fn handle_chat_message(ctx: AppContext, message: ChatMessage) {
             // Not used - file.pick responses come via SystemResponse
             tracing::debug!("Received PickFilesResponse - using SystemResponse instead");
         }
+        ChatMessage::PlanProposal(payload) => {
+            handle_plan_proposal(ctx, payload);
+        }
 
         // ========== Sidebar -> Agent messages (should not be received) ==========
         ChatMessage::ChatMessage(_) |
@@ -114,7 +117,9 @@ fn handle_chat_message(ctx: AppContext, message: ChatMessage) {
         ChatMessage::PluginCommand(_) |
         ChatMessage::SystemCommand(_) |
         ChatMessage::BrowserToolResponse(_) |
-        ChatMessage::PickFilesRequest(_) => {
+        ChatMessage::PickFilesRequest(_) |
+        ChatMessage::PlanResponse(_) |
+        ChatMessage::ToolAuthResponse(_) => {
             tracing::warn!("Received unexpected ToAgent message in sidebar");
         }
     }
@@ -231,6 +236,11 @@ fn handle_stream_chunk(mut ctx: AppContext, payload: StreamChunkPayload) {
         });
     }
 
+    // Process tool event if present
+    if let Some(event) = payload.event {
+        handle_tool_event(ctx, event);
+    }
+
     // New protocol: content + done flag (no stream_id needed)
     if payload.done {
         // Stream complete - finalize accumulated content into a message
@@ -248,37 +258,201 @@ fn handle_stream_chunk(mut ctx: AppContext, payload: StreamChunkPayload) {
             }
         };
 
-        // Only add message if there's actual content
-        if !final_content.is_empty() {
-            let message = Message::assistant_markdown(final_content);
+        // Drain live_tools into final ToolCallData, merging with payload tool_calls
+        let live_tool_data: Vec<ToolCallData> = ctx.live_tools.write().drain(..).map(|entry| {
+            let status = match entry.status {
+                LiveToolStatus::Success => Some(ToolCallStatus::Success),
+                LiveToolStatus::Failed => Some(ToolCallStatus::Failed),
+                _ => None,
+            };
+            ToolCallData {
+                id: entry.id,
+                name: entry.name,
+                icon: entry.icon,
+                display_target: Some(entry.summary),
+                arguments: String::new(),
+                duration_ms: entry.duration_ms,
+                status,
+            }
+        }).collect();
+
+        // Convert payload tool_calls to UI data (fallback for tools without events)
+        let payload_tool_calls: Vec<ToolCallData> = payload.tool_calls.iter()
+            .filter(|tc| !live_tool_data.iter().any(|lt| lt.id == tc.id))
+            .map(|tc| {
+                ToolCallData {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    icon: get_tool_icon(&tc.name).to_string(),
+                    display_target: extract_tool_target(&tc.name, &tc.arguments),
+                    arguments: tc.arguments.clone(),
+                    duration_ms: None,
+                    status: None,
+                }
+            }).collect();
+
+        // Merge: live_tools first (they have duration/status), then any remaining payload tools
+        let mut tool_calls = live_tool_data;
+        tool_calls.extend(payload_tool_calls);
+
+        // Clear pending tool auth
+        ctx.pending_tool_auth.set(None);
+
+        // Strip tool XML artifacts and apply narration filter
+        let stripped = strip_tool_xml(&final_content);
+        let display_content = if tool_calls.is_empty() {
+            stripped
+        } else {
+            let tool_names: Vec<String> = tool_calls.iter()
+                .map(|tc| tc.name.clone()).collect();
+            filter_narration(&stripped, &tool_names)
+        };
+
+        // Add message if there's content or tool calls
+        if !display_content.is_empty() || !tool_calls.is_empty() {
+            let message = if tool_calls.is_empty() {
+                Message::assistant_markdown(display_content)
+            } else {
+                Message::assistant_with_activity(display_content, tool_calls)
+            };
             ctx.messages.write().push(message);
         }
 
         // Clear agent status
         ctx.agent_status.write().hide();
-
-        // Handle tool calls if present
-        if !payload.tool_calls.is_empty() {
-            tracing::debug!("Received {} tool calls", payload.tool_calls.len());
-            // TODO: Handle tool calls
-        }
     } else {
         // Streaming in progress - accumulate content
-        let mut streaming = ctx.streaming.write();
-        match &mut *streaming {
-            Some(ref mut stream) => {
-                stream.content.push_str(&payload.content);
-            }
-            None => {
-                // Start new stream
-                *streaming = Some(StreamingState {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    content: payload.content,
-                    format: StreamFormat::Markdown,
-                });
+        if !payload.content.is_empty() {
+            let mut streaming = ctx.streaming.write();
+            match &mut *streaming {
+                Some(ref mut stream) => {
+                    stream.content.push_str(&payload.content);
+                }
+                None => {
+                    // Start new stream
+                    *streaming = Some(StreamingState {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        content: payload.content,
+                        format: StreamFormat::Markdown,
+                    });
+                }
             }
         }
     }
+}
+
+/// Handle real-time tool execution events
+fn handle_tool_event(mut ctx: AppContext, event: shared_protocol::ToolEvent) {
+    use shared_protocol::ToolEvent;
+
+    match event {
+        ToolEvent::Start { tool_id, tool_name, icon, summary } => {
+            tracing::debug!("Tool started: {} ({})", tool_name, tool_id);
+            ctx.live_tools.write().push(LiveToolEntry {
+                id: tool_id,
+                name: tool_name,
+                icon,
+                summary,
+                status: LiveToolStatus::Running,
+                duration_ms: None,
+            });
+        }
+        ToolEvent::Auth { tool_id, request } => {
+            tracing::info!("Tool auth requested: {} ({})", request.tool, tool_id);
+            // Update matching live tool entry status
+            ctx.live_tools.with_mut(|tools| {
+                if let Some(entry) = tools.iter_mut().find(|t| t.id == tool_id) {
+                    entry.status = LiveToolStatus::WaitingAuth(request.clone());
+                }
+            });
+            // Set pending auth for dialog
+            ctx.pending_tool_auth.set(Some(request));
+        }
+        ToolEvent::End { tool_id, status, duration_ms, summary } => {
+            tracing::debug!("Tool ended: {} ({}, {}ms)", tool_id, summary, duration_ms);
+            ctx.live_tools.with_mut(|tools| {
+                if let Some(entry) = tools.iter_mut().find(|t| t.id == tool_id) {
+                    entry.status = match status {
+                        shared_protocol::ToolEventStatus::Success => LiveToolStatus::Success,
+                        shared_protocol::ToolEventStatus::Failed => LiveToolStatus::Failed,
+                    };
+                    entry.duration_ms = Some(duration_ms);
+                    entry.summary = summary;
+                }
+            });
+            // Clear pending auth if this tool was waiting
+            ctx.pending_tool_auth.with_mut(|auth| {
+                if let Some(req) = auth.as_ref() {
+                    if req.tool_id == tool_id {
+                        *auth = None;
+                    }
+                }
+            });
+        }
+    }
+}
+
+/// Filter narration paragraphs from accumulated text.
+///
+/// Heuristic: paragraphs that start with narration patterns AND mention
+/// a tool name are considered narration and removed. If everything would
+/// be filtered, the original text is returned as a safety net.
+fn filter_narration(text: &str, tool_names: &[String]) -> String {
+    let paragraphs: Vec<&str> = text.split("\n\n").collect();
+    let mut answer_parts = Vec::new();
+
+    let narration_starters = [
+        "Let me ", "I'll ", "I need to ", "I'm going to ",
+        "First, let me ", "Now let me ", "Now I'll ",
+    ];
+
+    for para in &paragraphs {
+        let trimmed = para.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let starts_with_narration = narration_starters.iter()
+            .any(|s| trimmed.starts_with(s));
+        let mentions_tool = tool_names.iter()
+            .any(|t| trimmed.contains(t.as_str()));
+
+        // Only filter if BOTH conditions: narration pattern AND tool mention
+        if starts_with_narration && mentions_tool {
+            continue;
+        }
+
+        answer_parts.push(*para);
+    }
+
+    // If everything was filtered, return original (safety net)
+    if answer_parts.is_empty() {
+        return text.to_string();
+    }
+
+    answer_parts.join("\n\n")
+}
+
+/// Strip `<tool_result>…</tool_result>` and `<tool_call>…</tool_call>` XML blocks
+/// from assistant text. These are agent protocol artifacts that should not be
+/// displayed to users.
+fn strip_tool_xml(text: &str) -> String {
+    let mut result = text.to_string();
+    for tag in &["tool_result", "tool_call"] {
+        loop {
+            let open = format!("<{}", tag);
+            let close = format!("</{}>", tag);
+            if let Some(start) = result.find(&open) {
+                if let Some(end_pos) = result[start..].find(&close) {
+                    let end = start + end_pos + close.len();
+                    result.replace_range(start..end, "");
+                    continue;
+                }
+            }
+            break;
+        }
+    }
+    result
 }
 
 fn handle_stream_end(mut ctx: AppContext, payload: StreamEndPayload) {
@@ -385,13 +559,34 @@ fn handle_error(mut ctx: AppContext, payload: ErrorPayload) {
 // ============================================
 
 fn handle_content_block(mut ctx: AppContext, payload: ContentBlockPayload) {
-    let message = match payload.content_type {
-        ContentType::Text => Message::assistant(
-            payload.content.as_str().unwrap_or_default().to_string(),
-        ),
-        ContentType::Markdown => Message::assistant_markdown(
-            payload.content.as_str().unwrap_or_default().to_string(),
-        ),
+    let raw_text = payload.content.as_str().unwrap_or_default().to_string();
+
+    match payload.content_type {
+        ContentType::Text | ContentType::Markdown => {
+            // Strip tool XML artifacts before display
+            let clean = strip_tool_xml(&raw_text);
+            if clean.trim().is_empty() {
+                return; // Nothing to show after stripping
+            }
+
+            // Merge into the last assistant message if possible
+            let merged = ctx.messages.with_mut(|messages| {
+                if let Some(last) = messages.last_mut() {
+                    if last.role == MessageRole::Assistant {
+                        if let MessageContent::Markdown(ref mut md) = last.content {
+                            md.push_str("\n\n");
+                            md.push_str(&clean);
+                            return true;
+                        }
+                    }
+                }
+                false
+            });
+
+            if !merged {
+                ctx.messages.write().push(Message::assistant_markdown(clean));
+            }
+        }
         ContentType::Code => {
             let language = payload
                 .metadata
@@ -400,15 +595,45 @@ fn handle_content_block(mut ctx: AppContext, payload: ContentBlockPayload) {
                 .and_then(|v| v.as_str())
                 .unwrap_or("text")
                 .to_string();
-            Message::code(language, payload.content.as_str().unwrap_or_default())
+            ctx.messages.write().push(Message::code(language, raw_text));
         }
         ContentType::A2ui | ContentType::Image => {
             // P2: placeholder for now
-            Message::assistant("[Content block not yet supported]")
+            ctx.messages.write().push(Message::assistant("[Content block not yet supported]"));
         }
-    };
+    }
+}
 
-    ctx.messages.write().push(message);
+// ============================================
+// Plan Proposal Handler
+// ============================================
+
+fn handle_plan_proposal(mut ctx: AppContext, payload: shared_protocol::PlanProposalPayload) {
+    tracing::info!("Received plan proposal: {} steps", payload.steps.len());
+
+    // Deactivate all existing plan messages
+    ctx.messages.with_mut(|messages| {
+        for msg in messages.iter_mut() {
+            if let MessageContent::Plan(ref mut plan) = msg.content {
+                plan.is_active = false;
+            }
+        }
+    });
+
+    // Convert protocol steps to state steps
+    let steps: Vec<PlanStepData> = payload.steps.into_iter().map(|s| PlanStepData {
+        description: s.description,
+        model: s.model,
+    }).collect();
+
+    // Push new plan message as active
+    ctx.messages.write().push(Message::plan(payload.summary, steps, true));
+
+    // Set pending plan flag
+    ctx.pending_plan.set(true);
+
+    // Set agent to waiting state
+    ctx.agent_status.write().set_waiting();
 }
 
 // ============================================
@@ -448,6 +673,33 @@ fn handle_system_response(mut ctx: AppContext, payload: SystemResponsePayload) {
                 }
             } else {
                 tracing::error!("session.clone failed: {:?}", payload.error);
+            }
+        }
+        "session.delete" => {
+            if payload.success {
+                if let Some(data) = payload.data {
+                    handle_session_delete_response(ctx, data);
+                }
+            } else {
+                tracing::error!("session.delete failed: {:?}", payload.error);
+            }
+        }
+        "session.rename" => {
+            if payload.success {
+                if let Some(data) = payload.data {
+                    handle_session_rename_response(ctx, data);
+                }
+            } else {
+                tracing::error!("session.rename failed: {:?}", payload.error);
+            }
+        }
+        "session.pin" | "session.unpin" => {
+            if payload.success {
+                if let Some(data) = payload.data {
+                    handle_session_pin_response(ctx, data);
+                }
+            } else {
+                tracing::error!("{} failed: {:?}", payload.command, payload.error);
             }
         }
         // MCP configuration commands
@@ -500,6 +752,19 @@ fn handle_system_response(mut ctx: AppContext, payload: SystemResponsePayload) {
                         .unwrap_or_else(|| "File picker failed".to_string());
                     tracing::error!("file.pick failed: {}", error_msg);
                 }
+            }
+        }
+        // Skill list response
+        "skill.list" => {
+            if payload.success {
+                if let Some(data) = payload.data {
+                    handle_skill_list_response(ctx, data);
+                }
+            } else {
+                let error_msg = payload.error
+                    .map(|e| e.message)
+                    .unwrap_or_else(|| "Unknown error".to_string());
+                tracing::error!("skill.list failed: {}", error_msg);
             }
         }
         _ => {
@@ -609,6 +874,7 @@ fn handle_session_list_response(mut ctx: AppContext, data: serde_json::Value) {
                 title,
                 updated_at,
                 message_count,
+                pinned: session_json.get("pinned").and_then(|v| v.as_bool()).unwrap_or(false),
             });
         }
 
@@ -618,6 +884,40 @@ fn handle_session_list_response(mut ctx: AppContext, data: serde_json::Value) {
         ctx.history.write().set_sessions(Vec::new(), 0);
         tracing::info!("No sessions in history");
     }
+}
+
+/// Handle session.delete response
+fn handle_session_delete_response(_ctx: AppContext, data: serde_json::Value) {
+    let deleted = data.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
+    if deleted {
+        tracing::info!("Session deleted successfully");
+    }
+}
+
+/// Handle session.rename response - update title in history and active session
+fn handle_session_rename_response(mut ctx: AppContext, data: serde_json::Value) {
+    let id = data.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+    let title = data.get("title").and_then(|v| v.as_str());
+
+    if let Some(title) = title {
+        ctx.history.write().update_title(id, title);
+
+        let active_id = ctx.session.read().id.clone();
+        if active_id == id {
+            ctx.session.write().set_title(title.to_string());
+        }
+
+        tracing::info!("Session {} renamed to '{}'", id, title);
+    }
+}
+
+/// Handle session.pin/unpin response - update pinned state in history
+fn handle_session_pin_response(mut ctx: AppContext, data: serde_json::Value) {
+    let id = data.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+    let pinned = data.get("pinned").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    ctx.history.write().update_pinned(id, pinned);
+    tracing::info!("Session {} pinned={}", id, pinned);
 }
 
 // ============================================
@@ -637,38 +937,25 @@ fn handle_internal_message(mut ctx: AppContext, message: InternalMessage) {
             }
         }
         InternalMessage::TabContextUpdate(payload) => {
-            let old_zen_sync_id = ctx.tab_context.read().zen_sync_id.clone();
-            let new_zen_sync_id = payload.zen_sync_id.clone();
+            // Session is window-scoped, not tab-scoped.
+            // Tab switching only updates the current tab context (URL, title, etc.)
+            // without changing the active session or conversation.
+            tracing::info!("Tab context updated: tab_id={}, url={}", payload.tab_id, payload.url);
 
-            // Update tab context
-            ctx.tab_context.set(TabContext {
-                tab_id: payload.tab_id,
-                zen_sync_id: payload.zen_sync_id,
-                url: payload.url,
-                title: payload.title,
-                favicon_url: payload.favicon_url,
+            // Defer signal write to next microtask to avoid AlreadyBorrowed panic.
+            // The JS onMessage callback runs outside the Dioxus runtime context,
+            // so we use spawn_local (not Dioxus's spawn which requires runtime).
+            // This also avoids borrow conflicts when Dioxus effects/components
+            // are holding read guards on tab_context during the notification phase.
+            spawn_local(async move {
+                ctx.tab_context.set(TabContext {
+                    tab_id: payload.tab_id,
+                    zen_sync_id: payload.zen_sync_id,
+                    url: payload.url,
+                    title: payload.title,
+                    favicon_url: payload.favicon_url,
+                });
             });
-
-            // If zen_sync_id changed, resolve the new session
-            if new_zen_sync_id != old_zen_sync_id {
-                // Reset UI state when switching tabs
-                ctx.agent_status.write().hide();
-                ctx.streaming.set(None);
-                ctx.permission_request.set(None);
-
-                if let Some(ref session_id) = new_zen_sync_id {
-                    tracing::info!("Tab changed, resolving session: {}", session_id);
-                    let session_id = session_id.clone();
-                    spawn_local(async move {
-                        if let Err(e) = crate::messaging::sender::send_session_resolve(&session_id).await {
-                            tracing::error!("Failed to resolve session: {}", e);
-                        }
-                    });
-                } else {
-                    // No session_id - clear messages and show welcome
-                    ctx.messages.set(Vec::new());
-                }
-            }
         }
         InternalMessage::AskUserRequest(payload) => {
             tracing::info!("Received AskUser request: {}", payload.request_id);
@@ -815,4 +1102,41 @@ fn handle_mcp_connection_response(mut ctx: AppContext, data: serde_json::Value) 
 
     ctx.mcp_config.write().update_status(&name, status);
     tracing::info!("MCP server '{}' connection status updated: connected={}", name, connected);
+}
+
+// ============================================
+// Skill List Response Handler
+// ============================================
+
+/// Handle skill.list response - populate available skills
+fn handle_skill_list_response(mut ctx: AppContext, data: serde_json::Value) {
+    use crate::state::SkillItem;
+
+    let skills_json = data.get("skills").and_then(|s| s.as_array());
+
+    if let Some(skills_arr) = skills_json {
+        let skills: Vec<SkillItem> = skills_arr
+            .iter()
+            .filter_map(|s| {
+                let name = s.get("name")?.as_str()?.to_string();
+                let description = s.get("description")?.as_str().unwrap_or_default().to_string();
+                let tags = s.get("tags")
+                    .and_then(|t| t.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+
+                Some(SkillItem {
+                    name,
+                    description,
+                    tags,
+                })
+            })
+            .collect();
+
+        tracing::info!("Loaded {} skills", skills.len());
+        ctx.available_skills.set(skills);
+    } else {
+        tracing::info!("No skills available");
+        ctx.available_skills.set(Vec::new());
+    }
 }

@@ -63,6 +63,7 @@ pub async fn send_to_agent(message: ChatMessage) -> Result<(), String> {
         ChatMessage::SystemCommand(_) => "system_command",
         ChatMessage::BrowserToolResponse(_) => "browser_tool_response",
         ChatMessage::PickFilesRequest(_) => "pick_files_request",
+        ChatMessage::PlanResponse(_) => "plan_response",
         _ => "other",
     };
 
@@ -163,6 +164,28 @@ pub async fn send_browser_tool_response(response: BrowserToolResponsePayload) ->
 }
 
 // ============================================
+// Plan Response Messages
+// ============================================
+
+/// Send plan confirmed response to agent
+pub async fn send_plan_confirmed(session_id: &str) -> Result<(), String> {
+    let message = ChatMessage::PlanResponse(PlanResponsePayload {
+        session_id: session_id.to_string(),
+        response: PlanResponse::Confirmed,
+    });
+    send_to_agent(message).await
+}
+
+/// Send plan cancelled response to agent
+pub async fn send_plan_cancelled(session_id: &str) -> Result<(), String> {
+    let message = ChatMessage::PlanResponse(PlanResponsePayload {
+        session_id: session_id.to_string(),
+        response: PlanResponse::Cancelled,
+    });
+    send_to_agent(message).await
+}
+
+// ============================================
 // File Picker (Native Dialog via Agent)
 // ============================================
 
@@ -229,6 +252,55 @@ pub async fn send_session_clone(source_id: &str, target_id: &str) -> Result<(), 
         params: Some(serde_json::json!({
             "source_id": source_id,
             "target_id": target_id
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send session.delete command to agent
+pub async fn send_session_delete(session_id: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "session.delete".to_string(),
+        params: Some(serde_json::json!({
+            "session_id": session_id
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send session.rename command to agent
+pub async fn send_session_rename(session_id: &str, title: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "session.rename".to_string(),
+        params: Some(serde_json::json!({
+            "session_id": session_id,
+            "title": title
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send session.pin command to agent
+pub async fn send_session_pin(session_id: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "session.pin".to_string(),
+        params: Some(serde_json::json!({
+            "session_id": session_id
+        })),
+    });
+    send_to_agent(message).await
+}
+
+/// Send session.unpin command to agent
+pub async fn send_session_unpin(session_id: &str) -> Result<(), String> {
+    let message = ChatMessage::SystemCommand(SystemCommandPayload {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        command: "session.unpin".to_string(),
+        params: Some(serde_json::json!({
+            "session_id": session_id
         })),
     });
     send_to_agent(message).await
@@ -611,6 +683,25 @@ pub async fn send_ask_user_cancel(request_id: &str) -> Result<(), String> {
         .map_err(|e| format!("Send failed: {:?}", e))?;
 
     Ok(())
+}
+
+// ============================================
+// Tool Authorization Response
+// ============================================
+
+/// Send tool authorization response to agent
+pub async fn send_tool_auth_response(
+    tool_id: String,
+    option_index: u32,
+    scope: shared_protocol::AuthScope,
+) -> Result<(), String> {
+    let msg = ChatMessage::ToolAuthResponse(shared_protocol::ToolAuthResponsePayload {
+        tool_id,
+        option_index,
+        scope,
+    });
+
+    send_to_agent(msg).await
 }
 
 // ============================================

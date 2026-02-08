@@ -13,6 +13,7 @@ mod history;
 mod mcp;
 mod ask_user;
 mod file_picker;
+mod tools;
 
 pub use session::*;
 pub use message::*;
@@ -23,6 +24,7 @@ pub use history::*;
 pub use mcp::*;
 pub use ask_user::*;
 pub use file_picker::*;
+pub use tools::*;
 
 /// Skill information for the skill selector
 #[derive(Debug, Clone, PartialEq)]

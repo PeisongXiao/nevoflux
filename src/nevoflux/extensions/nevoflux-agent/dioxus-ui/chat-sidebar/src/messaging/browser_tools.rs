@@ -112,6 +112,10 @@ pub async fn execute_browser_tool(request: &BrowserToolRequestPayload) -> Browse
 
     match &request.action {
         BrowserToolAction::Navigate => execute_navigate(tab_id, &request.params).await,
+        // GoBack/GoForward are handled by background.js via browser.nevoflux.back/forward
+        BrowserToolAction::GoBack | BrowserToolAction::GoForward => {
+            make_error_result("GoBack/GoForward should be forwarded to background.js")
+        }
         BrowserToolAction::Click => execute_click(tab_id, &request.params).await,
         BrowserToolAction::Type => execute_type(tab_id, &request.params).await,
         BrowserToolAction::Fill => execute_fill(tab_id, &request.params).await,

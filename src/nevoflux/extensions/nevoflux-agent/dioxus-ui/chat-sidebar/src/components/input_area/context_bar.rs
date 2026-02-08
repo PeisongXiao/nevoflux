@@ -13,12 +13,19 @@ use crate::utils::{truncate, extract_domain};
 #[component]
 pub fn ContextBar() -> Element {
     let mut ctx = use_app_context();
-    let tab = ctx.tab_context.read();
+    // Clone upfront and drop the read guard immediately to avoid holding
+    // a borrow across the entire render (which can cause AlreadyBorrowed
+    // panics when the signal is written from a JS callback).
+    let tab = ctx.tab_context.read().clone();
 
     // Don't show if no context
     if tab.url.is_empty() {
         return rsx! {};
     }
+
+    let favicon = tab.favicon_url.clone();
+    let title = truncate(&tab.title, 40);
+    let domain = extract_domain(&tab.url);
 
     let handle_remove = move |_| {
         ctx.tab_context.set(TabContext::default());
@@ -27,7 +34,7 @@ pub fn ContextBar() -> Element {
     rsx! {
         div { class: "context-bar",
             // Favicon
-            if let Some(ref favicon) = tab.favicon_url {
+            if let Some(ref favicon) = favicon {
                 img {
                     class: "context-favicon",
                     src: "{favicon}",
@@ -38,10 +45,10 @@ pub fn ContextBar() -> Element {
             }
 
             // Title (truncated)
-            span { class: "context-title", "{truncate(&tab.title, 40)}" }
+            span { class: "context-title", "{title}" }
 
             // Domain
-            span { class: "context-domain", "{extract_domain(&tab.url)}" }
+            span { class: "context-domain", "{domain}" }
 
             // Remove button
             button {

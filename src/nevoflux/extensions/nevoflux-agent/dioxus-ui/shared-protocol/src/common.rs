@@ -154,6 +154,10 @@ pub enum PluginAction {
 pub enum BrowserToolAction {
     /// Navigate to a URL
     Navigate,
+    /// Go back in browser history
+    GoBack,
+    /// Go forward in browser history
+    GoForward,
     /// Click an element
     Click,
     /// Type text

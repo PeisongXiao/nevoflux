@@ -15,6 +15,8 @@ pub struct SessionState {
     pub created_at: u64,
     /// Whether the session is active
     pub is_active: bool,
+    /// Window ID the session belongs to
+    pub window_id: Option<i32>,
 }
 
 impl Default for SessionState {
@@ -31,6 +33,7 @@ impl SessionState {
             title: None,
             created_at: js_sys::Date::now() as u64,
             is_active: true,
+            window_id: None,
         }
     }
 

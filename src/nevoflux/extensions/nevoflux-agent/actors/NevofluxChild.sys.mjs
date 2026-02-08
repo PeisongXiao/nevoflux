@@ -20,7 +20,7 @@ ChromeUtils.defineLazyGetter(lazy, "a11yService", () => {
 // InspectorUtils is globally available in privileged Firefox contexts
 // Used to detect event listeners added via addEventListener
 
-// Interactive roles for filtering
+// Interactive roles for filtering (A11y tree — Gecko nsIAccessible role names)
 const INTERACTIVE_ROLES = new Set([
   "pushbutton", "button", "link", "entry", "password text",
   "text", "text container", "editable text", "searchbox",
@@ -28,8 +28,44 @@ const INTERACTIVE_ROLES = new Set([
   "toggle button", "combobox", "listbox", "option", "combobox option",
   "slider", "spinbutton", "menuitem", "menubar", "menu",
   "tab", "pagetab", "tablist", "tree item", "switch",
-  // Also include these for form elements
-  "autocomplete", "editbar", "password text", "dropdown list",
+  "autocomplete", "editbar", "dropdown list",
+]);
+
+// Landmark roles for grouping in compact output
+const LANDMARK_ROLES = new Set([
+  "banner", "navigation", "main", "complementary", "contentinfo",
+  "search", "form", "region",
+]);
+
+// Gecko role name → ARIA role (for a11y: locator protocol)
+const ROLE_TO_ARIA = {
+  pushbutton: "button",
+  entry: "textbox",
+  link: "link",
+  "password text": "textbox",
+  checkbox: "checkbox",
+  "radio button": "radio",
+  combobox: "combobox",
+  slider: "slider",
+  tab: "tab",
+  pagetab: "tab",
+  menuitem: "menuitem",
+  switch: "switch",
+  searchbox: "searchbox",
+  "toggle button": "button",
+  option: "option",
+  "combobox option": "option",
+  spinbutton: "spinbutton",
+  listbox: "listbox",
+  "tree item": "treeitem",
+  "editable text": "textbox",
+  "text container": "textbox",
+};
+
+// Interactive events for InspectorUtils detection
+const INTERACTIVE_EVENTS = new Set([
+  "click", "mousedown", "mouseup", "pointerdown", "pointerup",
+  "touchstart", "touchend", "keydown", "keyup", "keypress",
 ]);
 
 // Role mapping from nsIAccessible role constants to readable strings
@@ -345,76 +381,95 @@ export class NevofluxChild extends JSWindowActorChild {
     return el?.value || "";
   }
 
-  snapshot({ interactive = true, compact = false, depth, root, useA11y = true, domFallback = true, include_hidden = false, viewport_only = true }) {
+  // =====================================================================
+  //  Snapshot Engine — 5-Phase Pipeline
+  //  Phase 1: A11y Tree (primary semantic source)
+  //  Phase 2: DOM Gap-Fill (catch what A11y misses)
+  //  Phase 3: Merge + Occlusion + Dedup + Priority + Truncate
+  //  Phase 4: Selector Generation (a11y: locator protocol)
+  //  Phase 5: Serialization (compact for LLM, refs for program)
+  // =====================================================================
+
+  snapshot({ root, useA11y, domFallback, viewport_only, maxElements } = {}) {
+    if (useA11y == null) useA11y = true;
+    if (domFallback == null) domFallback = true;
+    if (viewport_only == null) viewport_only = true;
+    if (maxElements == null) maxElements = 200;
+
     const doc = this.currentDoc;
     const win = this.currentWin;
     if (!doc || !win) {
-      return { tree: "", refs: {}, error: "No document available" };
+      return { type: "full", tree: "", refs: {}, error: "No document available" };
     }
 
     const rootEl = root ? doc.querySelector(root) : doc.body || doc.documentElement;
     if (!rootEl) {
-      return { tree: "", refs: {}, error: "Root element not found" };
+      return { type: "full", tree: "", refs: {}, error: "Root element not found" };
     }
 
-    const elements = [];
-    const seenNodes = new Set();
-    let refCounter = 0;
+    const seenNodes = new Set(); // All A11y-traversed DOMNodes (not just interactive)
+    let a11yResults = [];
+    let domExtras = [];
 
-    // === Layer 1: AXTree traversal ===
+    // === Phase 1: A11y Tree traversal ===
     if (useA11y && lazy.a11yService) {
       try {
         const accDoc = lazy.a11yService.getAccessibleFor(doc);
         if (accDoc) {
-          this._collectFromA11y(accDoc, elements, seenNodes, win, interactive, viewport_only, include_hidden, depth, 0);
+          this._walkA11yTree(accDoc, a11yResults, seenNodes, win, []);
         }
       } catch (e) {
         console.warn("[NevofluxChild.snapshot] A11y traversal failed:", e.message);
       }
     }
 
-    // === Layer 2: DOM heuristic fallback ===
+    // === Phase 2: DOM gap-fill ===
     if (domFallback) {
-      this._collectFromDomFallback(rootEl, elements, seenNodes, win, viewport_only, include_hidden);
+      domExtras = this._domPatchScan(rootEl, seenNodes, win);
     }
 
-    // === Build refs and tree output ===
-    const refs = {};
-    const lines = [];
-
-    for (const elem of elements) {
-      refCounter++;
-      const refId = `e${refCounter}`;
-      const selector = this.generateSelector(elem.node);
-      const name = (elem.name || "").trim();
-      const truncatedName = name.length > 80 ? name.substring(0, 77) + "..." : name;
-
-      refs[refId] = {
-        selector,
-        role: elem.role,
-        name: truncatedName,
-        tagName: elem.node.tagName?.toLowerCase() || "",
-        rect: elem.rect ? {
-          x: Math.round(elem.rect.x),
-          y: Math.round(elem.rect.y),
-          width: Math.round(elem.rect.width),
-          height: Math.round(elem.rect.height),
-        } : null,
-      };
-
-      const rolePart = elem.role || elem.node.tagName?.toLowerCase() || "element";
-      const namePart = truncatedName ? ` "${truncatedName}"` : "";
-      const states = [];
-      if (elem.node === doc.activeElement) states.push("focused");
-      if (elem.node.disabled) states.push("disabled");
-      if (elem.node.checked) states.push("checked");
-      if (elem.node.readOnly) states.push("readonly");
-      const statePart = states.length > 0 ? ` (${states.join(", ")})` : "";
-
-      lines.push(`[${refId}] ${rolePart}${namePart}${statePart}`);
+    // === Phase 3: Merge pipeline ===
+    let elements = this._snapshotMerge(a11yResults, domExtras);
+    const preOcclusionCount = elements.length;
+    elements = this._filterOccluded(elements, doc);
+    const occludedCount = preOcclusionCount - elements.length;
+    elements = this._deduplicateNested(elements);
+    elements = this._prioritize(elements);
+    let truncatedCount = 0;
+    if (elements.length > maxElements) {
+      truncatedCount = elements.length - maxElements;
+      elements = elements.slice(0, maxElements);
     }
 
-    // === Build viewportInfo ===
+    // === Phase 5 (before Phase 4): Clear old IDs and assign new ones ===
+    this._clearPreviousAiIds(doc);
+    let uid = 0;
+    for (const el of elements) {
+      el.id = `e${uid++}`;
+      try { el.node.setAttribute("data-ai-id", el.id); } catch {}
+    }
+
+    // === Phase 4: Selector generation ===
+    const docAcc = (useA11y && lazy.a11yService)
+      ? lazy.a11yService.getAccessibleFor(doc) : null;
+    for (const el of elements) {
+      el.selectors = this._generateSelectors(el, doc, docAcc);
+    }
+
+    // === Phase 5: Serialization ===
+    // Mark duplicate names for disambiguation
+    this._markDuplicateNames(elements);
+    // Compute landmarks for inferred elements
+    for (const el of elements) {
+      if (el.inferred && !el.landmark) {
+        el.landmark = this._findLandmarkFromDOM(el.node);
+      }
+    }
+
+    const compact = this._serializeCompact(elements, doc, win, truncatedCount);
+    const refs = this._buildRefs(elements);
+
+    // Build viewportInfo
     const scrollTop = win.scrollY || 0;
     const scrollHeight = doc.documentElement.scrollHeight || 0;
     const viewportHeight = win.innerHeight || 0;
@@ -431,195 +486,889 @@ export class NevofluxChild extends JSWindowActorChild {
       url: win.location?.href || "",
     };
 
-    const scrollPercent = scrollHeight > viewportHeight
-      ? Math.round((scrollTop / (scrollHeight - viewportHeight)) * 100)
-      : 0;
-    const scrollPos = scrollTop === 0 ? "top"
-      : scrollTop + viewportHeight >= scrollHeight - 1 ? "bottom"
-      : `${scrollPercent}%`;
-    const header = `Page: "${viewportInfo.pageTitle}" | URL: ${viewportInfo.url}\nViewport: ${viewportWidth}x${viewportHeight} | Scroll: ${Math.round(scrollTop)}/${scrollHeight} (${scrollPos})`;
-
-    const tree = header + "\n\n" + lines.join("\n");
-
     return {
-      tree,
+      type: "full",
+      tree: compact,
       refs,
       viewportInfo,
-      stats: { total: elements.length },
+      stats: {
+        total: elements.length,
+        a11y: elements.filter(e => !e.inferred).length,
+        inferred: elements.filter(e => e.inferred).length,
+        occluded: occludedCount,
+        truncated: truncatedCount,
+      },
       url: viewportInfo.url,
       title: viewportInfo.pageTitle,
     };
   }
 
-  _collectFromA11y(accNode, elements, seenNodes, win, interactive, viewport_only, include_hidden, maxDepth, currentDepth) {
-    if (maxDepth !== undefined && currentDepth > maxDepth) return;
+  // ── Phase 1: A11y Tree Traversal ──
 
+  _walkA11yTree(acc, results, seenNodes, win, landmarkStack) {
+    // Step 1: Viewport pruning (can skip entire subtree)
+    const bx = {}, by = {}, bw = {}, bh = {};
+    try { acc.getBounds(bx, by, bw, bh); } catch { return; }
+    const vr = {
+      x: bx.value - win.mozInnerScreenX,
+      y: by.value - win.mozInnerScreenY,
+      width: bw.value,
+      height: bh.value,
+    };
+    if (vr.y + vr.height < 0 || vr.y > win.innerHeight ||
+        vr.x + vr.width < 0 || vr.x > win.innerWidth) {
+      return; // Subtree must also be outside viewport
+    }
+
+    // Step 2: Landmark stack maintenance
+    const roleNum = acc.role;
+    const roleName = ROLE_MAP[roleNum] || "";
+    let currentLandmark = landmarkStack[landmarkStack.length - 1] || null;
+
+    if (LANDMARK_ROLES.has(roleName)) {
+      let accName = "";
+      try { accName = acc.name || ""; } catch {}
+      currentLandmark = accName ? `${roleName} "${accName}"` : roleName;
+      landmarkStack.push(currentLandmark);
+    }
+
+    // Step 3: Collect DOMNode (ALL nodes, not just interactive)
+    let domNode = null;
+    try { domNode = acc.DOMNode; } catch {}
+    if (domNode?.nodeType === 1) {
+      seenNodes.add(domNode); // Mark as A11y-traversed
+
+      // Step 4: Interactive role filter (no subtree pruning)
+      if (INTERACTIVE_ROLES.has(roleName)) {
+        let accName = "";
+        try { accName = acc.name || ""; } catch {}
+
+        results.push({
+          node: domNode,
+          role: roleName,
+          name: accName,
+          states: this._extractA11yStates(acc),
+          viewportRect: vr,
+          landmark: currentLandmark,
+          inferred: false,
+          signal: null,
+        });
+      }
+    }
+
+    // Always recurse children
+    const count = acc.childCount || 0;
+    for (let i = 0; i < count; i++) {
+      try {
+        const child = acc.getChildAt(i);
+        if (child) this._walkA11yTree(child, results, seenNodes, win, landmarkStack);
+      } catch {}
+    }
+
+    // Pop landmark scope
+    if (LANDMARK_ROLES.has(roleName)) {
+      landmarkStack.pop();
+    }
+  }
+
+  _extractA11yStates(acc) {
+    const states = {};
     try {
-      const roleNum = accNode.role;
-      const roleName = ROLE_MAP[roleNum] || "";
+      const s1 = {}, s2 = {};
+      acc.getState(s1, s2);
+      const state = s1.value || 0;
+      const extraState = s2.value || 0;
+      // nsIAccessibleStates constants (from accessible/interfaces/nsIAccessibleStates.idl)
+      if (state & 0x01) states.disabled = true;     // STATE_UNAVAILABLE
+      if (state & 0x02) states.selected = true;     // STATE_SELECTED
+      if (state & 0x04) states.focused = true;      // STATE_FOCUSED
+      if (state & 0x08) states.pressed = true;      // STATE_PRESSED
+      if (state & 0x10) states.checked = true;      // STATE_CHECKED
+      if (state & 0x40) states.readonly = true;     // STATE_READONLY
+      if (state & 0x200) states.expanded = true;    // STATE_EXPANDED
+      if (state & 0x400) states.expanded = false;   // STATE_COLLAPSED (overrides)
+    } catch {}
+    return states;
+  }
 
-      let domNode = null;
-      try { domNode = accNode.DOMNode; } catch (e) { /* skip */ }
+  // ── Phase 2: DOM Gap-Fill ──
 
-      if (domNode && domNode.nodeType === 1) {
-        const isInteractive = !interactive || INTERACTIVE_ROLES.has(roleName);
+  _domPatchScan(root, seenNodes, win) {
+    const extras = [];
+    const doc = root.ownerDocument || this.currentDoc;
+    if (!doc) return extras;
+    const promotedAncestors = new Set(); // Track ancestors already captured via child promotion
 
-        if (isInteractive && !seenNodes.has(domNode)) {
-          if (viewport_only && !this._isViewportVisible(domNode, win)) {
-            // Skip - not in viewport
-          } else if (!include_hidden && this._isStyleHidden(domNode, win)) {
-            // Skip - hidden by style
-          } else {
-            const rect = domNode.getBoundingClientRect();
-            const name = this._getAccessibleName(accNode);
+    const walk = (node) => {
+      if (!node || node.nodeType !== 1) return;
 
-            seenNodes.add(domNode);
-            elements.push({
-              node: domNode,
-              role: roleName,
-              name,
-              rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      // Viewport pruning (first, all nodes — can skip subtree)
+      let rect;
+      try { rect = node.getBoundingClientRect(); } catch { return; }
+      const M = 50;
+      if (rect.bottom < -M || rect.top > win.innerHeight + M ||
+          rect.right < -M || rect.left > win.innerWidth + M) {
+        return; // Skip entire subtree
+      }
+
+      // Shadow DOM: targeted probe
+      if (node.shadowRoot) {
+        try {
+          const probe = "a,button,input,select,textarea,[role],[tabindex],[contenteditable]";
+          const candidates = node.shadowRoot.querySelectorAll(probe);
+          let hasUnknown = false;
+          for (const el of candidates) {
+            if (!seenNodes.has(el)) { hasUnknown = true; break; }
+          }
+          if (hasUnknown) {
+            for (const child of node.shadowRoot.children) walk(child);
+          }
+        } catch {}
+      }
+
+      // Same-origin iframe
+      if (node.tagName === "IFRAME") {
+        try {
+          const body = node.contentDocument?.body;
+          if (body) walk(body);
+        } catch {} // Cross-origin: silent skip
+      }
+
+      // Gap-fill detection (only for A11y-uncovered nodes)
+      if (!seenNodes.has(node)) {
+        let signal = this._detectInteractiveSignal(node, win);
+        if (signal && rect.width > 0 && rect.height > 0) {
+          let captureNode = node;
+          let captureRect = rect;
+          let skip = false;
+
+          // Promote cursor-detected children to their interactive ancestor
+          // e.g. <a><span><strong>text</strong></span></a> → capture the <a>
+          if (signal === "cursor") {
+            const ancestor = this._findInteractiveAncestor(node);
+            if (ancestor) {
+              if (promotedAncestors.has(ancestor)) {
+                skip = true; // Already captured via another child
+              } else {
+                promotedAncestors.add(ancestor);
+                captureNode = ancestor;
+                signal = "tag";
+                try { captureRect = ancestor.getBoundingClientRect(); } catch {}
+              }
+            }
+          }
+
+          if (!skip) {
+            extras.push({
+              node: captureNode,
+              tag: captureNode.tagName,
+              text: this._getDirectText(captureNode).trim().slice(0, 60),
+              signal,
+              viewportRect: {
+                x: captureRect.x, y: captureRect.y,
+                width: captureRect.width, height: captureRect.height,
+              },
+              inferred: true,
             });
           }
         }
       }
 
-      const childCount = accNode.childCount || 0;
-      for (let i = 0; i < childCount; i++) {
-        try {
-          const child = accNode.getChildAt(i);
-          if (child) {
-            this._collectFromA11y(child, elements, seenNodes, win, interactive, viewport_only, include_hidden, maxDepth, currentDepth + 1);
+      for (const child of node.children) walk(child);
+    };
+
+    walk(root);
+    return extras;
+  }
+
+  _detectInteractiveSignal(el, win) {
+    // Primary: InspectorUtils (catches all addEventListener events)
+    try {
+      if (typeof InspectorUtils !== "undefined") {
+        const unwrapped = el.wrappedJSObject || el;
+        const listeners = InspectorUtils.getEventListenerInfoFor(unwrapped);
+        if (listeners?.length > 0) {
+          for (const l of listeners) {
+            if (INTERACTIVE_EVENTS.has(l.type)) return "listener";
           }
-        } catch (e) { /* skip */ }
+        }
       }
-    } catch (e) { /* skip */ }
-  }
+    } catch {}
 
-  _getAccessibleName(accNode) {
-    try {
-      return accNode.name || "";
-    } catch (e) {
-      return "";
+    // Standard: native tag
+    const tag = el.tagName;
+    if (tag === "A" && el.hasAttribute("href")) return "tag";
+    if (["BUTTON", "INPUT", "SELECT", "TEXTAREA", "DETAILS", "SUMMARY"].includes(tag)) return "tag";
+
+    // Standard: ARIA role
+    const role = el.getAttribute("role");
+    if (role && ["button", "link", "textbox", "checkbox", "radio", "combobox",
+      "menuitem", "tab", "switch", "option", "slider", "spinbutton",
+      "searchbox", "listbox"].includes(role)) return "role";
+
+    // Standard: tabindex >= 0
+    if (el.hasAttribute("tabindex")) {
+      const ti = parseInt(el.getAttribute("tabindex"), 10);
+      if (ti >= 0) return "tabindex";
     }
-  }
 
-  _isStyleHidden(el, win) {
+    // Standard: contenteditable
+    if (el.isContentEditable && el.getAttribute("contenteditable") === "true") return "editable";
+
+    // Heuristic: cursor:pointer with text and no child interactive elements
     try {
-      const style = win.getComputedStyle(el);
-      return style.display === "none" || style.visibility === "hidden";
-    } catch (e) {
-      return false;
-    }
+      const cs = win.getComputedStyle(el);
+      if (cs.cursor === "pointer") {
+        const text = this._getDirectText(el).trim();
+        if (text.length > 0 && !el.querySelector(
+          "a,button,input,select,textarea,[role='button'],[role='link']"
+        )) {
+          return "cursor";
+        }
+      }
+    } catch {}
+
+    // Heuristic: React/Vue framework handlers
+    try {
+      const unwrapped = el.wrappedJSObject || el;
+      const keys = Object.keys(unwrapped);
+      for (const key of keys) {
+        if (key.startsWith("__reactProps$")) {
+          try {
+            const props = unwrapped[key];
+            if (props?.onClick || props?.onMouseDown || props?.onPointerDown) return "handler";
+          } catch {}
+        }
+      }
+      if (unwrapped._vei) {
+        const vei = unwrapped._vei;
+        if (vei.onClick || vei.onMousedown || vei.onPointerdown ||
+            vei.onclick || vei.onmousedown || vei.onpointerdown) return "handler";
+      }
+    } catch {}
+
+    // Heuristic: SPA class/data patterns
+    try {
+      if (el.dataset?.controlName || el.dataset?.action || el.dataset?.click ||
+          el.dataset?.toggle || el.dataset?.entityUrn) return "control";
+      if (/^(btn|button|clickable|interactive|action)/i.test(el.className)) return "control";
+    } catch {}
+
+    return null;
   }
 
-  _collectFromDomFallback(rootEl, elements, seenNodes, win, viewport_only, include_hidden) {
-    const doc = this.currentDoc;
-    if (!doc) return;
+  // Find nearest interactive ancestor for cursor-promoted elements (max 5 levels up)
+  _findInteractiveAncestor(el) {
+    const INTERACTIVE_TAGS = new Set(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA"]);
+    const INTERACTIVE_ARIA = new Set([
+      "button", "link", "textbox", "checkbox", "radio",
+      "combobox", "menuitem", "tab", "switch", "option",
+    ]);
+    let p = el.parentElement;
+    for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
+      if (INTERACTIVE_TAGS.has(p.tagName)) return p;
+      const role = p.getAttribute("role");
+      if (role && INTERACTIVE_ARIA.has(role)) return p;
+    }
+    return null;
+  }
 
-    const allElements = rootEl.querySelectorAll("*");
-    for (const el of allElements) {
-      if (seenNodes.has(el)) continue;
-
-      let isInteractive = false;
-
-      try {
-        const style = win.getComputedStyle(el);
-        if (style.cursor === "pointer") isInteractive = true;
-      } catch (e) { /* skip */ }
-
-      if (!isInteractive && el.hasAttribute("tabindex")) {
-        const ti = parseInt(el.getAttribute("tabindex"), 10);
-        if (ti >= 0) isInteractive = true;
+  _getDirectText(el) {
+    let t = "";
+    for (const n of el.childNodes) {
+      if (n.nodeType === 3) { // Text node
+        t += n.textContent;
+      } else if (n.nodeType === 1) {
+        // Exclude child interactive elements' text
+        const tag = n.tagName;
+        if (!["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA"].includes(tag) &&
+            !n.getAttribute("role")) {
+          t += this._getDirectText(n);
+        }
       }
+    }
+    return t.replace(/\s+/g, " ");
+  }
 
-      if (!isInteractive && typeof InspectorUtils !== "undefined") {
-        try {
-          const listeners = InspectorUtils.getEventListenerInfo(el);
-          const hasClickListener = listeners.some(l =>
-            l.type === "click" || l.type === "mousedown" || l.type === "pointerdown"
-          );
-          if (hasClickListener) isInteractive = true;
-        } catch (e) { /* skip */ }
-      }
+  // ── Phase 3: Merge Pipeline ──
 
-      if (!isInteractive) continue;
+  _snapshotMerge(a11yResults, domExtras) {
+    const merged = [];
 
-      if (viewport_only && !this._isViewportVisible(el, win)) continue;
-      if (!include_hidden && this._isStyleHidden(el, win)) continue;
-
-      const rect = el.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
-
-      let name = "";
-      try {
-        name = el.textContent?.trim()?.substring(0, 80) || "";
-        name = el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || name;
-      } catch (e) { /* skip */ }
-
-      seenNodes.add(el);
-      elements.push({
-        node: el,
-        role: el.tagName?.toLowerCase() || "element",
-        name,
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    for (const el of a11yResults) {
+      merged.push({
+        node: el.node,
+        role: el.role,
+        name: el.name,
+        states: el.states,
+        viewportRect: el.viewportRect,
+        landmark: el.landmark,
+        inferred: false,
+        signal: null,
       });
     }
+
+    for (const el of domExtras) {
+      merged.push({
+        node: el.node,
+        role: this._tagToRole(el.tag),
+        name: el.text,
+        states: {},
+        viewportRect: el.viewportRect,
+        landmark: null,
+        inferred: true,
+        signal: el.signal,
+      });
+    }
+
+    return merged;
   }
 
-  // Helper to check if element is explicitly hidden (blacklist approach)
-  // Only filter elements that are definitively hidden, preserve uncertain cases
-  _isHiddenElement(el, win) {
-    try {
-      const style = win.getComputedStyle(el);
-      // Only filter explicitly hidden elements
-      if (style.display === "none") return true;
-      if (style.visibility === "hidden") return true;
-      // Everything else is considered visible (including opacity:0, zero-size, out of viewport)
-      return false;
-    } catch (e) {
-      return false; // On error, assume visible
+  _tagToRole(tag) {
+    switch (tag) {
+      case "A": return "link";
+      case "BUTTON": return "button";
+      case "INPUT": return "textbox";
+      case "SELECT": return "listbox";
+      case "TEXTAREA": return "textbox";
+      case "DETAILS": return "details";
+      case "SUMMARY": return "summary";
+      case "IMG": return "img";
+      default: return tag.toLowerCase();
     }
   }
 
-  /**
-   * Check if element is visible in the current viewport.
-   * Three checks: geometric (in viewport + has area), style (not hidden), obstruction (center point hit test).
-   * @param {Element} el - DOM element
-   * @param {Window} win - Window object
-   * @returns {boolean} true if element is visible in viewport
-   */
-  _isViewportVisible(el, win) {
-    try {
-      // 1. Geometric: element must be in viewport with non-zero dimensions
-      const rect = el.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return false;
-      const vw = win.innerWidth;
-      const vh = win.innerHeight;
-      // Element must overlap with viewport
-      if (rect.bottom <= 0 || rect.top >= vh || rect.right <= 0 || rect.left >= vw) return false;
+  _filterOccluded(elements, doc) {
+    return elements.filter(el => {
+      const rect = el.viewportRect;
+      // 5-point sampling
+      const points = [
+        [rect.x + rect.width * 0.5,  rect.y + rect.height * 0.5],
+        [rect.x + rect.width * 0.25, rect.y + rect.height * 0.25],
+        [rect.x + rect.width * 0.75, rect.y + rect.height * 0.75],
+        [rect.x + rect.width * 0.75, rect.y + rect.height * 0.25],
+        [rect.x + rect.width * 0.25, rect.y + rect.height * 0.75],
+      ];
 
-      // 2. Style: not explicitly hidden
-      const style = win.getComputedStyle(el);
-      if (style.display === "none") return false;
-      if (style.visibility === "hidden") return false;
-      if (parseFloat(style.opacity) === 0) return false;
+      let hits = 0;
+      const vw = doc.defaultView?.innerWidth || 0;
+      const vh = doc.defaultView?.innerHeight || 0;
+      for (const [x, y] of points) {
+        if (x < 0 || y < 0 || x >= vw || y >= vh) continue;
+        try {
+          const topEl = doc.elementFromPoint(x, y);
+          if (topEl && (el.node === topEl || el.node.contains(topEl) || topEl.contains(el.node))) {
+            hits++;
+          }
+        } catch {}
+      }
 
-      // 3. Obstruction: center point hit test
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      // Clamp to viewport bounds
-      const testX = Math.max(0, Math.min(centerX, vw - 1));
-      const testY = Math.max(0, Math.min(centerY, vh - 1));
-      const topEl = this.currentDoc.elementFromPoint(testX, testY);
-      if (!topEl) return false;
-      // Element is visible if hit test returns itself or a descendant
-      if (topEl !== el && !el.contains(topEl)) return false;
+      return hits > 0;
+    });
+  }
 
-      return true;
-    } catch (e) {
-      return false;
+  _deduplicateNested(elements) {
+    const nodeSet = new Set(elements.map(e => e.node));
+    const toRemove = new Set();
+
+    for (const el of elements) {
+      if (toRemove.has(el.node)) continue;
+
+      // Find interactive ancestor (up to 6 levels)
+      let p = el.node.parentElement;
+      let parent = null;
+      for (let i = 0; i < 6 && p; i++, p = p.parentElement) {
+        if (nodeSet.has(p)) { parent = p; break; }
+      }
+      if (!parent) continue;
+
+      const parentEl = elements.find(e => e.node === parent);
+      if (!parentEl || toRemove.has(parent)) continue;
+
+      if (!el.inferred && !parentEl.inferred) {
+        // R1/R2: Both A11y
+        const childName = (el.name || "").trim();
+        const parentName = (parentEl.name || "").trim();
+        if (childName === parentName || childName.length === 0 ||
+            parentName.includes(childName)) {
+          toRemove.add(el.node); // R1
+        }
+        // R2: keep both (different text = independent functions)
+      } else if (el.inferred && !parentEl.inferred) {
+        toRemove.add(el.node); // R3: A11y parent covers inferred child
+      } else if (!el.inferred && parentEl.inferred) {
+        // R4: Keep A11y child, remove inferred parent
+        // (May trigger multiple times for same parent — safe)
+        toRemove.add(parent);
+      } else {
+        // R5: Both inferred — keep the one with longer text
+        if ((el.name || "").length >= (parentEl.name || "").length) {
+          toRemove.add(parent);
+        } else {
+          toRemove.add(el.node);
+        }
+      }
     }
+
+    return elements.filter(e => !toRemove.has(e.node));
+  }
+
+  _prioritize(elements) {
+    return elements.sort((a, b) => {
+      const pa = this._elementPriority(a);
+      const pb = this._elementPriority(b);
+      if (pa !== pb) return pb - pa;
+      // Same priority: top-to-bottom, left-to-right
+      return (a.viewportRect.y - b.viewportRect.y) ||
+             (a.viewportRect.x - b.viewportRect.x);
+    });
+  }
+
+  _elementPriority(el) {
+    let p = 0;
+
+    // Source weight
+    if (!el.inferred) p += 10;
+
+    // Functional weight (A11y: role-based)
+    if (!el.inferred) {
+      const role = el.role;
+      if (["entry", "searchbox", "textbox", "password text",
+           "combobox", "spinbutton", "editable text"].includes(role)) p += 15;
+      if (["pushbutton", "button", "toggle button",
+           "switch"].includes(role)) p += 12;
+      if (role === "link") p += 8;
+      if (["checkbox", "radio button", "option",
+           "menuitem", "tab", "pagetab"].includes(role)) p += 6;
+    }
+
+    // Functional weight (Inferred: tag + signal based)
+    if (el.inferred) {
+      const tag = el.role.toUpperCase();
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) p += 15;
+      if (el.signal === "editable") p += 14;
+      const ariaRole = el.node?.getAttribute?.("role") || "";
+      if (["button", "link", "textbox", "searchbox",
+           "combobox", "tab"].includes(ariaRole)) p += 12;
+      if (el.signal === "listener") p += 8;
+      if (el.signal === "tabindex") p += 6;
+      if (el.signal === "cursor") p += 3;
+      if (el.signal === "handler" || el.signal === "control") p += 2;
+    }
+
+    // Name bonus
+    if (el.name && el.name.trim().length > 0) p += 5;
+
+    return p;
+  }
+
+  // ── Phase 4: Selector Generation ──
+
+  _generateSelectors(el, doc, docAcc) {
+    const node = el.node;
+    const selectors = [];
+
+    // A11y elements: try a11y: locator protocol first
+    if (!el.inferred && el.role && el.name) {
+      const ariaRole = ROLE_TO_ARIA[el.role];
+      if (ariaRole) {
+        // Try CSS form first (only when name = aria-label)
+        const ariaLabel = node.getAttribute("aria-label");
+        if (ariaLabel === el.name) {
+          const explicitRole = node.getAttribute("role");
+          const css = explicitRole
+            ? `[role="${ariaRole}"][aria-label="${this._cssEscape(el.name)}"]`
+            : `${node.tagName.toLowerCase()}[aria-label="${this._cssEscape(el.name)}"]`;
+          if (this._isUniqueSelector(css, node, doc)) {
+            selectors.push({ type: "css", strategy: "role", value: css });
+          }
+        }
+
+        // a11y: locator (works for name from any source)
+        if (selectors.length === 0 || selectors[0].strategy !== "role") {
+          const a11yLoc = `a11y:${ariaRole}/${el.name}`;
+          if (!docAcc || this._isUniqueA11y(docAcc, ariaRole, el.name)) {
+            selectors.push({ type: "a11y", strategy: "role", value: a11yLoc });
+          }
+        }
+      }
+    }
+
+    // Shared path: aria-label
+    const ariaLabel = node.getAttribute("aria-label");
+    if (ariaLabel && !selectors.some(s => s.strategy === "role" && s.type === "css")) {
+      const s = `[aria-label="${this._cssEscape(ariaLabel)}"]`;
+      if (this._isUniqueSelector(s, node, doc)) {
+        selectors.push({ type: "css", strategy: "aria", value: s });
+      }
+    }
+
+    // Shared: placeholder
+    const ph = node.getAttribute("placeholder");
+    if (ph) {
+      const s = `[placeholder="${this._cssEscape(ph)}"]`;
+      if (this._isUniqueSelector(s, node, doc)) {
+        selectors.push({ type: "css", strategy: "ph", value: s });
+      }
+    }
+
+    // Shared: label[for] → use the input's own #id as selector (label confirms identity)
+    if (node.id && !this._isDynamicId(node.id)) {
+      try {
+        const label = doc.querySelector(`label[for="${this._cssEscape(node.id)}"]`);
+        if (label) {
+          const s = `#${CSS.escape(node.id)}`;
+          if (this._isUniqueSelector(s, node, doc)) {
+            selectors.push({ type: "css", strategy: "label", value: s });
+          }
+        }
+      } catch {}
+    }
+
+    // Shared: data-testid etc
+    for (const attr of ["data-testid", "data-test-id", "data-control-name"]) {
+      const val = node.getAttribute(attr);
+      if (val) {
+        selectors.push({ type: "css", strategy: "testid", value: `[${attr}="${this._cssEscape(val)}"]` });
+        break;
+      }
+    }
+
+    // Shared: stable id
+    if (node.id && !this._isDynamicId(node.id)) {
+      selectors.push({ type: "css", strategy: "id", value: `#${node.id}` });
+    }
+
+    // CSS path fallback (only if unique)
+    const cssPath = this._buildCssPath(node, doc);
+    if (cssPath && this._isUniqueSelector(cssPath, node, doc)) {
+      selectors.push({ type: "css", strategy: "css", value: cssPath });
+    }
+
+    return selectors;
+  }
+
+  _isUniqueSelector(selector, expectedNode, doc) {
+    try {
+      const matches = doc.querySelectorAll(selector);
+      return matches.length === 1 && matches[0] === expectedNode;
+    } catch { return false; }
+  }
+
+  _isUniqueA11y(docAcc, targetRole, targetName) {
+    let count = 0;
+    const walk = (acc) => {
+      if (count > 1) return;
+      const roleName = ROLE_MAP[acc.role] || "";
+      const ariaRole = ROLE_TO_ARIA[roleName] || "";
+      let name = "";
+      try { name = acc.name || ""; } catch {}
+      if (ariaRole === targetRole && name === targetName) {
+        count++;
+        if (count > 1) return;
+      }
+      for (let i = 0; i < (acc.childCount || 0); i++) {
+        try {
+          const child = acc.getChildAt(i);
+          if (child) walk(child);
+          if (count > 1) return;
+        } catch {}
+      }
+    };
+    walk(docAcc);
+    return count === 1;
+  }
+
+  _isDynamicId(id) {
+    return /[0-9a-f]{8,}|ember\d+|react|:r[0-9a-z]+:|\d{6,}/.test(id);
+  }
+
+  _buildCssPath(el, doc) {
+    const parts = [];
+    let cur = el;
+    for (let i = 0; i < 4 && cur && cur !== doc.body; i++, cur = cur.parentElement) {
+      let seg = cur.tagName.toLowerCase();
+      if (cur.id && !this._isDynamicId(cur.id)) {
+        parts.unshift(`#${cur.id}`);
+        break;
+      }
+      const parent = cur.parentElement;
+      if (parent) {
+        const sibs = [...parent.children].filter(c => c.tagName === cur.tagName);
+        if (sibs.length > 1) seg += `:nth-of-type(${sibs.indexOf(cur) + 1})`;
+      }
+      parts.unshift(seg);
+    }
+    return parts.join(">");
+  }
+
+  _cssEscape(s) {
+    return (s || "").replace(/["\\[\]]/g, "\\$&");
+  }
+
+  // ── Phase 5: Serialization ──
+
+  _clearPreviousAiIds(doc) {
+    try {
+      const old = doc.querySelectorAll("[data-ai-id]");
+      for (const el of old) el.removeAttribute("data-ai-id");
+    } catch {}
+  }
+
+  _markDuplicateNames(elements) {
+    const groups = new Map();
+    for (const el of elements) {
+      if (!el.name) continue;
+      const key = `${el.inferred ? "?" : ""}${el.role}:${el.name}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(el);
+    }
+    for (const [, group] of groups) {
+      if (group.length > 1) {
+        for (const el of group) el._hasDuplicateName = true;
+      }
+    }
+  }
+
+  _findNearestContext(el) {
+    const node = el.node;
+    // Strategy 1: nearest heading or aria-label container
+    let p = node.parentElement;
+    for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
+      try {
+        const heading = p.querySelector("h1,h2,h3,h4,h5,h6,[role='heading']");
+        if (heading && heading !== node) {
+          return heading.textContent.trim().slice(0, 30);
+        }
+        const label = p.getAttribute("aria-label");
+        if (label) return label.slice(0, 30);
+      } catch {}
+    }
+    // Strategy 2: nearest image alt in card container
+    try {
+      const container = node.closest("[class*='card'],[class*='item'],[role='article']");
+      if (container) {
+        const img = container.querySelector("img[alt]");
+        if (img?.alt) return img.alt.slice(0, 30);
+      }
+    } catch {}
+    return null;
+  }
+
+  _findLandmarkFromDOM(node) {
+    let p = node.parentElement;
+    for (let i = 0; i < 10 && p; i++, p = p.parentElement) {
+      const role = p.getAttribute("role");
+      if (role && LANDMARK_ROLES.has(role)) {
+        const label = p.getAttribute("aria-label");
+        return label ? `${role} "${label}"` : role;
+      }
+      const tag = p.tagName;
+      if (tag === "NAV") {
+        const label = p.getAttribute("aria-label");
+        return label ? `navigation "${label}"` : "navigation";
+      }
+      if (tag === "MAIN") return "main";
+      if (tag === "HEADER") {
+        const label = p.getAttribute("aria-label");
+        return label ? `banner "${label}"` : "banner";
+      }
+      if (tag === "FOOTER") {
+        const label = p.getAttribute("aria-label");
+        return label ? `contentinfo "${label}"` : "contentinfo";
+      }
+      if (tag === "ASIDE") {
+        const label = p.getAttribute("aria-label");
+        return label ? `complementary "${label}"` : "complementary";
+      }
+    }
+    return null;
+  }
+
+  _serializeCompact(elements, doc, win, truncatedCount) {
+    const lines = [];
+
+    // Page header
+    lines.push(`# ${doc.title || ""}`);
+    const loc = win.location || {};
+    lines.push(`@ ${loc.pathname || ""}${loc.search || ""}`);
+
+    const scrollTop = Math.round(win.scrollY || 0);
+    const scrollHeight = doc.documentElement.scrollHeight || 0;
+    const vh = win.innerHeight || 0;
+    const vw = win.innerWidth || 0;
+    const pct = scrollHeight > vh
+      ? Math.round((scrollTop / (scrollHeight - vh)) * 100) : 0;
+    const pos = scrollTop === 0 ? "top"
+      : scrollTop + vh >= scrollHeight - 1 ? "bottom"
+      : `${pct}%`;
+    lines.push(`viewport: ${vw}x${vh} scroll: ${scrollTop}/${scrollHeight} (${pos})`);
+    lines.push("");
+
+    // Group by landmark
+    const groups = new Map();
+    for (const el of elements) {
+      const lm = el.landmark || null;
+      if (!groups.has(lm)) groups.set(lm, []);
+      groups.get(lm).push(el);
+    }
+    // Named landmarks first, null last
+    const sorted = new Map();
+    for (const [lm, items] of groups) {
+      if (lm) sorted.set(lm, items);
+    }
+    const noLandmark = groups.get(null);
+    if (noLandmark?.length) sorted.set(null, noLandmark);
+
+    for (const [landmark, items] of sorted) {
+      if (landmark) lines.push(`## ${landmark}`);
+      for (const el of items) {
+        lines.push(this._elementToCompactLine(el, win));
+      }
+      lines.push("");
+    }
+
+    if (truncatedCount > 0) {
+      lines.push(`(+${truncatedCount} more elements truncated)`);
+    }
+
+    return lines.join("\n");
+  }
+
+  _elementToCompactLine(el, win) {
+    let line = `[${el.id}]`;
+
+    // Prefix: A11y role or ?signal for inferred
+    if (el.inferred) {
+      line += ` ?${el.signal || "unknown"}`;
+    } else {
+      line += ` ${el.role}`;
+    }
+
+    // Name
+    if (el.name) {
+      line += ` "${el.name}"`;
+    }
+
+    // Disambiguation context (only for duplicate names)
+    if (el._hasDuplicateName) {
+      const ctx = this._findNearestContext(el);
+      if (ctx) line += ` (near "${ctx}")`;
+    }
+
+    // Optional attributes
+    const node = el.node;
+    try {
+      const ph = node.getAttribute("placeholder");
+      if (ph) line += ` ph="${ph}"`;
+    } catch {}
+
+    // States (symbols)
+    if (el.states?.checked) line += " \u2713";
+    if (el.states?.expanded === true) line += " \u25BC";
+    if (el.states?.expanded === false) line += " \u25B6";
+    if (el.states?.selected) line += " [sel]";
+    if (el.states?.disabled) line += " [dis]";
+    if (el.states?.focused) line += " [foc]";
+
+    // Value for inputs
+    try {
+      if (node.value) {
+        const v = node.value.length > 30 ? node.value.slice(0, 27) + "..." : node.value;
+        line += ` val="${v}"`;
+      }
+    } catch {}
+
+    // Link target (shortened for same-origin)
+    try {
+      if (node.tagName === "A" && node.href) {
+        const url = new URL(node.href);
+        if (url.origin === win.location.origin) {
+          line += ` \u2192 ${url.pathname}`;
+        } else {
+          line += ` \u2192 ${url.host}${url.pathname}`;
+        }
+      }
+    } catch {}
+
+    return line;
+  }
+
+  _buildRefs(elements) {
+    const refs = {};
+    for (const el of elements) {
+      refs[el.id] = {
+        selectors: el.selectors || [],
+        role: el.role,
+        name: el.name || "",
+        tagName: el.node.tagName?.toLowerCase() || "",
+        rect: el.viewportRect ? {
+          x: Math.round(el.viewportRect.x),
+          y: Math.round(el.viewportRect.y),
+          width: Math.round(el.viewportRect.width),
+          height: Math.round(el.viewportRect.height),
+        } : null,
+        inferred: el.inferred,
+        ...(el.signal ? { signal: el.signal } : {}),
+      };
+    }
+    return refs;
+  }
+
+  // ── a11y: Locator Resolver (for act() operations) ──
+
+  resolveLocator(selector, doc) {
+    if (!selector) return null;
+
+    // Type: CSS
+    if (selector.type === "css") {
+      try { return doc.querySelector(selector.value); } catch { return null; }
+    }
+
+    // Type: a11y: protocol
+    if (selector.type === "a11y") {
+      const match = selector.value.match(/^a11y:([^/]+)\/(.+)$/);
+      if (!match) return null;
+      const [, targetRole, targetName] = match;
+
+      if (!lazy.a11yService) return null;
+      const docAcc = lazy.a11yService.getAccessibleFor(doc);
+      if (!docAcc) return null;
+
+      return this._findByRoleName(docAcc, targetRole, targetName);
+    }
+
+    return null;
+  }
+
+  _findByRoleName(acc, targetRole, targetName) {
+    const roleName = ROLE_MAP[acc.role] || "";
+    const ariaRole = ROLE_TO_ARIA[roleName] || "";
+    let name = "";
+    try { name = acc.name || ""; } catch {}
+
+    if (ariaRole === targetRole && name === targetName) {
+      try { return acc.DOMNode; } catch { return null; }
+    }
+
+    for (let i = 0; i < (acc.childCount || 0); i++) {
+      try {
+        const child = acc.getChildAt(i);
+        if (!child) continue;
+        const found = this._findByRoleName(child, targetRole, targetName);
+        if (found) return found;
+      } catch {}
+    }
+    return null;
+  }
+
+  // ── Resolve element by snapshot ID (used by act operations) ──
+
+  resolveSnapshotElement(id, doc) {
+    // 1. Direct data-ai-id lookup (O(1))
+    const direct = doc.querySelector(`[data-ai-id="${id}"]`);
+    if (direct) return direct;
+    return null;
   }
 
   async screenshot({ fullPage = false, type = "jpeg", quality = 60, maxWidth = 1280 }) {

@@ -481,6 +481,46 @@ class NativeChannel {
 }
 
 // =============================================================================
+// Window-Session Mapping
+// =============================================================================
+
+/**
+ * Get session ID for a window, creating one if it doesn't exist
+ * @param {number} windowId - The window ID
+ * @returns {Promise<string>} - The session ID
+ */
+async function getWindowSession(windowId) {
+  try {
+    const sessionId = await browser.sessions.getWindowValue(windowId, "nevoflux_session_id");
+    if (sessionId) {
+      console.log(`[NevoFlux] Window ${windowId} has session: ${sessionId}`);
+      return sessionId;
+    }
+  } catch (e) {
+    console.warn("[NevoFlux] browser.sessions.getWindowValue failed:", e);
+  }
+  const newId = `sess-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+  await setWindowSession(windowId, newId);
+  console.log(`[NevoFlux] Window ${windowId} assigned new session: ${newId}`);
+  return newId;
+}
+
+/**
+ * Set session ID for a window
+ * @param {number} windowId - The window ID
+ * @param {string} sessionId - The session ID to set
+ * @returns {Promise<void>}
+ */
+async function setWindowSession(windowId, sessionId) {
+  try {
+    await browser.sessions.setWindowValue(windowId, "nevoflux_session_id", sessionId);
+    console.log(`[NevoFlux] Window ${windowId} -> session ${sessionId}`);
+  } catch (e) {
+    console.warn("[NevoFlux] browser.sessions.setWindowValue failed:", e);
+  }
+}
+
+// =============================================================================
 // Channel Manager (Simplified for 2-channel architecture)
 // =============================================================================
 
@@ -813,6 +853,12 @@ async function executeBrowserTool(request, caller = "unknown") {
       case "navigate":
         return await executeNavigateViaApi(targetTabId, params);
 
+      case "go_back":
+        return await executeGoBackViaApi(targetTabId);
+
+      case "go_forward":
+        return await executeGoForwardViaApi(targetTabId);
+
       // Selector-based interactions (uses trusted events via windowUtils)
       case "click":
         return await executeClickViaApi(targetTabId, params);
@@ -956,6 +1002,30 @@ async function executeNavigateViaApi(tabId, params) {
         resolve({ success: true, result: { url, note: "Navigation started but completion not confirmed" } });
       }, 30000);
     });
+  } catch (error) {
+    return { success: false, error: { code: -1, message: error.message, recoverable: true } };
+  }
+}
+
+/**
+ * Go back in browser history via browser.nevoflux.back()
+ */
+async function executeGoBackViaApi(tabId) {
+  try {
+    const result = await browser.nevoflux.back(tabId);
+    return result.success !== undefined ? result : { success: true, result };
+  } catch (error) {
+    return { success: false, error: { code: -1, message: error.message, recoverable: true } };
+  }
+}
+
+/**
+ * Go forward in browser history via browser.nevoflux.forward()
+ */
+async function executeGoForwardViaApi(tabId) {
+  try {
+    const result = await browser.nevoflux.forward(tabId);
+    return result.success !== undefined ? result : { success: true, result };
   } catch (error) {
     return { success: false, error: { code: -1, message: error.message, recoverable: true } };
   }
@@ -1261,11 +1331,10 @@ async function executeSnapshotViaApi(tabId, params) {
     cleanupOldSnapshots();
 
     console.log(`[NevoFlux] Stored ${Object.keys(numericRefs).length} element refs for tab ${tabId}`);
-    // Debug: Log a few specific elements to verify storage
-    if (numericRefs[31]) {
-      console.log(`[NevoFlux] Element 31 stored:`, JSON.stringify(numericRefs[31]).substring(0, 300));
-    }
-    console.log(`[NevoFlux] First 5 elements:`, Object.entries(numericRefs).slice(0, 5).map(([k, v]) => `${k}: ${v.selector?.substring(0, 50)}`).join("; "));
+    console.log(`[NevoFlux] First 5 elements:`, Object.entries(numericRefs).slice(0, 5).map(([k, v]) => {
+      const sel = v.selectors?.[0]?.value || v.selector || "no-selector";
+      return `${k}: ${sel.substring(0, 50)}`;
+    }).join("; "));
 
     return {
       success: true,
@@ -1273,7 +1342,7 @@ async function executeSnapshotViaApi(tabId, params) {
         tree: result.tree,
         refs: result.refs,
         element_count: Object.keys(result.refs || {}).length,
-        stats: result.stats || { total: Object.keys(result.refs || {}).length, fromA11y: 0, fromDom: 0 },
+        stats: result.stats || { total: Object.keys(result.refs || {}).length, a11y: 0, inferred: 0, occluded: 0, truncated: 0 },
         url: result.url || "",
         title: result.title || "",
       },
@@ -1328,28 +1397,41 @@ async function getElementSelector(tabId, elementId, getChildren = false) {
 
   console.log(`[NevoFlux] Found element ${elementId} (normalized: ${normalizedId}):`, JSON.stringify(elementRef).substring(0, 300));
 
+  // Extract best CSS selector from the selectors array (new format)
+  // Also supports legacy single-selector format for backward compatibility
+  function getBestCssSelector(ref) {
+    // New format: selectors array
+    if (ref.selectors && Array.isArray(ref.selectors)) {
+      // Prefer CSS selectors in priority order (skip a11y: locators for CSS-based operations)
+      for (const s of ref.selectors) {
+        if (s.type === "css") return s.value;
+      }
+      // Fallback: return first selector value regardless of type
+      return ref.selectors[0]?.value || null;
+    }
+    // Legacy format: single selector string
+    return ref.selector || null;
+  }
+
   // If getChildren is true, return array with parent and all direct children
   if (getChildren) {
-    const parentSelector = elementRef.selector;
+    const parentSelector = getBestCssSelector(elementRef);
     const allRefs = Object.entries(tabData.refs);
 
-    // Find direct children by checking if selector starts with parent + " > "
+    // Find direct children by checking CSS path relationship
     const childRefs = allRefs.filter(([id, ref]) => {
-      if (!ref.selector || ref.selector === parentSelector) return false;
-      // Must start with parent selector
-      if (!ref.selector.startsWith(parentSelector)) return false;
-      // Check the part after parent selector: must be " > something" without another " > "
-      const afterParent = ref.selector.substring(parentSelector.length);
-      return afterParent.startsWith(" > ") && !afterParent.substring(3).includes(" > ");
+      const sel = getBestCssSelector(ref);
+      if (!sel || sel === parentSelector) return false;
+      if (!sel.startsWith(parentSelector)) return false;
+      const afterParent = sel.substring(parentSelector.length);
+      return afterParent.startsWith(">") && !afterParent.substring(1).includes(">");
     });
 
-    // Sort children by element ID (DOM order)
     childRefs.sort((a, b) => Number(a[0]) - Number(b[0]));
 
-    // Build result array: children first, then parent (try children before parent)
     const selectors = [];
     for (const [id, ref] of childRefs) {
-      selectors.push(ref.selector);
+      selectors.push(getBestCssSelector(ref));
     }
     selectors.push(parentSelector);
 
@@ -1357,7 +1439,7 @@ async function getElementSelector(tabId, elementId, getChildren = false) {
     return selectors;
   }
 
-  return elementRef.selector;
+  return getBestCssSelector(elementRef);
 }
 
 /**
@@ -2799,6 +2881,49 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
           sendResponse({ success: false, error: err.message });
         });
       return true; // Keep sendResponse valid for async
+
+    case "bg:get_window_session": {
+      const windowId = message.windowId;
+      if (!windowId) {
+        sendResponse({ success: false, error: "windowId required" });
+        return true;
+      }
+      getWindowSession(windowId).then(sessionId => {
+        sendResponse({ success: true, sessionId });
+      }).catch(e => {
+        sendResponse({ success: false, error: e.message });
+      });
+      return true;
+    }
+
+    case "bg:set_window_session": {
+      const { windowId: wId, sessionId: sId } = message;
+      if (!wId || !sId) {
+        sendResponse({ success: false, error: "windowId and sessionId required" });
+        return true;
+      }
+      setWindowSession(wId, sId).then(() => {
+        sendResponse({ success: true });
+      }).catch(e => {
+        sendResponse({ success: false, error: e.message });
+      });
+      return true;
+    }
+
+    case "bg:new_session": {
+      const winId = message.windowId;
+      if (!winId) {
+        sendResponse({ success: false, error: "windowId required" });
+        return true;
+      }
+      const newSessionId = `sess-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+      setWindowSession(winId, newSessionId).then(() => {
+        sendResponse({ success: true, sessionId: newSessionId });
+      }).catch(e => {
+        sendResponse({ success: false, error: e.message });
+      });
+      return true;
+    }
 
     default:
       console.warn("[NevoFlux] Unknown Background API:", apiType);

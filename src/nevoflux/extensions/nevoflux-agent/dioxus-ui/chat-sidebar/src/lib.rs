@@ -87,8 +87,8 @@ fn ChatSidebar() -> Element {
                     // Message display area
                     MessageArea {}
 
-                    // Agent status bar (shows when agent is active)
-                    AgentStatusBar {}
+                    // History panel overlay
+                    HistoryPanel {}
                 }
 
                 // Input area with context bar
@@ -96,6 +96,9 @@ fn ChatSidebar() -> Element {
 
                 // Permission dialog (modal, P0 priority)
                 PermissionDialog {}
+
+                // Tool authorization dialog (modal, for tool-level auth)
+                ToolAuthDialog {}
 
                 // AskUser dialog (modal, for agent questions)
                 AskUserDialog {}

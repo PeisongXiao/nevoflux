@@ -15,6 +15,8 @@ pub struct SessionSummary {
     pub updated_at: u64,
     /// Number of messages in the session
     pub message_count: u32,
+    /// Whether the session is pinned
+    pub pinned: bool,
 }
 
 impl SessionSummary {
@@ -46,6 +48,25 @@ impl SessionSummary {
         } else {
             let days = diff_secs / 86400;
             format!("{} day{} ago", days, if days == 1 { "" } else { "s" })
+        }
+    }
+
+    /// Get date group label for session grouping
+    pub fn date_group(&self) -> &'static str {
+        let now = js_sys::Date::now() as u64;
+        let diff_ms = now.saturating_sub(self.updated_at * 1000);
+        let diff_secs = diff_ms / 1000;
+
+        if diff_secs < 86400 {
+            "Today"
+        } else if diff_secs < 172800 {
+            "Yesterday"
+        } else if diff_secs < 604800 {
+            "This Week"
+        } else if diff_secs < 2592000 {
+            "This Month"
+        } else {
+            "Older"
         }
     }
 }
@@ -92,5 +113,27 @@ impl HistoryState {
     /// Check if there are any sessions
     pub fn has_sessions(&self) -> bool {
         !self.sessions.is_empty()
+    }
+
+    /// Remove a session by ID
+    pub fn remove_session(&mut self, session_id: &str) {
+        self.sessions.retain(|s| s.id != session_id);
+        if self.total > 0 {
+            self.total -= 1;
+        }
+    }
+
+    /// Update the title of a session
+    pub fn update_title(&mut self, session_id: &str, title: &str) {
+        if let Some(session) = self.sessions.iter_mut().find(|s| s.id == session_id) {
+            session.title = Some(title.to_string());
+        }
+    }
+
+    /// Update the pinned status of a session
+    pub fn update_pinned(&mut self, session_id: &str, pinned: bool) {
+        if let Some(session) = self.sessions.iter_mut().find(|s| s.id == session_id) {
+            session.pinned = pinned;
+        }
     }
 }

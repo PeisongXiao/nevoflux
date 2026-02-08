@@ -8,12 +8,14 @@ mod time;
 
 pub use time::*;
 
-/// Truncate a string to a maximum length, adding ellipsis if needed
-pub fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+/// Truncate a string to a maximum number of characters, adding ellipsis if needed
+pub fn truncate(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
+        format!("{}...", truncated)
     }
 }
 
