@@ -432,6 +432,56 @@
           "strategy": { "type": "string", "enum": ["navigation", "interaction", "scroll"], "optional": true },
           "maxWait": { "type": "integer", "optional": true }
         }
+      },
+      {
+        "id": "ArtifactCreateOptions",
+        "type": "object",
+        "description": "Options for creating an artifact",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "optional": true, "description": "Artifact type (e.g. html, css, js). Defaults to html" },
+          "title": { "type": "string", "optional": true, "description": "Artifact title. Defaults to Untitled" },
+          "code": { "type": "string", "optional": true, "description": "Artifact content/code" },
+          "state": { "type": "string", "optional": true, "description": "Artifact state (e.g. streaming, complete). Defaults to streaming" },
+          "source": { "type": "string", "optional": true, "description": "Artifact source (e.g. agent). Defaults to agent" },
+          "permissions": { "type": "array", "items": { "type": "string" }, "optional": true, "description": "Artifact permissions" }
+        }
+      },
+      {
+        "id": "ArtifactUpdateOptions",
+        "type": "object",
+        "description": "Options for updating an artifact",
+        "properties": {
+          "code": { "type": "string", "optional": true, "description": "Updated content/code" },
+          "state": { "type": "string", "optional": true, "description": "Updated state" },
+          "title": { "type": "string", "optional": true, "description": "Updated title" }
+        }
+      },
+      {
+        "id": "ArtifactEntry",
+        "type": "object",
+        "description": "Artifact data entry",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "content": { "type": "string" },
+          "state": { "type": "string" },
+          "source": { "type": "string" },
+          "permissions": { "type": "array", "items": { "type": "string" } },
+          "createdAt": { "type": "number" },
+          "updatedAt": { "type": "number" }
+        }
+      },
+      {
+        "id": "ContentStoreEntry",
+        "type": "object",
+        "description": "A content store entry for persistence",
+        "properties": {
+          "key": { "type": "string" },
+          "value": { "type": "any" },
+          "updated_at": { "type": "integer", "optional": true }
+        }
       }
     ],
     "functions": [
@@ -1281,6 +1331,98 @@
           { "name": "options", "$ref": "StabilityOptions", "optional": true }
         ],
         "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "createArtifact",
+        "type": "function",
+        "async": "promise",
+        "description": "Create a new artifact and open it in a background canvas tab",
+        "parameters": [
+          { "name": "options", "$ref": "ArtifactCreateOptions" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "updateArtifact",
+        "type": "function",
+        "async": "promise",
+        "description": "Update an existing artifact's content, state, or title",
+        "parameters": [
+          { "name": "id", "type": "string" },
+          { "name": "options", "$ref": "ArtifactUpdateOptions" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "getArtifact",
+        "type": "function",
+        "async": "promise",
+        "description": "Get an artifact by ID",
+        "parameters": [
+          { "name": "id", "type": "string" }
+        ],
+        "returns": { "type": "object" }
+      },
+      {
+        "name": "deleteArtifact",
+        "type": "function",
+        "async": "promise",
+        "description": "Delete an artifact by ID",
+        "parameters": [
+          { "name": "id", "type": "string" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "listArtifacts",
+        "type": "function",
+        "async": "promise",
+        "description": "List all artifacts",
+        "parameters": [],
+        "returns": { "type": "object" }
+      },
+      {
+        "name": "getSettings",
+        "type": "function",
+        "async": "promise",
+        "description": "Get a settings value by key",
+        "parameters": [
+          { "name": "key", "type": "string" }
+        ],
+        "returns": { "type": "object" }
+      },
+      {
+        "name": "setSettings",
+        "type": "function",
+        "async": "promise",
+        "description": "Set a settings value by key",
+        "parameters": [
+          { "name": "key", "type": "string" },
+          { "name": "value", "type": "any" }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      },
+      {
+        "name": "contentStoreLoad",
+        "type": "function",
+        "async": "promise",
+        "description": "Bulk-load entries into ContentStore from persistence (suppresses re-persist)",
+        "parameters": [
+          { "name": "entries", "type": "array", "items": { "$ref": "ContentStoreEntry" } }
+        ],
+        "returns": { "$ref": "ApiResult" }
+      }
+    ],
+    "events": [
+      {
+        "name": "onContentStoreChanged",
+        "type": "function",
+        "description": "Fired when ContentStore is mutated (set or delete)",
+        "parameters": [
+          { "name": "operation", "type": "string" },
+          { "name": "key", "type": "string" },
+          { "name": "value", "type": "any", "optional": true }
+        ]
       }
     ]
   }

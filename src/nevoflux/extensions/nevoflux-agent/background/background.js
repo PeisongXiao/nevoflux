@@ -96,6 +96,11 @@ const MessageTypes = {
   ASK_USER_REQUEST: "ask_user_request",
   ASK_USER_RESPONSE: "ask_user_response",
 
+  // Artifact streaming (Agent -> Background -> ContentStore)
+  ARTIFACT_START: "artifact_start",
+  ARTIFACT_DELTA: "artifact_delta",
+  ARTIFACT_COMPLETE: "artifact_complete",
+
   // Legacy types (backwards compatibility)
   TAB_CONTEXT_UPDATE: "tab_context_update",
   REQUEST_TAB_CONTEXT: "request_tab_context",
@@ -112,6 +117,14 @@ const RECONNECT_CONFIG = {
 };
 
 const MAX_RECONNECT_ATTEMPTS = 20;
+
+// =============================================================================
+// ContentStore Persistence Configuration
+// =============================================================================
+
+const CONTENT_STORE_DEBOUNCE_MS = 1000; // 1 second per-key debounce
+const CONTENT_STORE_MAX_VALUE_SIZE = 500_000; // 500KB max value size
+const contentStoreDebounceTimers = new Map(); // key -> timeoutId
 
 // =============================================================================
 // Chunking Configuration
@@ -606,10 +619,38 @@ class ChannelManager {
 
   /**
    * Handle messages from Chat channel
-   * All messages are broadcast to Sidebar - Sidebar decides how to handle
+   * Artifact messages are intercepted and stored via ContentStore.
+   * All messages are also broadcast to Sidebar.
    */
   handleChatMessage(message) {
     console.log("[NevoFlux] Chat channel received:", message.type);
+
+    // Intercept artifact streaming messages
+    const msgType = message.type;
+    if (msgType === MessageTypes.ARTIFACT_START ||
+        msgType === MessageTypes.ARTIFACT_DELTA ||
+        msgType === MessageTypes.ARTIFACT_COMPLETE) {
+      handleArtifactMessage(message).catch((err) => {
+        console.error("[NevoFlux] Artifact handling failed:", err);
+      });
+    }
+
+    // Intercept content_store responses
+    if (msgType === MessageTypes.SYSTEM_RESPONSE) {
+      const payload = message.payload;
+      const cmd = payload?.command;
+      if (cmd === "content_store.load" && payload?.success) {
+        const entries = payload.data?.entries || [];
+        console.log(`[NevoFlux] Content store load response: ${entries.length} entries`);
+        if (entries.length > 0) {
+          browser.nevoflux.contentStoreLoad(entries).catch((err) => {
+            console.error("[NevoFlux] Content store load failed:", err);
+          });
+        }
+      } else if ((cmd === "content_store.set" || cmd === "content_store.delete") && !payload?.success) {
+        console.warn(`[NevoFlux] Content store persist failed: ${cmd}`, payload?.error);
+      }
+    }
 
     // All messages go to Sidebar - Sidebar decides how to handle
     broadcastToSidebar(message);
@@ -636,6 +677,17 @@ class ChannelManager {
     this.connectionStatus.chat = connected;
     if (connected) {
       console.log("[NevoFlux] Chat channel connected (bidirectional communication ready)");
+
+      // Load persisted ContentStore entries from Rust agent
+      console.log("[NevoFlux] Loading content store from agent...");
+      this.sendToAgent({
+        type: MessageTypes.SYSTEM_COMMAND,
+        payload: {
+          command: "content_store.load",
+          request_id: `cs_load_${Date.now()}`,
+          params: { prefix: "" },
+        },
+      });
     }
     this.broadcastConnectionStatus();
   }
@@ -693,6 +745,69 @@ function broadcastToSidebar(message) {
 }
 
 // =============================================================================
+// ContentStore Persistence Bridge
+// =============================================================================
+
+/**
+ * Listen for ContentStore changes and persist to Rust agent's SQLite.
+ * Uses per-key debouncing (1s) to coalesce rapid writes (e.g. artifact streaming).
+ */
+browser.nevoflux.onContentStoreChanged.addListener((operation, key, value) => {
+  // Skip if agent not connected
+  if (!channelManager.connectionStatus.chat) {
+    console.debug("[NevoFlux] ContentStore changed but agent not connected, skipping persist:", key);
+    return;
+  }
+
+  // Clear existing debounce timer for this key
+  if (contentStoreDebounceTimers.has(key)) {
+    clearTimeout(contentStoreDebounceTimers.get(key));
+  }
+
+  // Debounce per key
+  const timerId = setTimeout(() => {
+    contentStoreDebounceTimers.delete(key);
+
+    // Re-check connection after debounce delay
+    if (!channelManager.connectionStatus.chat) {
+      console.debug("[NevoFlux] Agent disconnected during debounce, skipping persist:", key);
+      return;
+    }
+
+    if (operation === "set") {
+      // Guard: skip oversized values
+      const serialized = JSON.stringify(value);
+      if (serialized && serialized.length > CONTENT_STORE_MAX_VALUE_SIZE) {
+        console.warn(`[NevoFlux] ContentStore value too large (${serialized.length}), skipping persist: ${key}`);
+        return;
+      }
+
+      console.log(`[NevoFlux] Persisting: content_store.set ${key}`);
+      channelManager.sendToAgent({
+        type: MessageTypes.SYSTEM_COMMAND,
+        payload: {
+          command: "content_store.set",
+          request_id: `cs_set_${Date.now()}`,
+          params: { key, value },
+        },
+      });
+    } else if (operation === "delete") {
+      console.log(`[NevoFlux] Persisting: content_store.delete ${key}`);
+      channelManager.sendToAgent({
+        type: MessageTypes.SYSTEM_COMMAND,
+        payload: {
+          command: "content_store.delete",
+          request_id: `cs_del_${Date.now()}`,
+          params: { key },
+        },
+      });
+    }
+  }, CONTENT_STORE_DEBOUNCE_MS);
+
+  contentStoreDebounceTimers.set(key, timerId);
+});
+
+// =============================================================================
 // MCP Request Handler
 // =============================================================================
 
@@ -748,6 +863,62 @@ async function handleMcpRequest(payload) {
         },
       },
     });
+  }
+}
+
+// =============================================================================
+// Artifact Streaming Handler
+// =============================================================================
+
+/**
+ * Handle artifact streaming messages from the native agent.
+ *
+ * Flow:
+ *   artifact_start  → createArtifact (state: "streaming")
+ *   artifact_delta  → updateArtifact (append code)
+ *   artifact_complete → updateArtifact (state: "complete")
+ */
+async function handleArtifactMessage(message) {
+  const { type, payload } = message;
+
+  switch (type) {
+    case MessageTypes.ARTIFACT_START: {
+      const { id, artifact_type, title, source, permissions } = payload;
+      console.log(`[NevoFlux] Artifact start: ${id} (${artifact_type})`);
+      await browser.nevoflux.createArtifact({
+        id,
+        type: artifact_type || "html",
+        title: title || "Untitled",
+        code: "",
+        state: "streaming",
+        source: source || "agent",
+        permissions: permissions || [],
+      });
+      break;
+    }
+
+    case MessageTypes.ARTIFACT_DELTA: {
+      const { id, delta } = payload;
+      // Fetch current content, append delta
+      const current = await browser.nevoflux.getArtifact(id);
+      if (current?.success) {
+        const newCode = (current.data.content || "") + (delta || "");
+        await browser.nevoflux.updateArtifact(id, { code: newCode });
+      } else {
+        console.warn(`[NevoFlux] Artifact delta for unknown id: ${id}`);
+      }
+      break;
+    }
+
+    case MessageTypes.ARTIFACT_COMPLETE: {
+      const { id, final_code, title } = payload;
+      console.log(`[NevoFlux] Artifact complete: ${id}`);
+      const updates = { state: "complete" };
+      if (final_code !== undefined) updates.code = final_code;
+      if (title !== undefined) updates.title = title;
+      await browser.nevoflux.updateArtifact(id, updates);
+      break;
+    }
   }
 }
 

@@ -47,6 +47,9 @@ let interceptCounter = 0;
 // Maximum age for captures before auto-cleanup (5 minutes)
 const CAPTURE_MAX_AGE_MS = 300000;
 
+// Module-level: unsubscribe handle for ContentStore persist callback
+let contentStorePersistUnsubscribe = null;
+
 this.nevoflux = class extends ExtensionAPI {
   getAPI(context) {
     const { extension } = context;
@@ -1422,6 +1425,136 @@ this.nevoflux = class extends ExtensionAPI {
             return { success: true }; // Already unlocked
           }
         },
+
+        // ========== Artifact Management ==========
+
+        async createArtifact({ id, type, title, code, state, source, permissions }) {
+          const { NevofluxContentStore } = ChromeUtils.importESModule(
+            "resource:///modules/NevofluxContentStore.sys.mjs"
+          );
+          const now = Date.now();
+          const entry = {
+            type: type || "html",
+            title: title || "Untitled",
+            content: code || "",
+            state: state || "streaming",
+            source: source || "agent",
+            permissions: permissions || [],
+            createdAt: now,
+            updatedAt: now,
+          };
+          NevofluxContentStore.set(`canvas:${id}`, entry);
+
+          // Open canvas tab in background
+          const win = Services.wm.getMostRecentBrowserWindow();
+          if (win?.gBrowser) {
+            win.gBrowser.addTab(`nevoflux://canvas/${id}`, {
+              triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+              inBackground: true,
+            });
+          }
+
+          return { success: true, id };
+        },
+
+        async updateArtifact(id, { code, state, title }) {
+          const { NevofluxContentStore } = ChromeUtils.importESModule(
+            "resource:///modules/NevofluxContentStore.sys.mjs"
+          );
+          const existing = NevofluxContentStore.get(`canvas:${id}`);
+          if (!existing) {
+            return { success: false, error: { code: 12001, message: "Artifact not found", recoverable: false } };
+          }
+
+          if (code !== undefined) existing.content = code;
+          if (state !== undefined) existing.state = state;
+          if (title !== undefined) existing.title = title;
+          existing.updatedAt = Date.now();
+
+          NevofluxContentStore.set(`canvas:${id}`, existing);
+          return { success: true };
+        },
+
+        async getArtifact(id) {
+          const { NevofluxContentStore } = ChromeUtils.importESModule(
+            "resource:///modules/NevofluxContentStore.sys.mjs"
+          );
+          const entry = NevofluxContentStore.get(`canvas:${id}`);
+          return entry
+            ? { success: true, data: entry }
+            : { success: false, error: { code: 12001, message: "Artifact not found", recoverable: false } };
+        },
+
+        async deleteArtifact(id) {
+          const { NevofluxContentStore } = ChromeUtils.importESModule(
+            "resource:///modules/NevofluxContentStore.sys.mjs"
+          );
+          NevofluxContentStore.delete(`canvas:${id}`);
+          return { success: true };
+        },
+
+        async listArtifacts() {
+          const { NevofluxContentStore } = ChromeUtils.importESModule(
+            "resource:///modules/NevofluxContentStore.sys.mjs"
+          );
+          const entries = NevofluxContentStore.query("canvas:");
+          return { success: true, data: entries.map(e => ({ id: e.key.replace("canvas:", ""), ...e.value })) };
+        },
+
+        // ========== Settings ==========
+
+        async getSettings(key) {
+          const { NevofluxContentStore } = ChromeUtils.importESModule(
+            "resource:///modules/NevofluxContentStore.sys.mjs"
+          );
+          return { success: true, data: NevofluxContentStore.get(`config:${key}`) };
+        },
+
+        async setSettings(key, value) {
+          const { NevofluxContentStore } = ChromeUtils.importESModule(
+            "resource:///modules/NevofluxContentStore.sys.mjs"
+          );
+          NevofluxContentStore.set(`config:${key}`, value);
+          return { success: true };
+        },
+
+        // ========== ContentStore Persistence ==========
+
+        async contentStoreLoad(entries) {
+          const { NevofluxContentStore } = ChromeUtils.importESModule(
+            "resource:///modules/NevofluxContentStore.sys.mjs"
+          );
+          NevofluxContentStore._loading = true;
+          try {
+            for (const entry of entries) {
+              if (entry.key && entry.value !== undefined) {
+                NevofluxContentStore.set(entry.key, entry.value);
+              }
+            }
+          } finally {
+            NevofluxContentStore._loading = false;
+          }
+          return { success: true };
+        },
+
+        onContentStoreChanged: new EventManager({
+          context,
+          module: "nevoflux",
+          event: "onContentStoreChanged",
+          register: fire => {
+            const { NevofluxContentStore } = ChromeUtils.importESModule(
+              "resource:///modules/NevofluxContentStore.sys.mjs"
+            );
+            const unsubscribe = NevofluxContentStore.onPersist((op, key, value) => {
+              fire.async(op, key, value);
+            });
+            contentStorePersistUnsubscribe = unsubscribe;
+            return () => {
+              unsubscribe();
+              contentStorePersistUnsubscribe = null;
+            };
+          },
+        }).api(),
       },
     };
   }
