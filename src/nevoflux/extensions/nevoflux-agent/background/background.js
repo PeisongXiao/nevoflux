@@ -1910,20 +1910,25 @@ async function executeCanvasRender(params) {
 
   const title = params?.title || "Generated App";
   const entry = params?.entry || undefined;
-  const id = params?.artifact_id || `code-mode-${Date.now()}`;
+  const id = params?.artifact_id || `code-mode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // Create artifact in ContentStore
-  await browser.nevoflux.createArtifact({
-    id,
-    type: "project",
-    title,
-    files,
-    entry,
-    code: "",
-    state: "complete",
-    source: "agent",
-    permissions: [],
-  });
+  try {
+    await browser.nevoflux.createArtifact({
+      id,
+      type: "project",
+      title,
+      files,
+      entry,
+      code: "",
+      state: "complete",
+      source: "agent",
+      permissions: [],
+    });
+  } catch (e) {
+    console.error("[NevoFlux] canvas_render: Failed to create artifact:", e);
+    return { success: false, error: { code: -1, message: `Failed to create artifact: ${e.message || e}`, recoverable: true } };
+  }
 
   // Open canvas tab
   try {
