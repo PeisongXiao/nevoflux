@@ -1205,10 +1205,11 @@ function normalizeArtifactType(rawType) {
     "image/svg+xml": "svg",
     "application/javascript": "react",
     "text/jsx": "react",
+    "application/project": "project",
   };
   if (MIME_MAP[rawType]) return MIME_MAP[rawType];
   // Already a short type
-  if (["html", "react", "markdown", "svg", "mermaid"].includes(rawType)) return rawType;
+  if (["html", "react", "markdown", "svg", "mermaid", "project"].includes(rawType)) return rawType;
   // Fallback: try to extract subtype from MIME
   const parts = rawType.split("/");
   if (parts.length === 2) return parts[1];
@@ -1228,7 +1229,7 @@ async function handleArtifactMessage(message) {
 
   switch (type) {
     case MessageTypes.ARTIFACT_START: {
-      const { id, content_type, title, source, permissions } = payload;
+      const { id, content_type, title, source, permissions, files, entry, options } = payload;
       console.log(`[NevoFlux] Artifact start: ${id} (${content_type})`);
 
       // Initialize delta buffer for this artifact
@@ -1238,8 +1239,7 @@ async function handleArtifactMessage(message) {
       // Daemon sends "text/html", canvas.js expects "html"
       const normalizedType = normalizeArtifactType(content_type);
 
-      // Store artifact in ContentStore first, then open tab for streaming display
-      await browser.nevoflux.createArtifact({
+      const createOptions = {
         id,
         type: normalizedType,
         title: title || "Untitled",
@@ -1247,7 +1247,17 @@ async function handleArtifactMessage(message) {
         state: "streaming",
         source: source || "agent",
         permissions: permissions || [],
-      });
+      };
+
+      // Multi-file project support
+      if (files) {
+        createOptions.files = files;
+        createOptions.entry = entry;
+        createOptions.options = options;
+      }
+
+      // Store artifact in ContentStore first, then open tab for streaming display
+      await browser.nevoflux.createArtifact(createOptions);
 
       // Open canvas tab immediately — page subscribes to ContentStore updates
       // and will render content as artifact_delta messages arrive
@@ -1286,7 +1296,7 @@ async function handleArtifactMessage(message) {
     }
 
     case MessageTypes.ARTIFACT_COMPLETE: {
-      const { id, final_code, title } = payload;
+      const { id, final_code, title, files, entry } = payload;
       const bufferedLen = _artifactDeltaBuffers.get(id)?.length || 0;
       console.log(`[NevoFlux] Artifact complete: ${id}, bufferedContentLen=${bufferedLen}`);
       // Clean up delta buffer
@@ -1294,6 +1304,9 @@ async function handleArtifactMessage(message) {
       const updates = { state: "complete" };
       if (final_code !== undefined) updates.code = final_code;
       if (title !== undefined) updates.title = title;
+      // Multi-file project support
+      if (files !== undefined) updates.files = files;
+      if (entry !== undefined) updates.entry = entry;
       await browser.nevoflux.updateArtifact(id, updates);
       break;
     }
