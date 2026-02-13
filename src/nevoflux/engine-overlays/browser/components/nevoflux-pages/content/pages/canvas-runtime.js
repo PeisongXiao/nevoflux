@@ -51,6 +51,14 @@ const CanvasRuntime = {
     "/App.ts",
     "/App.jsx",
     "/App.js",
+    // Vue entry points
+    "/src/main.vue",
+    "/src/App.vue",
+    "/App.vue",
+    // Svelte entry points
+    "/src/main.svelte",
+    "/src/App.svelte",
+    "/App.svelte",
   ],
 
   /**
@@ -87,7 +95,7 @@ const CanvasRuntime = {
 
     // 3. Fallback: first .tsx/.jsx/.ts/.js file in VFS
     const allFiles = VirtualFS.list();
-    const jsExtensions = [".tsx", ".jsx", ".ts", ".js"];
+    const jsExtensions = [".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte"];
     for (const ext of jsExtensions) {
       const match = allFiles.find((f) => f.endsWith(ext));
       if (match) {
@@ -104,7 +112,7 @@ const CanvasRuntime = {
    * Determine whether an entry file's content needs a mount wrapper.
    *
    * Returns `false` if the content already contains its own mounting logic
-   * (createRoot, ReactDOM.render, document.getElementById).
+   * (createRoot, ReactDOM.render, createApp, new App, document.getElementById).
    *
    * Returns `true` if the content appears to be a pure component export
    * (export default function/class/const/let/var or export default [A-Z]).
@@ -117,7 +125,9 @@ const CanvasRuntime = {
     if (
       content.includes("createRoot") ||
       content.includes("ReactDOM.render") ||
-      content.includes("document.getElementById")
+      content.includes("createApp") ||
+      content.includes("document.getElementById") ||
+      content.includes("document.querySelector")
     ) {
       return false;
     }
@@ -136,27 +146,81 @@ const CanvasRuntime = {
   // ── Mount Wrapping ─────────────────────────────────────
 
   /**
+   * Detect the framework for a file based on its extension.
+   *
+   * @param {string} filePath - The file path to check.
+   * @returns {"react"|"vue"|"svelte"} The detected framework.
+   */
+  _detectFramework(filePath) {
+    if (filePath.endsWith(".vue")) {
+      return "vue";
+    }
+    if (filePath.endsWith(".svelte")) {
+      return "svelte";
+    }
+    return "react";
+  },
+
+  /**
    * Create a wrapper entry file that mounts a pure component export.
    *
-   * Writes a wrapper file at `/__nevoflux_entry_wrapper.jsx` in VirtualFS
-   * that imports the default export from the original entry and renders
-   * it into `#root` using React 18's createRoot API.
+   * Generates framework-appropriate mount code:
+   * - **React**: Uses `createRoot` from `react-dom/client`
+   * - **Vue**: Uses `createApp` from `vue`
+   * - **Svelte**: Instantiates component with `new App({ target })`
    *
+   * Writes the wrapper file at `/__nevoflux_entry_wrapper.{ext}` in VirtualFS.
    * Sets `this._wrappedEntry` to the wrapper path so the bundler uses
    * it as the actual entry point.
    *
    * @param {string} entryPath - The original entry point path in VFS.
    */
   _wrapEntryWithMount(entryPath) {
-    const wrapperPath = "/__nevoflux_entry_wrapper.jsx";
-    const wrapperCode = [
-      'import { createRoot } from "react-dom/client";',
-      `import App from "${entryPath}";`,
-      "",
-      'const root = createRoot(document.getElementById("root"));',
-      "root.render(<App />);",
-      "",
-    ].join("\n");
+    const framework = this._detectFramework(entryPath);
+
+    let wrapperPath;
+    let wrapperCode;
+
+    switch (framework) {
+      case "vue": {
+        wrapperPath = "/__nevoflux_entry_wrapper.js";
+        wrapperCode = [
+          'import { createApp } from "vue";',
+          `import App from "${entryPath}";`,
+          "",
+          'createApp(App).mount("#root");',
+          "",
+        ].join("\n");
+        break;
+      }
+
+      case "svelte": {
+        wrapperPath = "/__nevoflux_entry_wrapper.js";
+        wrapperCode = [
+          `import App from "${entryPath}";`,
+          "",
+          "new App({",
+          '  target: document.getElementById("root"),',
+          "});",
+          "",
+        ].join("\n");
+        break;
+      }
+
+      default: {
+        // React
+        wrapperPath = "/__nevoflux_entry_wrapper.jsx";
+        wrapperCode = [
+          'import { createRoot } from "react-dom/client";',
+          `import App from "${entryPath}";`,
+          "",
+          'const root = createRoot(document.getElementById("root"));',
+          "root.render(<App />);",
+          "",
+        ].join("\n");
+        break;
+      }
+    }
 
     VirtualFS.write(wrapperPath, wrapperCode);
     this._wrappedEntry = wrapperPath;
@@ -276,9 +340,12 @@ const CanvasRuntime = {
       this._entry = entry;
 
       // 3. Check if entry needs mount wrapper
+      //    .vue and .svelte files are always component definitions and need wrapping.
+      //    JS/TS files are checked for existing mount logic.
       const entryContent = VirtualFS.read(entry);
       let bundleEntry = entry;
-      if (entryContent && this._needsMountWrapper(entryContent)) {
+      const isComponentFile = entry.endsWith(".vue") || entry.endsWith(".svelte");
+      if (isComponentFile || (entryContent && this._needsMountWrapper(entryContent))) {
         this._wrapEntryWithMount(entry);
         bundleEntry = this._wrappedEntry;
       }
@@ -348,11 +415,13 @@ const CanvasRuntime = {
         };
       }
 
-      // If the updated file is the entry, re-check if mount wrapper is needed
+      // If the updated file is the entry, re-check if mount wrapper is needed.
+      // .vue and .svelte files always need wrapping (they are component definitions).
       const normalizedPath = VirtualFS.normalize(path);
       if (normalizedPath === this._entry) {
+        const isComponentFile = this._entry.endsWith(".vue") || this._entry.endsWith(".svelte");
         const updatedContent = VirtualFS.read(normalizedPath);
-        if (updatedContent && this._needsMountWrapper(updatedContent)) {
+        if (isComponentFile || (updatedContent && this._needsMountWrapper(updatedContent))) {
           if (!this._wrappedEntry) {
             this._wrapEntryWithMount(this._entry);
           }

@@ -13,6 +13,8 @@
  * Plugins:
  * - VFS Plugin: resolves relative/absolute imports from VirtualFS
  * - CDN Plugin: marks bare npm specifiers as external (resolved via importmap)
+ * - Vue SFC Plugin: compiles .vue Single File Components to JavaScript
+ * - Svelte Plugin: compiles .svelte components to JavaScript
  * - CSS Plugin: collects CSS from .css imports into a combined string
  *
  * Assumes `globalThis.esbuild` and `VirtualFS` are available as globals.
@@ -30,6 +32,12 @@ const Bundler = {
   /** @type {Map<string, {js: string, css: string, errors: string[]}>} */
   _bundleCache: new Map(),
 
+  /** @type {object|null} Lazily-loaded Vue compiler-sfc module. */
+  _vueCompiler: null,
+
+  /** @type {boolean} Whether Svelte compiler global is confirmed available. */
+  _svelteCompilerReady: false,
+
   /**
    * Framework packages mapped to esm.sh CDN URLs for runtime importmap.
    * @type {Record<string, string>}
@@ -40,6 +48,9 @@ const Bundler = {
     "react-dom/client": "https://esm.sh/react-dom@18/client?dev",
     "react/jsx-runtime": "https://esm.sh/react@18/jsx-runtime?dev",
     "react/jsx-dev-runtime": "https://esm.sh/react@18/jsx-dev-runtime?dev",
+    "vue": "https://esm.sh/vue@3?dev",
+    "svelte": "https://esm.sh/svelte@4?dev",
+    "svelte/internal": "https://esm.sh/svelte@4/internal?dev",
   },
 
   // ── Initialization ──────────────────────────────────────
@@ -196,6 +207,204 @@ const Bundler = {
     };
   },
 
+  /**
+   * Create the Vue SFC plugin for esbuild.
+   *
+   * Compiles `.vue` Single File Components into JavaScript at bundle time.
+   * Lazily loads the Vue compiler-sfc ESM module from the vendor directory
+   * on first use via dynamic `import()`.
+   *
+   * Handles `<script>` / `<script setup>`, `<template>`, and `<style>` blocks.
+   * Extracted CSS is collected into `_collectedCSS` (same as the CSS plugin).
+   *
+   * @returns {object} An esbuild plugin object.
+   */
+  _createVuePlugin() {
+    const bundler = this;
+
+    return {
+      name: "vue-sfc",
+      setup(build) {
+        build.onLoad({ filter: /\.vue$/, namespace: "vfs" }, async (args) => {
+          const source = VirtualFS.read(args.path);
+
+          if (source === null) {
+            return {
+              errors: [{ text: `Vue SFC not found: ${args.path}` }],
+            };
+          }
+
+          // Lazy-load Vue compiler-sfc (ESM browser build)
+          if (!bundler._vueCompiler) {
+            try {
+              bundler._vueCompiler = await import(
+                "chrome://nevoflux/content/vendor/vue-compiler-sfc.esm.js"
+              );
+            } catch (e) {
+              return {
+                errors: [{
+                  text: `Vue compiler not available: ${e.message}. ` +
+                    "Ensure vue-compiler-sfc.esm.js is in the vendor directory.",
+                }],
+              };
+            }
+          }
+
+          const { parse, compileScript, compileTemplate } = bundler._vueCompiler;
+
+          try {
+            // Parse the SFC into descriptor blocks
+            const { descriptor, errors: parseErrors } = parse(source, {
+              filename: args.path,
+            });
+
+            if (parseErrors && parseErrors.length > 0) {
+              return {
+                errors: parseErrors.map((e) => ({
+                  text: `Vue SFC parse error in ${args.path}: ${e.message || e}`,
+                })),
+              };
+            }
+
+            const sfcId = args.path.replace(/[^a-zA-Z0-9]/g, "_");
+            const parts = [];
+
+            // 1. Compile <script> or <script setup>
+            let scriptResult = null;
+            if (descriptor.script || descriptor.scriptSetup) {
+              scriptResult = compileScript(descriptor, {
+                id: sfcId,
+                inlineTemplate: true,
+              });
+              parts.push(scriptResult.content);
+            }
+
+            // 2. Compile <template> (only if not inlined by compileScript)
+            if (descriptor.template && !(descriptor.scriptSetup && scriptResult)) {
+              const templateResult = compileTemplate({
+                source: descriptor.template.content,
+                filename: args.path,
+                id: sfcId,
+                compilerOptions: {
+                  bindingMetadata: scriptResult ? scriptResult.bindings : {},
+                },
+              });
+
+              if (templateResult.errors && templateResult.errors.length > 0) {
+                return {
+                  errors: templateResult.errors.map((e) => ({
+                    text: `Vue template error in ${args.path}: ${e.message || e}`,
+                  })),
+                };
+              }
+
+              parts.push(templateResult.code);
+
+              // If there is a script block but no <script setup>, wire up the render function
+              if (scriptResult && !descriptor.scriptSetup) {
+                parts.push(
+                  "\n__default__.render = render;",
+                  `__default__.__file = ${JSON.stringify(args.path)};`
+                );
+              }
+            }
+
+            // 3. Collect <style> blocks
+            for (const style of descriptor.styles || []) {
+              if (style.content) {
+                bundler._collectedCSS.push(style.content);
+              }
+            }
+
+            const code = parts.join("\n");
+            return { contents: code, loader: "js" };
+          } catch (e) {
+            return {
+              errors: [{
+                text: `Vue SFC compilation failed for ${args.path}: ${e.message || e}`,
+              }],
+            };
+          }
+        });
+      },
+    };
+  },
+
+  /**
+   * Create the Svelte plugin for esbuild.
+   *
+   * Compiles `.svelte` components into JavaScript at bundle time.
+   * Uses the Svelte compiler loaded as a UMD global (`globalThis.svelte`)
+   * via `<script>` tag from the vendor directory.
+   *
+   * The Svelte compiler generates DOM-targeting JavaScript with CSS
+   * injected into the component (default `css: "injected"` mode).
+   * If separate CSS is emitted, it is collected into `_collectedCSS`.
+   *
+   * @returns {object} An esbuild plugin object.
+   */
+  _createSveltePlugin() {
+    const bundler = this;
+
+    return {
+      name: "svelte",
+      setup(build) {
+        build.onLoad({ filter: /\.svelte$/, namespace: "vfs" }, (args) => {
+          const source = VirtualFS.read(args.path);
+
+          if (source === null) {
+            return {
+              errors: [{ text: `Svelte component not found: ${args.path}` }],
+            };
+          }
+
+          // Check that Svelte compiler global is available
+          if (!bundler._svelteCompilerReady) {
+            if (typeof globalThis.svelte === "undefined" || !globalThis.svelte.compile) {
+              return {
+                errors: [{
+                  text: "Svelte compiler not available. " +
+                    "Ensure svelte-compiler.min.js is loaded via <script> tag.",
+                }],
+              };
+            }
+            bundler._svelteCompilerReady = true;
+          }
+
+          try {
+            const result = globalThis.svelte.compile(source, {
+              filename: args.path,
+              generate: "dom",
+              css: "injected",
+              hydratable: false,
+              dev: false,
+            });
+
+            // Collect warnings (non-fatal)
+            if (result.warnings && result.warnings.length > 0) {
+              for (const w of result.warnings) {
+                console.warn(`[Bundler] Svelte warning in ${args.path}: ${w.message}`);
+              }
+            }
+
+            // Collect CSS if emitted separately (when css: "external")
+            if (result.css && result.css.code) {
+              bundler._collectedCSS.push(result.css.code);
+            }
+
+            return { contents: result.js.code, loader: "js" };
+          } catch (e) {
+            return {
+              errors: [{
+                text: `Svelte compilation failed for ${args.path}: ${e.message || e}`,
+              }],
+            };
+          }
+        });
+      },
+    };
+  },
+
   // ── Caching ─────────────────────────────────────────────
 
   /**
@@ -326,6 +535,8 @@ const Bundler = {
         plugins: [
           this._createVFSPlugin(),
           this._createCDNPlugin(),
+          this._createVuePlugin(),
+          this._createSveltePlugin(),
           this._createCSSPlugin(),
         ],
       });
@@ -377,6 +588,8 @@ const Bundler = {
       ".mjs": "js",
       ".json": "json",
       ".css": "css",
+      ".vue": "js",
+      ".svelte": "js",
     };
     return loaderMap[ext] || "js";
   },

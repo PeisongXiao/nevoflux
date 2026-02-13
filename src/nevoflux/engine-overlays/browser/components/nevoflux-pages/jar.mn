@@ -26,3 +26,5 @@ nevoflux.jar:
     content/nevoflux/vendor/codemirror.min.js                (content/vendor/codemirror.min.js)
     content/nevoflux/vendor/esbuild-wasm.min.js              (content/vendor/esbuild-wasm.min.js)
     content/nevoflux/vendor/esbuild.wasm                     (content/vendor/esbuild.wasm)
+    content/nevoflux/vendor/vue-compiler-sfc.esm.js          (content/vendor/vue-compiler-sfc.esm.js)
+    content/nevoflux/vendor/svelte-compiler.min.js           (content/vendor/svelte-compiler.min.js)

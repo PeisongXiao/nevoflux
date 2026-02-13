@@ -38,11 +38,15 @@ const VirtualFS = {
     ".js",
     ".jsx",
     ".mjs",
+    ".vue",
+    ".svelte",
     "/index.ts",
     "/index.tsx",
     "/index.js",
     "/index.jsx",
     "/index.mjs",
+    "/index.vue",
+    "/index.svelte",
   ],
 
   // ── Path Normalization ──────────────────────────────────
