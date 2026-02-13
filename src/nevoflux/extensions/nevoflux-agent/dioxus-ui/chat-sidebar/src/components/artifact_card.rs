@@ -33,6 +33,7 @@ pub fn ArtifactCard(message: Message) -> Element {
         "application/json" | "json" => "\u{1F4C4}",
         "react" => "\u{269B}",
         "mermaid" => "\u{1F4CA}",
+        "project" => "\u{1F4E6}",
         _ => "\u{1F4C4}",
     };
 
@@ -42,6 +43,7 @@ pub fn ArtifactCard(message: Message) -> Element {
         "text/markdown" => "Markdown",
         "image/svg+xml" => "SVG",
         "application/json" => "JSON",
+        "project" => "Project",
         other => other,
     };
 
