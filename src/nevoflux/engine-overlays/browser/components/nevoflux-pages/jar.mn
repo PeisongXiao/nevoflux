@@ -21,3 +21,5 @@ nevoflux.jar:
     content/nevoflux/vendor/mermaid.min.js                   (content/vendor/mermaid.min.js)
     content/nevoflux/vendor/highlight.min.js                 (content/vendor/highlight.min.js)
     content/nevoflux/vendor/codemirror.min.js                (content/vendor/codemirror.min.js)
+    content/nevoflux/vendor/esbuild-wasm.min.js              (content/vendor/esbuild-wasm.min.js)
+    content/nevoflux/vendor/esbuild.wasm                     (content/vendor/esbuild.wasm)
