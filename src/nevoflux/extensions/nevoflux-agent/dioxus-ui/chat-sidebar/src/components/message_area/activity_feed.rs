@@ -138,3 +138,18 @@ fn format_duration(ms: u64) -> String {
         format!("{:.1}s", ms as f64 / 1000.0)
     }
 }
+
+/// Static "Done" indicator for live assistant messages without tool calls.
+/// Visually matches ActivityFeed header to prevent layout shift when
+/// StreamingBubble is replaced by MessageBubble.
+#[component]
+pub fn DoneFeed() -> Element {
+    rsx! {
+        div { class: "activity-feed done-feed",
+            div { class: "activity-feed-header done-feed-header",
+                span { class: "done-feed-icon", "\u{2713}" }
+                span { class: "activity-feed-label", "Done" }
+            }
+        }
+    }
+}

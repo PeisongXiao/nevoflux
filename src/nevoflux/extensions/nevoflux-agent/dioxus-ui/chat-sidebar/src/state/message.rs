@@ -4,7 +4,7 @@
 
 //! Message types for chat conversations
 
-use shared_protocol::StreamFormat;
+use shared_protocol::{StreamFormat, ToolCallInfo};
 
 /// Tool call data for display in activity feed
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +62,10 @@ pub struct Message {
     pub timestamp: u64,
     /// Message status
     pub status: MessageStatus,
+    /// Whether this message was received live (during current session).
+    /// Used to show "Done" indicator for no-tool-call responses.
+    /// Historical messages loaded from session.resolve keep the default `false`.
+    pub is_live: bool,
 }
 
 /// Message role
@@ -152,6 +156,7 @@ impl Message {
             tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
+            is_live: false,
         }
     }
 
@@ -165,6 +170,7 @@ impl Message {
             tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
+            is_live: false,
         }
     }
 
@@ -178,6 +184,7 @@ impl Message {
             tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
+            is_live: false,
         }
     }
 
@@ -191,6 +198,7 @@ impl Message {
             tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
+            is_live: false,
         }
     }
 
@@ -208,6 +216,7 @@ impl Message {
             tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
+            is_live: false,
         }
     }
 
@@ -224,6 +233,7 @@ impl Message {
             tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
+            is_live: false,
         }
     }
 
@@ -241,6 +251,7 @@ impl Message {
             tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
+            is_live: false,
         }
     }
 
@@ -259,6 +270,7 @@ impl Message {
             tool_calls: Vec::new(),
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
+            is_live: false,
         }
     }
 
@@ -275,7 +287,15 @@ impl Message {
             tool_calls,
             timestamp: js_sys::Date::now() as u64,
             status: MessageStatus::Sent,
+            is_live: false,
         }
+    }
+
+    /// Mark this message as received live (during current session).
+    /// Live messages show a "Done" indicator when they have no tool calls.
+    pub fn set_live(mut self) -> Self {
+        self.is_live = true;
+        self
     }
 }
 
@@ -288,6 +308,8 @@ pub struct StreamingState {
     pub content: String,
     /// Content format
     pub format: StreamFormat,
+    /// Tool calls accumulated from non-done stream chunks
+    pub tool_calls: Vec<ToolCallInfo>,
 }
 
 impl StreamingState {
@@ -297,12 +319,23 @@ impl StreamingState {
             id: id.to_string(),
             content: String::new(),
             format: StreamFormat::Markdown,
+            tool_calls: Vec::new(),
         }
     }
 
     /// Append content to the stream
     pub fn append(&mut self, delta: &str) {
         self.content.push_str(delta);
+    }
+
+    /// Accumulate tool calls from a non-done stream chunk
+    pub fn accumulate_tool_calls(&mut self, calls: &[ToolCallInfo]) {
+        for tc in calls {
+            // Deduplicate by ID
+            if !self.tool_calls.iter().any(|existing| existing.id == tc.id) {
+                self.tool_calls.push(tc.clone());
+            }
+        }
     }
 }
 

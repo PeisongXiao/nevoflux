@@ -19,6 +19,7 @@ pub use message_bubble::render_simple_markdown;
 pub use error_card::ErrorCard;
 pub use code_block::CodeBlock;
 pub use activity_feed::ActivityFeed;
+pub use activity_feed::DoneFeed;
 pub use live_tool_feed::LiveToolFeed;
 
 use dioxus::prelude::*;

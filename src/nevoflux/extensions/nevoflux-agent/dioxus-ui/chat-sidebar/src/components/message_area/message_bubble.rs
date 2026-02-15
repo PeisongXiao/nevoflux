@@ -7,7 +7,7 @@
 use dioxus::prelude::*;
 use crate::context::use_app_context;
 use crate::state::{Message, MessageContent, MessageRole, MessageStatus};
-use super::{ActivityFeed, CodeBlock, ErrorCard};
+use super::{ActivityFeed, DoneFeed, CodeBlock, ErrorCard};
 
 /// Single message bubble component
 #[component]
@@ -33,10 +33,14 @@ pub fn MessageBubble(
         MessageContent::Artifact(data) => data.title.clone(),
     };
 
+    // Live messages skip the slideIn animation to prevent layout shift
+    // when replacing the StreamingBubble.
+    let animate_class = if message.is_live { "no-animate" } else { "" };
+
     rsx! {
         // Wrapper for user messages to position toolbar outside
         div {
-            class: "message-row {role_class}",
+            class: "message-row {role_class} {animate_class}",
 
             // Left toolbar for user messages (outside the bubble)
             if is_user && !is_editing() {
@@ -143,9 +147,24 @@ pub fn MessageBubble(
                         }
                     }
 
-                    // Activity feed (tool calls) for assistant messages
-                    if !is_user && !message.tool_calls.is_empty() {
-                        ActivityFeed { tool_calls: message.tool_calls.clone() }
+                    // Activity feed (tool calls) or done indicator for assistant messages
+                    {
+                        let tc_count = message.tool_calls.len();
+                        if tc_count > 0 {
+                            web_sys::console::log_1(&format!(
+                                "[WASM] MessageBubble RENDER: id={}, tc_count={}, names=[{}]",
+                                message.id,
+                                tc_count,
+                                message.tool_calls.iter().map(|tc| tc.name.as_str()).collect::<Vec<_>>().join(", ")
+                            ).into());
+                        }
+                        rsx! {
+                            if !is_user && tc_count > 0 {
+                                ActivityFeed { tool_calls: message.tool_calls.clone() }
+                            } else if !is_user && message.is_live {
+                                DoneFeed {}
+                            }
+                        }
                     }
 
                     // Text content
@@ -183,9 +202,20 @@ pub fn MessageBubble(
                         span { class: "send-error", "Failed to send" }
                     }
 
-                    // Bottom toolbar for assistant messages
-                    if message.role == MessageRole::Assistant {
-                        AssistantMessageToolbar { content: content_text.clone() }
+                    // Bottom toolbar for assistant messages (only when message has text content)
+                    {
+                        let has_text = match &message.content {
+                            MessageContent::Text(t) => !t.is_empty(),
+                            MessageContent::Markdown(md) => !md.is_empty(),
+                            MessageContent::Code { .. } => true,
+                            _ => false,
+                        };
+
+                        rsx! {
+                            if message.role == MessageRole::Assistant && has_text {
+                                AssistantMessageToolbar { content: content_text.clone() }
+                            }
+                        }
                     }
                 }
             }

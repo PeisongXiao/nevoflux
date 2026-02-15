@@ -23,6 +23,20 @@ pub fn MessageList() -> Element {
     let streaming = streaming_signal.read();
     let agent_status = agent_status_signal.read();
 
+    // Debug: log every render of MessageList
+    {
+        let msg_summary: Vec<String> = messages.iter().map(|m| {
+            format!("{}(tc={})", m.id.get(..8).unwrap_or(&m.id), m.tool_calls.len())
+        }).collect();
+        web_sys::console::log_1(&format!(
+            "[WASM] MessageList RENDER: {} msgs [{}], streaming={}, thinking={}",
+            messages.len(),
+            msg_summary.join(", "),
+            streaming.is_some(),
+            agent_status.visible && agent_status.is_active(),
+        ).into());
+    }
+
     // Find the index of the last user message
     let last_user_index = messages.iter().enumerate()
         .filter(|(_, m)| m.role == crate::state::MessageRole::User)
@@ -74,12 +88,18 @@ pub fn MessageList() -> Element {
                 }
             }
 
-            // Streaming message with integrated thinking indicator
+            // Streaming message (action area + content only, no dots inside)
             if streaming.is_some() || show_thinking {
                 StreamingBubble {
                     stream: streaming.as_ref().cloned(),
-                    show_thinking: show_thinking,
                 }
+            }
+
+            // Thinking indicator — standalone below all messages/streaming.
+            // Stays in the same position regardless of StreamingBubble ↔ MessageBubble
+            // transitions, preventing layout shift when the bubble swaps.
+            if show_thinking {
+                ThinkingIndicator {}
             }
 
             // Scroll anchor
@@ -248,13 +268,60 @@ fn WaitingAnimation() -> Element {
     }
 }
 
-/// Streaming message bubble with integrated thinking/status indicator.
+/// Streaming action area — always-present container styled like ActivityFeed.
 ///
-/// Shows the thinking indicator inline at the bottom of the bubble,
-/// keeping it attached to the streaming content until completion.
-/// LiveToolFeed is displayed above the streaming content.
+/// Shows a header ("Working..." or tool count) and live tool chips.
+/// Visually matches the final ActivityFeed so the transition from
+/// streaming → final message is smooth.
 #[component]
-fn StreamingBubble(stream: Option<StreamingState>, show_thinking: bool) -> Element {
+fn StreamingActionArea() -> Element {
+    let ctx = use_app_context();
+    let live_tools = ctx.live_tools.read();
+    let tool_count = live_tools.len();
+    let has_tools = tool_count > 0;
+
+    // Header label
+    let header_text = if has_tools {
+        if tool_count == 1 {
+            "1 tool".to_string()
+        } else {
+            format!("{} tools", tool_count)
+        }
+    } else {
+        "Working...".to_string()
+    };
+
+    rsx! {
+        div { class: "streaming-action-area activity-feed",
+
+            // Header
+            div { class: "streaming-action-header activity-feed-header",
+                span { class: "streaming-action-icon", "\u{26A1}" }
+                span { class: "streaming-action-label", "{header_text}" }
+            }
+
+            // Live tool chips (when tools are running)
+            if has_tools {
+                div { class: "live-tool-feed",
+                    for tool in live_tools.iter() {
+                        super::live_tool_feed::LiveToolChip {
+                            key: "{tool.id}",
+                            entry: tool.clone(),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Streaming message bubble showing action area and streamed content.
+///
+/// Shows the StreamingActionArea (always present) above any streaming text
+/// content. The ThinkingIndicator (dots) is rendered separately in MessageList
+/// below this bubble to prevent layout shift on transitions.
+#[component]
+fn StreamingBubble(stream: Option<StreamingState>) -> Element {
     let has_content = stream.as_ref().is_some_and(|s| !s.content.is_empty());
     let rendered = stream
         .as_ref()
@@ -270,8 +337,8 @@ fn StreamingBubble(stream: Option<StreamingState>, show_thinking: bool) -> Eleme
                 aria_live: "polite",
                 aria_atomic: "false",
 
-                // Live tool execution feed (real-time tool status)
-                super::LiveToolFeed {}
+                // Action area: always present during streaming
+                StreamingActionArea {}
 
                 // Show content area if we have streamed text
                 if has_content {
@@ -280,11 +347,6 @@ fn StreamingBubble(stream: Option<StreamingState>, show_thinking: bool) -> Eleme
                             dangerous_inner_html: "{rendered}"
                         }
                     }
-                }
-
-                // Thinking/status indicator (attached at bottom of bubble)
-                if show_thinking {
-                    ThinkingIndicator {}
                 }
             }
         }

@@ -169,6 +169,14 @@ body {
   transition: all var(--nevo-transition-fast);
 }
 
+.header-btn svg {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  flex-shrink: 0;
+}
+
 .header-btn:hover {
   background: var(--nevo-surface);
   color: var(--nevo-text);
@@ -375,6 +383,11 @@ body {
   align-items: flex-start;
   gap: var(--nevo-space-xs);
   animation: slideIn var(--nevo-transition-slow);
+}
+
+/* Skip entry animation for live messages replacing the StreamingBubble */
+.message-row.no-animate {
+  animation: none;
 }
 
 .message-row.user {
@@ -659,6 +672,7 @@ body {
 .assistant-toolbar {
   justify-content: flex-start;
   margin-top: var(--nevo-space-sm);
+  opacity: 1;  /* always visible, not hover-dependent */
 }
 
 .toolbar-btn {
@@ -1202,7 +1216,7 @@ body {
 
 .text-input {
   width: 100%;
-  min-height: 24px;
+  min-height: 36px;
   background: transparent;
   border: none;
   color: var(--nevo-text);
@@ -1242,8 +1256,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: var(--nevo-space-sm);
-  padding-top: var(--nevo-space-xs);
+  margin-top: var(--nevo-space-xs);
 }
 
 /* Mode selector */
@@ -1253,15 +1266,15 @@ body {
   background: var(--nevo-surface);
   border: 1px solid var(--nevo-border);
   border-radius: var(--nevo-radius-full);
-  padding: 3px;
+  padding: 2px;
 }
 
 .mode-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   background: transparent;
   border: none;
@@ -1269,6 +1282,14 @@ body {
   color: var(--nevo-text-secondary);
   cursor: pointer;
   transition: all var(--nevo-transition-fast);
+}
+
+.mode-btn svg {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  flex-shrink: 0;
 }
 
 .mode-btn:hover:not(.active) {
@@ -1296,8 +1317,8 @@ body {
 }
 
 .input-action-btn {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1310,10 +1331,10 @@ body {
 }
 
 .input-action-btn svg {
-  width: 16px !important;
-  height: 16px !important;
-  min-width: 16px;
-  min-height: 16px;
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px;
+  min-height: 14px;
   flex-shrink: 0;
 }
 
@@ -1329,8 +1350,8 @@ body {
 
 /* Voice/Send Button */
 .voice-send-button {
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1865,15 +1886,6 @@ body {
 /* ============================================
    Header History Button & Dropdown
    ============================================ */
-.header {
-  justify-content: space-between;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--nevo-space-sm);
-}
 
 /* History dropdown */
 .history-dropdown {
@@ -3632,6 +3644,25 @@ body {
   color: var(--nevo-error);
 }
 
+/* Done feed - static completion indicator for live messages */
+.done-feed {
+  border-color: color-mix(in srgb, var(--nevo-primary) 20%, var(--nevo-border));
+}
+
+.done-feed-header {
+  cursor: default;
+}
+
+.done-feed-header:hover {
+  background: none;
+}
+
+.done-feed-icon {
+  color: var(--nevo-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* ============================================
    Dark Mode Overrides for New Components
    ============================================ */
@@ -3658,6 +3689,50 @@ body {
   }
 }
 
+/* ============================================
+   Streaming Action Area
+   ============================================ */
+
+.streaming-action-area {
+  animation: streaming-pulse 2s ease-in-out infinite;
+}
+
+.streaming-action-header {
+  cursor: default;
+  gap: var(--nevo-space-xs);
+}
+
+.streaming-action-header:hover {
+  background: none;
+}
+
+.streaming-action-icon {
+  font-size: 12px;
+}
+
+.streaming-action-label {
+  font-weight: 500;
+}
+
+.streaming-action-area .live-tool-feed {
+  padding-top: 0;
+  margin-bottom: 0;
+}
+
+.streaming-action-area .thinking-indicator {
+  margin: var(--nevo-space-xs) var(--nevo-space-sm);
+  padding: 0;
+}
+
+@keyframes streaming-pulse {
+  0%, 100% {
+    border-color: var(--nevo-border);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--nevo-primary) 40%, var(--nevo-border));
+  }
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .tool-chip__spinner {
@@ -3666,6 +3741,10 @@ body {
 
   .tool-auth-overlay,
   .tool-auth-dialog {
+    animation: none;
+  }
+
+  .streaming-action-area {
     animation: none;
   }
 }

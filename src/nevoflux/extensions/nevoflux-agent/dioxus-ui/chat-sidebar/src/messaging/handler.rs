@@ -250,22 +250,26 @@ fn handle_stream_chunk(mut ctx: AppContext, payload: StreamChunkPayload) {
 
     // New protocol: content + done flag (no stream_id needed)
     if payload.done {
-        // Stream complete - finalize accumulated content into a message
-        let final_content = {
+        // Stream complete - finalize accumulated content and tool_calls into a message
+        let (final_content, accumulated_tool_calls) = {
             let mut streaming = ctx.streaming.write();
             if let Some(mut stream) = streaming.take() {
                 // Append any final content from the done payload
                 if !payload.content.is_empty() {
                     stream.content.push_str(&payload.content);
                 }
-                stream.content
+                // Also accumulate any tool_calls from the done payload
+                if !payload.tool_calls.is_empty() {
+                    stream.accumulate_tool_calls(&payload.tool_calls);
+                }
+                (stream.content, stream.tool_calls)
             } else {
                 // No streaming state - use payload content directly
-                payload.content.clone()
+                (payload.content.clone(), payload.tool_calls.clone())
             }
         };
 
-        // Drain live_tools into final ToolCallData, merging with payload tool_calls
+        // Drain live_tools into final ToolCallData, merging with accumulated tool_calls
         let live_tool_data: Vec<ToolCallData> = ctx.live_tools.write().drain(..).map(|entry| {
             let status = match entry.status {
                 LiveToolStatus::Success => Some(ToolCallStatus::Success),
@@ -283,8 +287,8 @@ fn handle_stream_chunk(mut ctx: AppContext, payload: StreamChunkPayload) {
             }
         }).collect();
 
-        // Convert payload tool_calls to UI data (fallback for tools without events)
-        let payload_tool_calls: Vec<ToolCallData> = payload.tool_calls.iter()
+        // Convert accumulated tool_calls to UI data (fallback for tools without events)
+        let payload_tool_calls: Vec<ToolCallData> = accumulated_tool_calls.iter()
             .filter(|tc| !live_tool_data.iter().any(|lt| lt.id == tc.id))
             .map(|tc| {
                 ToolCallData {
@@ -315,33 +319,93 @@ fn handle_stream_chunk(mut ctx: AppContext, payload: StreamChunkPayload) {
             filter_narration(&stripped, &tool_names)
         };
 
-        // Add message if there's content or tool calls
+        // Add message if there's content or tool calls.
+        // When we have tool_calls but no text, try to merge into the previous
+        // assistant message so the ActivityFeed stays visually unified with
+        // the text rather than appearing as a separate empty bubble below.
+        web_sys::console::log_1(&format!(
+            "[WASM] stream done: content_len={}, tool_calls={}",
+            display_content.len(), tool_calls.len()
+        ).into());
+
         if !display_content.is_empty() || !tool_calls.is_empty() {
-            let message = if tool_calls.is_empty() {
-                Message::assistant_markdown(display_content)
+            if display_content.is_empty() && !tool_calls.is_empty() {
+                // Merge tool_calls into the last assistant message in-place.
+                // Using write() ensures Dioxus detects the mutation when
+                // the guard drops (more reliable than read/clone/set).
+                web_sys::console::log_1(&format!(
+                    "[WASM] MERGE branch: merging {} tool_calls into prev assistant",
+                    tool_calls.len()
+                ).into());
+                {
+                    let mut msgs = ctx.messages.write();
+                    // Only merge into Markdown messages — skip Artifact/Plan
+                    // cards which are rendered by ArtifactCard/PlanCard
+                    // (they don't have ActivityFeed).
+                    if let Some(last_assistant) = msgs.iter_mut().rev()
+                        .find(|m| m.role == MessageRole::Assistant
+                            && matches!(m.content, MessageContent::Markdown(_)))
+                    {
+                        last_assistant.tool_calls.extend(tool_calls);
+                        last_assistant.is_live = true;
+                        // Change ID so Dioxus sees a different key and
+                        // creates a fresh MessageBubble (bypasses memoization).
+                        last_assistant.id = uuid::Uuid::new_v4().to_string();
+                        web_sys::console::log_1(&format!(
+                            "[WASM] MERGE done: new id={}, total tool_calls={}",
+                            last_assistant.id, last_assistant.tool_calls.len()
+                        ).into());
+                    } else {
+                        web_sys::console::log_1(&"[WASM] MERGE: no prev assistant, creating new msg".into());
+                        msgs.push(Message::assistant_with_activity(display_content, tool_calls).set_live());
+                    }
+                    // write guard drops here → Dioxus marks signal dirty
+                }
             } else {
-                Message::assistant_with_activity(display_content, tool_calls)
-            };
-            ctx.messages.write().push(message);
+                let tc_count = tool_calls.len();
+                let has_content = !display_content.is_empty();
+                let message = if tool_calls.is_empty() {
+                    Message::assistant_markdown(display_content).set_live()
+                } else {
+                    Message::assistant_with_activity(display_content, tool_calls).set_live()
+                };
+                web_sys::console::log_1(&format!(
+                    "[WASM] NEW msg: has_content={}, tool_calls={}",
+                    has_content, tc_count
+                ).into());
+                ctx.messages.write().push(message);
+            }
         }
 
         // Clear agent status
         ctx.agent_status.write().hide();
     } else {
-        // Streaming in progress - accumulate content
-        if !payload.content.is_empty() {
+        // Streaming in progress - accumulate content and tool_calls
+        let has_content = !payload.content.is_empty();
+        let has_tool_calls = !payload.tool_calls.is_empty();
+        if has_content || has_tool_calls {
             let mut streaming = ctx.streaming.write();
             match &mut *streaming {
                 Some(ref mut stream) => {
-                    stream.content.push_str(&payload.content);
+                    if has_content {
+                        stream.content.push_str(&payload.content);
+                    }
+                    if has_tool_calls {
+                        stream.accumulate_tool_calls(&payload.tool_calls);
+                    }
                 }
                 None => {
                     // Start new stream
-                    *streaming = Some(StreamingState {
+                    let mut state = StreamingState {
                         id: uuid::Uuid::new_v4().to_string(),
                         content: payload.content,
                         format: StreamFormat::Markdown,
-                    });
+                        tool_calls: Vec::new(),
+                    };
+                    if has_tool_calls {
+                        state.accumulate_tool_calls(&payload.tool_calls);
+                    }
+                    *streaming = Some(state);
                 }
             }
         }
@@ -479,8 +543,8 @@ fn handle_stream_end(mut ctx: AppContext, payload: StreamEndPayload) {
 
     if let Some((content, format)) = final_content {
         let message = match format {
-            StreamFormat::Markdown => Message::assistant_markdown(content),
-            _ => Message::assistant(content),
+            StreamFormat::Markdown => Message::assistant_markdown(content).set_live(),
+            _ => Message::assistant(content).set_live(),
         };
 
         ctx.messages.write().push(message);
@@ -820,28 +884,131 @@ fn handle_session_resolve_response(mut ctx: AppContext, data: serde_json::Value)
 
     if let Some(messages_arr) = messages_json {
         // Clear current messages and load new ones
-        let mut new_messages = Vec::new();
+        let mut new_messages: Vec<Message> = Vec::new();
 
         for msg_json in messages_arr {
-            if let (Some(id), Some(role), Some(content)) = (
-                msg_json.get("id").and_then(|v| v.as_str()),
-                msg_json.get("role").and_then(|v| v.as_str()),
-                msg_json.get("content").and_then(|v| v.as_str()),
-            ) {
-                let message = match role {
-                    "user" => Message::user(content.to_string()),
-                    "assistant" => Message::assistant_markdown(content.to_string()),
-                    _ => continue,
-                };
-                // Set the correct ID
-                let mut msg = message;
-                msg.id = id.to_string();
-                new_messages.push(msg);
+            let id = msg_json.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+            let role = msg_json.get("role").and_then(|v| v.as_str()).unwrap_or_default();
+            let content = msg_json.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+            let content_type = msg_json.get("content_type").and_then(|v| v.as_str()).unwrap_or("text");
+            let metadata = msg_json.get("metadata");
+
+            if id.is_empty() || role.is_empty() {
+                continue;
+            }
+
+            match content_type {
+                "tool_use" => {
+                    // Fold tool_use messages into the preceding assistant message
+                    // as ActivityFeed entries instead of showing them as text.
+                    let tool_name = metadata
+                        .and_then(|m| m.get("tool_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let arguments = metadata
+                        .and_then(|m| m.get("arguments"))
+                        .map(|v| {
+                            if let Some(s) = v.as_str() { s.to_string() }
+                            else { v.to_string() }
+                        })
+                        .unwrap_or_default();
+                    let result_str = metadata
+                        .and_then(|m| m.get("result"))
+                        .map(|v| {
+                            if let Some(s) = v.as_str() { s.to_string() }
+                            else { v.to_string() }
+                        });
+
+                    let tool_data = ToolCallData {
+                        id: id.to_string(),
+                        name: tool_name.to_string(),
+                        icon: get_tool_icon(tool_name).to_string(),
+                        display_target: extract_tool_target(tool_name, &arguments)
+                            .or(result_str.as_ref().map(|r| {
+                                if r.len() > 60 { format!("{}...", &r[..60]) } else { r.clone() }
+                            })),
+                        arguments,
+                        duration_ms: metadata
+                            .and_then(|m| m.get("duration_ms"))
+                            .and_then(|v| v.as_u64()),
+                        status: Some(ToolCallStatus::Success),
+                    };
+
+                    // Attach to preceding assistant Markdown message
+                    if let Some(last_assistant) = new_messages.iter_mut().rev()
+                        .find(|m| m.role == MessageRole::Assistant
+                            && matches!(m.content, MessageContent::Markdown(_)))
+                    {
+                        last_assistant.tool_calls.push(tool_data);
+                    }
+                    // tool_use messages are folded — don't push as standalone
+                }
+                "tool_result" => {
+                    // Tool results: try to update the matching tool_call status
+                    // in the preceding assistant message. Don't show as standalone.
+                    let tool_call_id = metadata
+                        .and_then(|m| m.get("tool_call_id"))
+                        .and_then(|v| v.as_str());
+
+                    if let Some(tc_id) = tool_call_id {
+                        // Find the tool_call and update its display_target with the result
+                        for msg in new_messages.iter_mut().rev() {
+                            if let Some(tc) = msg.tool_calls.iter_mut().find(|t| t.id == tc_id) {
+                                if tc.display_target.is_none() && !content.is_empty() {
+                                    let truncated = if content.len() > 80 {
+                                        format!("{}...", &content[..80])
+                                    } else {
+                                        content.to_string()
+                                    };
+                                    tc.display_target = Some(truncated);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    // tool_result messages are folded — don't push as standalone
+                }
+                _ => {
+                    // Regular text/thinking messages
+                    let message = match role {
+                        "user" => Message::user(content.to_string()),
+                        "assistant" => Message::assistant_markdown(content.to_string()),
+                        _ => continue,
+                    };
+                    let mut msg = message;
+                    msg.id = id.to_string();
+                    new_messages.push(msg);
+                }
             }
         }
 
+        // Process artifacts from session — append ArtifactCards after messages
+        if let Some(artifacts_arr) = data.get("artifacts").and_then(|a| a.as_array()) {
+            for art_json in artifacts_arr {
+                if let (Some(id), Some(title)) = (
+                    art_json.get("id").and_then(|v| v.as_str()),
+                    art_json.get("title").and_then(|v| v.as_str()),
+                ) {
+                    let content_type = art_json.get("content_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("text/html")
+                        .to_string();
+
+                    new_messages.push(Message::artifact(
+                        id.to_string(),
+                        title.to_string(),
+                        content_type,
+                        ArtifactState::Complete,
+                    ));
+                }
+            }
+            tracing::info!("Loaded {} artifacts from session", artifacts_arr.len());
+        }
+
+        let tool_count: usize = new_messages.iter().map(|m| m.tool_calls.len()).sum();
+        tracing::info!("Loaded {} messages ({} tool calls folded) from session",
+            new_messages.len(), tool_count);
         ctx.messages.set(new_messages);
-        tracing::info!("Loaded {} messages from session", ctx.messages.read().len());
     } else {
         // No messages - clear and show welcome screen
         ctx.messages.set(Vec::new());
