@@ -297,6 +297,89 @@
       border-color: light-dark(#fcc, #a44);
     }
 
+    /* ── Markdown Textarea ─────────────────────────── */
+    .markdown-textarea {
+      width: 100%;
+      min-height: 200px;
+      padding: var(--nevoflux-space-md);
+      border: 1px solid var(--nevoflux-border);
+      border-radius: var(--nevoflux-radius-sm);
+      background: var(--nevoflux-bg);
+      color: var(--nevoflux-text);
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: var(--nevoflux-font-size-sm);
+      line-height: 1.6;
+      resize: vertical;
+      tab-size: 2;
+    }
+
+    .markdown-textarea:focus {
+      outline: none;
+      border-color: var(--nevoflux-accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--nevoflux-accent) 20%, transparent);
+    }
+
+    .markdown-textarea::placeholder {
+      color: var(--nevoflux-text-secondary);
+      opacity: 0.6;
+    }
+
+    .section-desc {
+      color: var(--nevoflux-text-secondary);
+      font-size: var(--nevoflux-font-size-sm);
+      margin-bottom: var(--nevoflux-space-md);
+      line-height: 1.5;
+    }
+
+    /* ── Save Button ───────────────────────────────── */
+    .save-bar {
+      position: sticky;
+      bottom: 0;
+      padding: var(--nevoflux-space-lg) 0;
+      background: var(--nevoflux-bg-secondary);
+      border-top: 1px solid var(--nevoflux-border);
+      margin-top: var(--nevoflux-space-2xl);
+      display: flex;
+      align-items: center;
+      gap: var(--nevoflux-space-md);
+    }
+
+    .save-btn {
+      padding: var(--nevoflux-space-sm) var(--nevoflux-space-xl);
+      border-radius: var(--nevoflux-radius-sm);
+      border: none;
+      font-size: var(--nevoflux-font-size-base);
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease, opacity 0.15s ease;
+      background: var(--nevoflux-accent);
+      color: white;
+    }
+
+    .save-btn:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--nevoflux-accent) 85%, black);
+    }
+
+    .save-btn:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    .save-status {
+      font-size: var(--nevoflux-font-size-sm);
+      color: var(--nevoflux-text-secondary);
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .save-status.visible {
+      opacity: 1;
+    }
+
+    .save-status.error {
+      color: light-dark(#d93025, #f88);
+    }
+
     /* Save indicator */
     .save-indicator {
       position: fixed;
@@ -325,98 +408,97 @@
       padding: var(--nevoflux-space-xl) 0;
     }
 
-    /* ── MCP Server Cards ──────────────────────────── */
+    /* ── MCP Server List ──────────────────────────── */
     .mcp-server-list {
-      display: flex;
-      flex-direction: column;
-      gap: var(--nevoflux-space-md);
-    }
-
-    .mcp-server-card {
-      border: 1px solid var(--nevoflux-border);
-      border-radius: var(--nevoflux-radius-md);
       background: var(--nevoflux-bg);
-      overflow: hidden;
+      border-radius: var(--nevoflux-radius-md);
+      border: 1px solid var(--nevoflux-border);
+      margin-bottom: var(--nevoflux-space-lg);
     }
 
-    .mcp-server-card.disabled {
-      opacity: 0.55;
-    }
-
-    .mcp-server-header {
+    .mcp-server-item {
+      padding: var(--nevoflux-space-md) var(--nevoflux-space-lg);
+      border-bottom: 1px solid light-dark(#f0f0f0, #2a2a2e);
       display: flex;
       align-items: center;
-      gap: var(--nevoflux-space-sm);
-      padding: var(--nevoflux-space-sm) var(--nevoflux-space-md);
-      background: var(--nevoflux-bg-secondary);
-      border-bottom: 1px solid var(--nevoflux-border);
-      cursor: pointer;
-      user-select: none;
+      justify-content: space-between;
+      transition: background 0.15s ease;
     }
 
-    .mcp-server-header:hover {
+    .mcp-server-item:last-child {
+      border-bottom: none;
+    }
+
+    .mcp-server-item:hover {
       background: var(--nevoflux-bg-tertiary);
     }
 
-    .mcp-server-expand {
-      font-size: 10px;
-      color: var(--nevoflux-text-secondary);
-      transition: transform 0.15s ease;
-      width: 16px;
-      text-align: center;
-      flex-shrink: 0;
-    }
-
-    .mcp-server-card.expanded .mcp-server-expand {
-      transform: rotate(90deg);
+    .mcp-server-info {
+      flex: 1;
+      min-width: 0;
     }
 
     .mcp-server-name {
-      flex: 1;
-      font-weight: 600;
       font-size: var(--nevoflux-font-size-base);
+      font-weight: 500;
+      color: var(--nevoflux-text);
+      margin-bottom: 2px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .mcp-server-name.unnamed {
-      color: var(--nevoflux-text-secondary);
-      font-style: italic;
-    }
-
-    .mcp-server-summary {
+    .mcp-server-type {
       font-size: var(--nevoflux-font-size-sm);
       color: var(--nevoflux-text-secondary);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 200px;
     }
 
-    .mcp-server-actions {
+    .mcp-server-status {
       display: flex;
       align-items: center;
-      gap: var(--nevoflux-space-xs);
+      gap: var(--nevoflux-space-sm);
       flex-shrink: 0;
+      margin-left: var(--nevoflux-space-md);
     }
 
-    .mcp-server-actions button {
+    .mcp-status-badge {
+      padding: 3px 10px;
+      border-radius: 10px;
+      font-size: var(--nevoflux-font-size-sm);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .mcp-status-badge.active {
+      background: light-dark(#e6f4ea, #1a3a2a);
+      color: light-dark(#1e8e3e, #6fcf97);
+    }
+
+    .mcp-status-badge.inactive {
+      background: light-dark(#fce8e6, #3a1a1a);
+      color: light-dark(#d93025, #f88);
+    }
+
+    .mcp-icon-btn {
       border: none;
       background: none;
       cursor: pointer;
-      padding: 4px 6px;
+      padding: 6px 8px;
       border-radius: var(--nevoflux-radius-sm);
       font-size: var(--nevoflux-font-size-sm);
       color: var(--nevoflux-text-secondary);
+      transition: all 0.15s ease;
     }
 
-    .mcp-server-actions button:hover {
+    .mcp-icon-btn:hover {
       background: var(--nevoflux-bg-tertiary);
-      color: var(--nevoflux-text);
+      color: var(--nevoflux-accent);
     }
 
-    .mcp-server-actions .mcp-delete-btn:hover {
+    .mcp-icon-btn.delete:hover {
       background: light-dark(#fee, #4a1a1a);
       color: light-dark(#c00, #f88);
     }
@@ -469,99 +551,165 @@
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--nevoflux-accent) 30%, transparent);
     }
 
-    /* Server editor body */
-    .mcp-server-body {
-      display: none;
-      padding: var(--nevoflux-space-md);
-    }
-
-    .mcp-server-card.expanded .mcp-server-body {
-      display: block;
-    }
-
-    .mcp-server-body .form-row {
-      margin-bottom: var(--nevoflux-space-sm);
-    }
-
-    .mcp-server-body .form-row label {
-      min-width: 80px;
-      font-size: var(--nevoflux-font-size-sm);
-    }
-
-    /* Key-value editor for env vars */
-    .kv-editor {
-      display: flex;
-      flex-direction: column;
-      gap: var(--nevoflux-space-xs);
-    }
-
-    .kv-editor .kv-row {
-      display: flex;
-      gap: var(--nevoflux-space-xs);
-      align-items: center;
-    }
-
-    .kv-editor .kv-row input {
-      flex: 1;
-      padding: var(--nevoflux-space-xs) var(--nevoflux-space-sm);
-      border: 1px solid var(--nevoflux-border);
-      border-radius: var(--nevoflux-radius-sm);
-      background: var(--nevoflux-bg);
-      color: var(--nevoflux-text);
-      font-family: var(--nevoflux-font-mono, monospace);
-      font-size: var(--nevoflux-font-size-sm);
-    }
-
-    .kv-editor .kv-row input:focus {
-      outline: none;
-      border-color: var(--nevoflux-accent);
-    }
-
-    .kv-editor .kv-row input.kv-key {
-      max-width: 140px;
-    }
-
-    .kv-editor .kv-sep {
-      color: var(--nevoflux-text-secondary);
-      font-size: var(--nevoflux-font-size-sm);
-      flex-shrink: 0;
-    }
-
-    .kv-editor .kv-remove {
-      padding: 2px 8px;
-      border: 1px solid var(--nevoflux-border);
-      border-radius: var(--nevoflux-radius-sm);
-      background: none;
-      color: var(--nevoflux-text-secondary);
-      cursor: pointer;
-      font-size: var(--nevoflux-font-size-sm);
-      flex-shrink: 0;
-    }
-
-    .kv-editor .kv-remove:hover {
-      background: light-dark(#fee, #4a1a1a);
-      color: light-dark(#c00, #f88);
-      border-color: light-dark(#fcc, #a44);
-    }
-
     /* MCP add server button */
     .mcp-add-server-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--nevoflux-space-xs);
-      padding: var(--nevoflux-space-sm) var(--nevoflux-space-lg);
-      border: 1px dashed var(--nevoflux-border);
-      border-radius: var(--nevoflux-radius-sm);
+      width: 100%;
+      padding: var(--nevoflux-space-md);
       background: none;
-      color: var(--nevoflux-text-secondary);
-      cursor: pointer;
+      border: 2px dashed var(--nevoflux-border);
+      border-radius: var(--nevoflux-radius-md);
+      color: var(--nevoflux-accent);
       font-size: var(--nevoflux-font-size-base);
-      margin-top: var(--nevoflux-space-sm);
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--nevoflux-space-xs);
+      margin-bottom: var(--nevoflux-space-2xl);
     }
 
     .mcp-add-server-btn:hover {
       border-color: var(--nevoflux-accent);
-      color: var(--nevoflux-accent);
+      background: color-mix(in srgb, var(--nevoflux-accent) 5%, transparent);
+    }
+
+    /* ── MCP Modal ────────────────────────────────── */
+    .mcp-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .mcp-modal.show {
+      display: flex;
+    }
+
+    .mcp-modal-content {
+      background: var(--nevoflux-bg);
+      border-radius: var(--nevoflux-radius-lg, 12px);
+      padding: var(--nevoflux-space-2xl);
+      width: 90%;
+      max-width: 600px;
+      max-height: 85vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+
+    .mcp-modal-header {
+      margin-bottom: var(--nevoflux-space-xl);
+    }
+
+    .mcp-modal-header h2 {
+      font-size: var(--nevoflux-font-size-xl);
+      font-weight: 600;
+      color: var(--nevoflux-text);
+      margin-bottom: var(--nevoflux-space-xs);
+    }
+
+    .mcp-modal-header p {
+      font-size: var(--nevoflux-font-size-sm);
+      color: var(--nevoflux-text-secondary);
+    }
+
+    .mcp-form-group {
+      margin-bottom: var(--nevoflux-space-lg);
+    }
+
+    .mcp-form-label {
+      display: block;
+      font-size: var(--nevoflux-font-size-base);
+      font-weight: 500;
+      color: var(--nevoflux-text);
+      margin-bottom: var(--nevoflux-space-xs);
+    }
+
+    .mcp-form-input,
+    .mcp-form-select {
+      width: 100%;
+      padding: var(--nevoflux-space-sm) var(--nevoflux-space-md);
+      border: 1px solid var(--nevoflux-border);
+      border-radius: var(--nevoflux-radius-sm);
+      font-size: var(--nevoflux-font-size-base);
+      color: var(--nevoflux-text);
+      background: var(--nevoflux-bg);
+      font-family: var(--nevoflux-font-family);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .mcp-form-input:focus,
+    .mcp-form-select:focus {
+      outline: none;
+      border-color: var(--nevoflux-accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--nevoflux-accent) 20%, transparent);
+    }
+
+    .mcp-form-select {
+      cursor: pointer;
+    }
+
+    .mcp-form-help {
+      font-size: var(--nevoflux-font-size-sm);
+      color: var(--nevoflux-text-secondary);
+      margin-top: 4px;
+    }
+
+    .mcp-form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--nevoflux-space-md);
+    }
+
+    .mcp-conditional-fields {
+      margin-top: var(--nevoflux-space-md);
+      padding: var(--nevoflux-space-md);
+      background: var(--nevoflux-bg-secondary);
+      border-radius: var(--nevoflux-radius-sm);
+    }
+
+    .mcp-modal-actions {
+      display: flex;
+      gap: var(--nevoflux-space-sm);
+      justify-content: flex-end;
+      margin-top: var(--nevoflux-space-2xl);
+    }
+
+    .mcp-btn-primary,
+    .mcp-btn-secondary {
+      padding: var(--nevoflux-space-sm) var(--nevoflux-space-xl);
+      border-radius: var(--nevoflux-radius-sm);
+      font-size: var(--nevoflux-font-size-base);
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      border: none;
+    }
+
+    .mcp-btn-secondary {
+      background: var(--nevoflux-bg-tertiary);
+      color: var(--nevoflux-text-secondary);
+    }
+
+    .mcp-btn-secondary:hover {
+      background: var(--nevoflux-border);
+      color: var(--nevoflux-text);
+    }
+
+    .mcp-btn-primary {
+      background: var(--nevoflux-accent);
+      color: white;
+    }
+
+    .mcp-btn-primary:hover {
+      background: color-mix(in srgb, var(--nevoflux-accent) 85%, black);
     }
 
     /* MCP global settings: number input */
@@ -614,6 +762,203 @@
 
     .mcp-empty-state .mcp-empty-hint {
       font-size: var(--nevoflux-font-size-sm);
+    }
+
+    /* ── LLM Provider Grid ─────────────────────────── */
+    .llm-providers-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: var(--nevoflux-space-md);
+    }
+
+    .llm-loading {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: var(--nevoflux-space-2xl);
+      color: var(--nevoflux-text-secondary);
+      font-size: var(--nevoflux-font-size-base);
+    }
+
+    .llm-provider-card {
+      display: flex;
+      align-items: center;
+      gap: var(--nevoflux-space-sm);
+      padding: var(--nevoflux-space-md);
+      border: 1px solid var(--nevoflux-border);
+      border-radius: var(--nevoflux-radius-md);
+      background: var(--nevoflux-bg);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      position: relative;
+    }
+
+    .llm-provider-card:hover {
+      background: var(--nevoflux-bg-tertiary);
+      border-color: var(--nevoflux-accent);
+    }
+
+    .llm-provider-card.configured {
+      border-color: light-dark(#34a853, #4caf50);
+    }
+
+    .llm-provider-card.active {
+      border-color: var(--nevoflux-accent);
+      box-shadow: 0 0 0 1px var(--nevoflux-accent);
+    }
+
+    .llm-provider-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--nevoflux-radius-sm);
+      background: color-mix(in srgb, var(--nevoflux-accent) 15%, transparent);
+      color: var(--nevoflux-accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: var(--nevoflux-font-size-lg);
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    .llm-provider-icon img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .llm-provider-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .llm-provider-name {
+      font-size: var(--nevoflux-font-size-base);
+      font-weight: 500;
+      color: var(--nevoflux-text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .llm-provider-type {
+      font-size: var(--nevoflux-font-size-sm);
+      color: var(--nevoflux-text-secondary);
+      text-transform: capitalize;
+    }
+
+    .llm-provider-status {
+      display: flex;
+      align-items: center;
+      gap: var(--nevoflux-space-xs);
+      flex-shrink: 0;
+    }
+
+    .llm-badge {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .llm-badge-active {
+      background: color-mix(in srgb, var(--nevoflux-accent) 15%, transparent);
+      color: var(--nevoflux-accent);
+    }
+
+    .llm-checkmark {
+      color: light-dark(#34a853, #4caf50);
+      font-size: var(--nevoflux-font-size-base);
+      font-weight: 700;
+    }
+
+    /* ── LLM Modal ─────────────────────────────────── */
+    .llm-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .llm-modal.show {
+      display: flex;
+    }
+
+    .llm-modal-content {
+      background: var(--nevoflux-bg);
+      border-radius: var(--nevoflux-radius-lg, 12px);
+      padding: var(--nevoflux-space-2xl);
+      width: 90%;
+      max-width: 480px;
+      max-height: 85vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+
+    .llm-modal-header {
+      margin-bottom: var(--nevoflux-space-xl);
+    }
+
+    .llm-modal-header h2 {
+      font-size: var(--nevoflux-font-size-xl);
+      font-weight: 600;
+      color: var(--nevoflux-text);
+      margin-bottom: var(--nevoflux-space-xs);
+    }
+
+    .llm-modal-header p {
+      font-size: var(--nevoflux-font-size-sm);
+      color: var(--nevoflux-text-secondary);
+    }
+
+    .llm-active-group {
+      margin-top: var(--nevoflux-space-sm);
+    }
+
+    .llm-active-label {
+      display: flex;
+      align-items: center;
+      gap: var(--nevoflux-space-sm);
+      cursor: pointer;
+      font-size: var(--nevoflux-font-size-base);
+      color: var(--nevoflux-text);
+    }
+
+    .llm-active-label input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--nevoflux-accent);
+    }
+
+    .llm-modal-status {
+      font-size: var(--nevoflux-font-size-sm);
+      min-height: 20px;
+      margin-top: var(--nevoflux-space-sm);
+    }
+
+    .llm-modal-status.success {
+      color: light-dark(#1e8e3e, #6fcf97);
+    }
+
+    .llm-modal-status.error {
+      color: light-dark(#d93025, #f88);
+    }
+
+    /* Password wrapper within LLM modal */
+    .llm-modal-content .password-wrapper {
+      position: relative;
+    }
+
+    .llm-modal-content .password-wrapper input {
+      width: 100%;
+      padding-right: 60px;
     }
   </style>
 </head>
