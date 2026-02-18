@@ -31,3 +31,6 @@ docs/plans/
 
 # Git worktrees
 .worktrees/
+
+# Test lab
+tool_test_lab/
