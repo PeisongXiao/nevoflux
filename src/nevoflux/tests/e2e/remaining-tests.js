@@ -337,7 +337,7 @@ const runDragTests = async () => {
   }
 
   if (!testTabId) {
-    console.warn('⚠️ Test page not open. Please open: file:///ai/project/nevoflux/src/nevoflux/tests/e2e/test-page.html');
+    console.warn('⚠️ Test page not open. Please open: file://<project-root>/src/nevoflux/tests/e2e/test-page.html');
     console.warn('Then run: runDragTests()');
 
     // Try to find any tab with drag elements

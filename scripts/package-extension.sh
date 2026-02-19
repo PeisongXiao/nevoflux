@@ -69,7 +69,8 @@ zip -r "$BUILD_DIR/$XPI_NAME" . \
 echo "✓ Extension packaged: $BUILD_DIR/$XPI_NAME"
 
 # Copy to engine directory if it exists
-ENGINE_EXT_DIR="$PROJECT_ROOT/engine/obj-x86_64-pc-linux-gnu/dist/bin/distribution/extensions"
+source "$SCRIPT_DIR/lib/detect-objdir.sh"
+ENGINE_EXT_DIR="$OBJ_DIR/dist/bin/distribution/extensions"
 if [ -d "$ENGINE_EXT_DIR" ]; then
   echo "Copying to engine directory..."
   cp "$BUILD_DIR/$XPI_NAME" "$ENGINE_EXT_DIR/$XPI_NAME"

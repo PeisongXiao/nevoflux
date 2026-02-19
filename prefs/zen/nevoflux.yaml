@@ -1,0 +1,26 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# NevoFlux sidebar positioning
+- name: sidebar.position_start
+  value: false
+
+- name: sidebar.width
+  value: 960
+
+- name: sidebar.minWidth
+  value: 300
+
+- name: sidebar.maxWidth
+  value: 1440
+
+# NevoFlux Agent settings
+- name: extensions.nevoflux.sidebar.position
+  value: right
+
+- name: extensions.nevoflux.sidebar.width
+  value: 960
+
+- name: extensions.nevoflux.sidebar.resizable
+  value: true

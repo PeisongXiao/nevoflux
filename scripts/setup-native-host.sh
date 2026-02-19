@@ -9,7 +9,7 @@
 # Binary resolution order:
 #   1. Command line argument: ./setup-native-host.sh /path/to/binary
 #   2. Environment variable: NEVOFLUX_AGENT_BIN=/path/to/binary
-#   3. Local development: /ai/project/nevoflux-agent/target/release/nevoflux-agent
+#   3. Local development: ../nevoflux-agent/target/release/nevoflux-agent
 #   4. GitHub release download (for release builds)
 
 set -e
@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Configuration
-AGENT_PROJECT="/ai/project/nevoflux-agent"
+AGENT_PROJECT="$PROJECT_ROOT/../nevoflux-agent"
 AGENT_BIN_NAME="nevoflux-agent"
 EXTENSION_ID="agent@nevoflux.com"
 MANIFEST_NAME="com.nevoflux.agent"

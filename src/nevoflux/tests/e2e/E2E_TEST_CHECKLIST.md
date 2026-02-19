@@ -6,7 +6,7 @@
 - [ ] Browser built: `npm run build`
 - [ ] Extension loaded: `npm run reload-ext`
 - [ ] Browser started: `npm run start`
-- [ ] Test page opened: `file:///ai/project/nevoflux/src/nevoflux/tests/e2e/test-page.html`
+- [ ] Test page opened: `file://<project-root>/src/nevoflux/tests/e2e/test-page.html`
 - [ ] Browser Console opened: `Ctrl+Shift+J` (or `Cmd+Shift+J` on Mac)
 
 ### API Verification
@@ -149,7 +149,7 @@ For faster testing, paste the console test script and run:
 
 ```javascript
 // Load the script from:
-// /ai/project/nevoflux/src/nevoflux/tests/e2e/console-test-script.js
+// <project-root>/src/nevoflux/tests/e2e/console-test-script.js
 
 // Then run:
 runAllTests()
@@ -190,7 +190,7 @@ runAllTests()
 
 ## Notes
 
-- Test page path: `file:///ai/project/nevoflux/src/nevoflux/tests/e2e/test-page.html`
+- Test page path: `file://<project-root>/src/nevoflux/tests/e2e/test-page.html`
 - All tests use `null` for tabId to target the active tab
 - Some tests may require visual verification
 - Network tests may need actual network requests to fully validate

@@ -13,7 +13,7 @@
         "ExtensionSettings": {
             "agent@nevoflux.com": {
                 "installation_mode": "force_installed",
-                "install_url": "file:///ai/project/nevoflux/engine/obj-x86_64-pc-linux-gnu/dist/bin/distribution/extensions/agent@nevoflux.com.xpi"
+                "install_url": "__EXTENSION_INSTALL_URL__"
             }
         }
     }

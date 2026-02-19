@@ -19,7 +19,8 @@ echo "📦 Packaging extension..."
 "$SCRIPT_DIR/package-extension.sh"
 
 # Step 2: Clear extension caches
-PROFILE_DIR="$PROJECT_ROOT/engine/obj-x86_64-pc-linux-gnu/tmp/profile-default"
+source "$SCRIPT_DIR/lib/detect-objdir.sh"
+PROFILE_DIR="$OBJ_DIR/tmp/profile-default"
 
 if [ -d "$PROFILE_DIR" ]; then
   echo ""
