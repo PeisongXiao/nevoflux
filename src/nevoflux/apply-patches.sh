@@ -82,8 +82,19 @@ if [ -d "${NEVOFLUX_DIR}/engine-overlays" ]; then
   cp -r "${NEVOFLUX_DIR}/engine-overlays/"* "${ENGINE_DIR}/" 2>/dev/null || true
 fi
 
-# 5. Inject nevoflux-pages into browser/components/moz.build DIRS list
-# Using sed s/// with newline instead of a\ for cross-platform compatibility
+# 5. Append NevoFlux pref overrides to firefox.js (loaded via preprocessor #include chain)
+# firefox.js → #include zen.js → #include zzz-nevoflux.js
+# Our zzz-nevoflux.js overrides zen.js defaults (e.g., sidebar position)
+FIREFOX_JS="${ENGINE_DIR}/browser/app/profile/firefox.js"
+if [ -f "${FIREFOX_JS}" ] && [ -f "${ENGINE_DIR}/browser/app/profile/zzz-nevoflux.js" ]; then
+  if ! grep -q "zzz-nevoflux.js" "${FIREFOX_JS}"; then
+    echo "Appending #include zzz-nevoflux.js to firefox.js..."
+    echo '#include zzz-nevoflux.js' >> "${FIREFOX_JS}"
+  fi
+fi
+
+# 6. Inject nevoflux-pages into browser/components/moz.build DIRS list
+#    Using sed s/// with newline instead of a\ for cross-platform compatibility
 COMPONENTS_MOZBUILD="${ENGINE_DIR}/browser/components/moz.build"
 if [ -f "${COMPONENTS_MOZBUILD}" ]; then
   if ! grep -q '"nevoflux-pages"' "${COMPONENTS_MOZBUILD}"; then
@@ -92,7 +103,7 @@ if [ -f "${COMPONENTS_MOZBUILD}" ]; then
   fi
 fi
 
-# 6. Inject NevofluxBridgeRouter and NevofluxContentStore into browser/modules/moz.build EXTRA_JS_MODULES
+# 7. Inject NevofluxBridgeRouter and NevofluxContentStore into browser/modules/moz.build EXTRA_JS_MODULES
 # NOTE: Must be inserted in alphabetical order (BridgeRouter before ContentStore)
 MODULES_MOZBUILD="${ENGINE_DIR}/browser/modules/moz.build"
 if [ -f "${MODULES_MOZBUILD}" ]; then
@@ -106,7 +117,7 @@ if [ -f "${MODULES_MOZBUILD}" ]; then
   fi
 fi
 
-# 7. Package nevoflux-agent extension as XPI
+# 8. Package nevoflux-agent extension as XPI
 if [ -f "${ROOT_DIR}/scripts/package-extension.sh" ]; then
   echo "Packaging nevoflux-agent extension..."
   bash "${ROOT_DIR}/scripts/package-extension.sh"

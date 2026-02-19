@@ -79,11 +79,6 @@ const Settings = {
       e.preventDefault();
       const section = link.dataset.section;
       this._activateSection(section);
-
-      // Update URL
-      const url = new URL(window.location.href);
-      url.searchParams.set("section", section);
-      history.replaceState(null, "", url.toString());
     });
   },
 
@@ -1390,11 +1385,11 @@ const Settings = {
       });
       if (result && result.value) {
         this._settings = result.value;
-        this._populateFields();
       }
     } catch (e) {
       console.error("Failed to load settings:", e);
     }
+    this._populateFields();
   },
 
   _populateFields() {

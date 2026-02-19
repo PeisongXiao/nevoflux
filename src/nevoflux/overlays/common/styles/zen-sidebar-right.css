@@ -6,9 +6,44 @@
 
 /**
  * NevoFlux Sidebar Customizations
+ *
+ * sidebar.position_start=false puts #sidebar-box on the right side (for the
+ * NevoFlux agent). However, Firefox's setPosition() also sets the
+ * sidebar-positionend attribute on #sidebar-main, which would move Zen's
+ * sidebar panel to the right too. These overrides keep #sidebar-main on the
+ * left where it belongs.
  */
+
+/* NevoFlux sidebar-box width override.
+ * Firefox CSS hardcodes width:18em (~288px) and the sidebar.width pref
+ * is never consumed.  Set the desired initial width here. */
+#sidebar-box {
+  width: 500px !important;
+  min-width: 300px !important;
+  max-width: 960px !important;
+}
 
 /* Hide sidebar header (system menu) */
 #sidebar-header {
   display: none !important;
+}
+
+/* Keep #sidebar-main on the LEFT even when sidebar-positionend is set.
+ * Overrides sidebar.css :root[sidebar-expand-on-hover] #sidebar-main[sidebar-positionend]
+ * which would set inset-inline-start:unset; inset-inline-end:0 */
+:root[sidebar-expand-on-hover] #sidebar-main[sidebar-positionend] {
+  inset-inline-start: 0 !important;
+  inset-inline-end: unset !important;
+}
+
+/* Keep expand-on-hover border on the right edge (as if position-start) */
+:root[sidebar-expand-on-hover] #sidebar-main[sidebar-positionend][sidebar-launcher-expanded],
+:root[sidebar-expand-on-hover] #sidebar-main[sidebar-positionend][sidebar-ongoing-animations]:not([sidebar-launcher-expanded]) {
+  border-inline-end: 0.01px solid var(--sidebar-border-color) !important;
+  border-inline-start: none !important;
+}
+
+/* Keep launcher-splitter margin on the left side */
+#sidebar-main[sidebar-positionend] + #sidebar-launcher-splitter {
+  margin-inline: calc(-1 * var(--splitter-width)) 0 !important;
 }
