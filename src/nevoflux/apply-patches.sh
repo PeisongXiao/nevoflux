@@ -21,11 +21,12 @@ echo "Applying nevoflux patches to src/zen..."
 
 # 1. Apply all .nfpatch files (using .nfpatch extension to avoid surfer scanning)
 find "${NEVOFLUX_DIR}/patches" -type f -name "*.nfpatch" 2>/dev/null | while read -r patch_file; do
-  # Calculate the relative path from patches/ and map it to the zen/ directory
-  relative_path="${patch_file#${NEVOFLUX_DIR}/patches/}"
-  target_dir="${ZEN_DIR}/$(dirname "$relative_path")"
-  
   echo "Applying: $patch_file"
+  # Check if patch is already applied (idempotent)
+  if (cd "${ZEN_DIR}" && git apply --check --reverse --ignore-whitespace "$patch_file") 2>/dev/null; then
+    echo "  Already applied, skipping."
+    continue
+  fi
   # Apply the patch in the zen directory
   (cd "${ZEN_DIR}" && git apply --ignore-whitespace "$patch_file") || {
     echo "WARN: Failed to apply $patch_file, trying with --3way"
@@ -62,11 +63,12 @@ if [ -d "${NEVOFLUX_DIR}/engine-overlays" ]; then
 fi
 
 # 5. Inject nevoflux-pages into browser/components/moz.build DIRS list
+# Using sed s/// with newline instead of a\ for cross-platform compatibility
 COMPONENTS_MOZBUILD="${ENGINE_DIR}/browser/components/moz.build"
 if [ -f "${COMPONENTS_MOZBUILD}" ]; then
   if ! grep -q '"nevoflux-pages"' "${COMPONENTS_MOZBUILD}"; then
     echo "Adding nevoflux-pages to browser/components/moz.build DIRS..."
-    sedi '/"newtab",/a\    "nevoflux-pages",' "${COMPONENTS_MOZBUILD}"
+    sedi 's/"newtab",/"newtab",\'$'\n''    "nevoflux-pages",/' "${COMPONENTS_MOZBUILD}"
   fi
 fi
 
@@ -76,11 +78,11 @@ MODULES_MOZBUILD="${ENGINE_DIR}/browser/modules/moz.build"
 if [ -f "${MODULES_MOZBUILD}" ]; then
   if ! grep -q '"NevofluxBridgeRouter.sys.mjs"' "${MODULES_MOZBUILD}"; then
     echo "Adding NevofluxBridgeRouter to browser/modules/moz.build..."
-    sedi '/"LinksCache.sys.mjs",/a\    "NevofluxBridgeRouter.sys.mjs",' "${MODULES_MOZBUILD}"
+    sedi 's/"LinksCache.sys.mjs",/"LinksCache.sys.mjs",\'$'\n''    "NevofluxBridgeRouter.sys.mjs",/' "${MODULES_MOZBUILD}"
   fi
   if ! grep -q '"NevofluxContentStore.sys.mjs"' "${MODULES_MOZBUILD}"; then
     echo "Adding NevofluxContentStore to browser/modules/moz.build..."
-    sedi '/"NevofluxBridgeRouter.sys.mjs",/a\    "NevofluxContentStore.sys.mjs",' "${MODULES_MOZBUILD}"
+    sedi 's/"NevofluxBridgeRouter.sys.mjs",/"NevofluxBridgeRouter.sys.mjs",\'$'\n''    "NevofluxContentStore.sys.mjs",/' "${MODULES_MOZBUILD}"
   fi
 fi
 
