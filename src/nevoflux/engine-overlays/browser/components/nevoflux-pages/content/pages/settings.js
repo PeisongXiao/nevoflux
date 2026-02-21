@@ -1418,7 +1418,7 @@ const Settings = {
 
     const label = document.createElement("span");
     label.className = "shortcut-label";
-    label.textContent = "Toggle Agentic AI Sidebar";
+    label.textContent = "Show / Hide Agentic AI Bot";
     row.appendChild(label);
 
     const keys = document.createElement("span");
