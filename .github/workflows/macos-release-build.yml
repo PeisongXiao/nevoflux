@@ -26,7 +26,7 @@ on:
 jobs:
   mac-build:
     name: Build macOS - ${{ matrix.arch }}
-    runs-on: macos-26
+    runs-on: [self-hosted, macos]
 
     strategy:
       fail-fast: false
@@ -119,6 +119,25 @@ jobs:
         env:
           SURFER_COMPAT: ${{ matrix.arch }}
         run: npm run import -- --verbose
+
+      - name: Download NevoFlux Agent binary
+        run: |
+          PLATFORM="macos"
+          ARCH="${{ matrix.arch }}"
+          ASSET_NAME="nevoflux-agent-${PLATFORM}-${ARCH}"
+          mkdir -p /tmp/agent/
+          gh release download latest \
+            --repo dorisgyl/nevoflux-agent \
+            --pattern "${ASSET_NAME}" \
+            --dir /tmp/agent/ || echo "Warning: Agent binary not available for ${PLATFORM}-${ARCH}"
+          if [ -f "/tmp/agent/${ASSET_NAME}" ]; then
+            mkdir -p build/AppDir/distribution/bin/
+            mv "/tmp/agent/${ASSET_NAME}" build/AppDir/distribution/bin/nevoflux-agent
+            chmod +x build/AppDir/distribution/bin/nevoflux-agent
+            echo "Agent binary installed: build/AppDir/distribution/bin/nevoflux-agent"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Bootstrap
         run: |
