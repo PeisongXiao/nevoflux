@@ -26,7 +26,7 @@ jobs:
     permissions:
       contents: write
     # aarch64 does not need full 16x
-    runs-on: ${{ (inputs.release-branch == 'release' && matrix.arch == 'x86_64') && 'self-hosted' || 'blacksmith-8vcpu-ubuntu-2404' }}
+    runs-on: [self-hosted, linux, x64]
     strategy:
       fail-fast: false
       matrix:
@@ -51,7 +51,7 @@ jobs:
           token: ${{ secrets.DEPLOY_KEY }}
 
       - name: Setup Node.js
-        uses: useblacksmith/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
 
@@ -108,6 +108,25 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           npm run import
+
+      - name: Download NevoFlux Agent binary
+        run: |
+          PLATFORM="linux"
+          ARCH="${{ matrix.arch }}"
+          ASSET_NAME="nevoflux-agent-${PLATFORM}-${ARCH}"
+          mkdir -p /tmp/agent/
+          gh release download latest \
+            --repo dorisgyl/nevoflux-agent \
+            --pattern "${ASSET_NAME}" \
+            --dir /tmp/agent/ || echo "Warning: Agent binary not available for ${PLATFORM}-${ARCH}"
+          if [ -f "/tmp/agent/${ASSET_NAME}" ]; then
+            mkdir -p build/AppDir/distribution/bin/
+            mv "/tmp/agent/${ASSET_NAME}" build/AppDir/distribution/bin/nevoflux-agent
+            chmod +x build/AppDir/distribution/bin/nevoflux-agent
+            echo "Agent binary installed: build/AppDir/distribution/bin/nevoflux-agent"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build language packs
         run: sh scripts/download-language-packs.sh
