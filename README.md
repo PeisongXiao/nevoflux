@@ -409,4 +409,5 @@ nevoflux is licensed under the [Mozilla Public License 2.0](./LICENSE).
 
 This project is developed and maintained by **YULIN GAN**.
 
+- GitHub: https://github.com/dorisgyl
 - Contact: doris_gyl@hotmail.com
