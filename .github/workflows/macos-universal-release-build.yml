@@ -15,7 +15,7 @@ on:
 jobs:
   mac-build:
     name: Unify macOS (Universal)
-    runs-on: 'macos-26'
+    runs-on: [self-hosted, macos]
 
     strategy:
       fail-fast: false
@@ -189,9 +189,9 @@ jobs:
           cd engine
           ./mach python -m mozbuild.action.make_dmg \
             --volume-name "${{ env.APP_NAME }}" \
-            --background ./browser/branding/${{ inputs.release-branch }}/background.png \
-            --icon ./browser/branding/${{ inputs.release-branch }}/firefox.icns \
-            --dsstore ./browser/branding/${{ inputs.release-branch }}/dsstore \
+            --background ./browser/branding/release/background.png \
+            --icon ./browser/branding/release/firefox.icns \
+            --dsstore ./browser/branding/release/dsstore \
             ./obj-x86_64-apple-darwin/dist/ ../zen-macOS-universal-temp.dmg
 
       - name: Remove sensitive information
