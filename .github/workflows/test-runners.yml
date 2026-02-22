@@ -1,0 +1,58 @@
+name: Test Self-Hosted Runners
+on: workflow_dispatch
+
+jobs:
+  test-linux:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - name: System info
+        run: |
+          echo "=== OS ==="
+          uname -a
+          echo "=== CPU ==="
+          nproc
+          echo "=== Memory ==="
+          free -h
+          echo "=== Disk ==="
+          df -h /
+          echo "=== Node ==="
+          node --version
+          echo "=== Rust ==="
+          rustc --version
+          echo "=== Python ==="
+          python3 --version
+          echo "=== gh CLI ==="
+          gh --version
+
+      - name: Test agent download
+        run: |
+          gh release list --repo dorisgyl/nevoflux-agent --limit 3 || echo "No releases yet"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test-macos:
+    runs-on: [self-hosted, macos]
+    steps:
+      - name: System info
+        run: |
+          echo "=== OS ==="
+          uname -a
+          echo "=== CPU ==="
+          sysctl -n hw.ncpu
+          echo "=== Memory ==="
+          sysctl -n hw.memsize | awk '{print $0/1024/1024/1024 " GB"}'
+          echo "=== Disk ==="
+          df -h /
+          echo "=== Node ==="
+          node --version
+          echo "=== Rust ==="
+          rustc --version
+          echo "=== Python ==="
+          python3 --version
+
+      - name: Test code signing
+        run: |
+          echo "=== Signing Identities ==="
+          security find-identity -v -p codesigning
+          echo "=== Keychain List ==="
+          security list-keychains
