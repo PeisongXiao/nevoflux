@@ -3,10 +3,12 @@ name: Code Linter
 on:
   push:
     branches:
+      - main
       - dev
   workflow_call:
   pull_request:
     branches:
+      - main
       - dev
 
 permissions:
@@ -38,3 +40,19 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Check for Rust changes
+        id: rust-changes
+        run: |
+          if git diff --name-only ${{ github.event.before || 'HEAD~1' }} HEAD | grep -qE '\.rs$|Cargo\.(toml|lock)$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rust lint
+        if: steps.rust-changes.outputs.changed == 'true'
+        run: |
+          cd src/nevoflux/extensions/nevoflux-agent/dioxus-ui
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
