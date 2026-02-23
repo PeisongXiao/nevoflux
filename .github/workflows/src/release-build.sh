@@ -3,9 +3,18 @@
 set -xe
 
 if command -v apt-get &> /dev/null; then
-  sudo apt-get install python3-launchpadlib
-  sudo apt-get update
-  sudo apt-get install -y xvfb libnvidia-egl-wayland1 mesa-utils libgl1-mesa-dri
+  PACKAGES="python3-launchpadlib xvfb libnvidia-egl-wayland1 mesa-utils libgl1-mesa-dri"
+  MISSING=""
+  for pkg in $PACKAGES; do
+    if ! dpkg -s "$pkg" &>/dev/null; then
+      MISSING="$MISSING $pkg"
+    fi
+  done
+  if [ -n "$MISSING" ]; then
+    echo "Installing missing packages:$MISSING"
+    sudo apt-get update || true
+    sudo apt-get install -y $MISSING || true
+  fi
 fi
 
 . $HOME/.cargo/env
