@@ -47,12 +47,6 @@ jobs:
         arch: [x86_64, aarch64]
 
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@main
-        if: ${{ !(inputs.generate-gpo && matrix.arch == 'aarch64') }}
-        with:
-          tool-cache: false
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
