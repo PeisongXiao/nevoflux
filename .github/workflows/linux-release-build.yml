@@ -185,6 +185,7 @@ jobs:
         env:
           SURFER_COMPAT: ${{ matrix.arch }}
           ZEN_RELEASE_BRANCH: ${{ inputs.release-branch }}
+          RUSTUP_TOOLCHAIN: '1.83'
         run: |
           export SURFER_PLATFORM="linux"
           if [[ -n ${{ inputs.MOZ_BUILD_DATE }} ]];then

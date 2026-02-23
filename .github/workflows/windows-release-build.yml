@@ -255,6 +255,7 @@ jobs:
         env:
           SURFER_COMPAT: ${{ matrix.arch }}
           ZEN_RELEASE_BRANCH: ${{ inputs.release-branch }}
+          RUSTUP_TOOLCHAIN: '1.83'
         run: |
           set -x
           dos2unix configs/windows/mozconfig
