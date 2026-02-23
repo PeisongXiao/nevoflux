@@ -101,71 +101,66 @@ jobs:
         if: ${{ !(inputs.generate-gpo && matrix.arch == 'aarch64') }}
         run: npm run download
 
-      - name: win-cross Cache
-        env:
-          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 5
-        id: cache-win-cross
-        uses: actions/cache@v4
-        with:
-          path: ${HOME}/win-cross
-          key: win-cross
-
       - name: Setup for Windows
-        if: steps.cache-win-cross.outputs.cache-hit != 'true' && !(inputs.generate-gpo && matrix.arch == 'aarch64')
+        if: ${{ !(inputs.generate-gpo && matrix.arch == 'aarch64') }}
         run: |
           set -x
-          mkdir -p ~/win-cross
-          cd engine/
-          sudo apt-get install python3-launchpadlib
-          sudo add-apt-repository ppa:savoury1/backports
-          sudo apt-get update
-          sudo apt-get install -y python3-pip autoconf \
-            autoconf2.13 \
-            automake \
-            bison \
-            build-essential \
-            cabextract \
-            curl \
-            cmake \
-            flex \
-            gawk \
-            gcc-multilib \
-            git \
-            gnupg \
-            jq \
-            libbz2-dev \
-            libexpat1-dev \
-            libffi-dev \
-            libncursesw5-dev \
-            libsqlite3-dev \
-            libssl-dev \
-            libtool \
-            libucl-dev \
-            libxml2-dev \
-            msitools \
-            ninja-build \
-            openssh-client \
-            p7zip-full \
-            pkg-config \
-            procps \
-            python3-requests \
-            python3-toml \
-            scons \
-            subversion \
-            tar \
-            unzip \
-            uuid \
-            uuid-dev \
-            wget \
-            zip \
-            zlib1g-dev \
-            aria2
-          echo Setup wine
-          aria2c "https://firefox-ci-tc.services.mozilla.com/api/index/v1/task/gecko.cache.level-1.toolchains.v3.linux64-wine.latest/artifacts/public%2Fbuild%2Fwine.tar.zst" -o wine.tar.zst
-          tar --zstd -xf wine.tar.zst -C ~/win-cross
-          rm wine.tar.zst
-          echo Setup Visual Studio
-          ./mach python --virtualenv build taskcluster/scripts/misc/get_vs.py build/vs/vs2022.yaml ~/win-cross/vs2022
+          if [ -d ~/win-cross/wine ] && [ -d ~/win-cross/vs2022 ]; then
+            echo "win-cross already set up, skipping."
+          else
+            mkdir -p ~/win-cross
+            cd engine/
+            sudo apt-get install -y python3-launchpadlib
+            sudo add-apt-repository -y ppa:savoury1/backports
+            sudo apt-get update
+            sudo apt-get install -y python3-pip autoconf \
+              autoconf2.13 \
+              automake \
+              bison \
+              build-essential \
+              cabextract \
+              curl \
+              cmake \
+              flex \
+              gawk \
+              gcc-multilib \
+              git \
+              gnupg \
+              jq \
+              libbz2-dev \
+              libexpat1-dev \
+              libffi-dev \
+              libncursesw5-dev \
+              libsqlite3-dev \
+              libssl-dev \
+              libtool \
+              libucl-dev \
+              libxml2-dev \
+              msitools \
+              ninja-build \
+              openssh-client \
+              p7zip-full \
+              pkg-config \
+              procps \
+              python3-requests \
+              python3-toml \
+              scons \
+              subversion \
+              tar \
+              unzip \
+              uuid \
+              uuid-dev \
+              wget \
+              zip \
+              zlib1g-dev \
+              aria2
+            echo Setup wine
+            aria2c "https://firefox-ci-tc.services.mozilla.com/api/index/v1/task/gecko.cache.level-1.toolchains.v3.linux64-wine.latest/artifacts/public%2Fbuild%2Fwine.tar.zst" -o wine.tar.zst
+            tar --zstd -xf wine.tar.zst -C ~/win-cross
+            rm wine.tar.zst
+            echo Setup Visual Studio
+            ./mach python --virtualenv build taskcluster/scripts/misc/get_vs.py build/vs/vs2022.yaml ~/win-cross/vs2022
+          fi
 
       - name: Import
         if: ${{ !(inputs.generate-gpo && matrix.arch == 'aarch64') }}
