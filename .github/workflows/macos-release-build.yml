@@ -76,13 +76,14 @@ jobs:
           export PATH="$(python3 -m site --user-base)/bin":$PATH
           python3 -m pip install --user mercurial || true
 
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $(cat .rust-toolchain)
+          RUST_VER=$(cat .rust-toolchain)
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $RUST_VER
           source $HOME/.cargo/env
 
           if test "${{ matrix.arch }}" = "aarch64"; then
-            rustup target add aarch64-apple-darwin
+            rustup target add --toolchain $RUST_VER aarch64-apple-darwin
           else
-            rustup target add x86_64-apple-darwin
+            rustup target add --toolchain $RUST_VER x86_64-apple-darwin
           fi
 
       - name: Force usage of gnu-tar
@@ -137,12 +138,13 @@ jobs:
       - name: Pin Rust version after bootstrap
         run: |
           source $HOME/.cargo/env
-          rustup default $(cat .rust-toolchain)
+          RUST_VER=$(cat .rust-toolchain)
+          rustup default $RUST_VER
           rustc --version
           if test "${{ matrix.arch }}" = "aarch64"; then
-            rustup target add aarch64-apple-darwin
+            rustup target add --toolchain $RUST_VER aarch64-apple-darwin
           else
-            rustup target add x86_64-apple-darwin
+            rustup target add --toolchain $RUST_VER x86_64-apple-darwin
           fi
 
       - name: Build language packs

@@ -209,14 +209,15 @@ jobs:
       - name: Setup Rust
         if: ${{ !(inputs.generate-gpo && matrix.arch == 'aarch64') }}
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $(cat .rust-toolchain)
+          RUST_VER=$(cat .rust-toolchain)
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $RUST_VER
           source $HOME/.cargo/env
-          rustup default $(cat .rust-toolchain)
+          rustup default $RUST_VER
           rustc --version
           if test "${{ matrix.arch }}" = "aarch64"; then
-            rustup target add aarch64-pc-windows-msvc
+            rustup target add --toolchain $RUST_VER aarch64-pc-windows-msvc
           else
-            rustup target add x86_64-pc-windows-msvc
+            rustup target add --toolchain $RUST_VER x86_64-pc-windows-msvc
           fi
           cd engine/
           cargo install cargo-download --locked
