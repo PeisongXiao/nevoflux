@@ -238,6 +238,12 @@ jobs:
           RUSTUP_TOOLCHAIN: '1.83'
         run: |
           export SURFER_PLATFORM="darwin"
+          # Use local Xcode SDK to avoid 403 errors downloading from Mozilla servers
+          export MACOS_SDK_DIR=$(xcrun --show-sdk-path 2>/dev/null || echo "")
+          if [[ -n "$MACOS_SDK_DIR" ]]; then
+            echo "Using local macOS SDK: $MACOS_SDK_DIR"
+            export SDKROOT="$MACOS_SDK_DIR"
+          fi
           if [[ -n "${{ inputs.MOZ_BUILD_DATE }}" ]];then
             export MOZ_BUILD_DATE="${{ inputs.MOZ_BUILD_DATE }}"
           fi
