@@ -238,8 +238,8 @@ jobs:
           RUSTUP_TOOLCHAIN: '1.83'
         run: |
           export SURFER_PLATFORM="darwin"
-          if [[ -n ${{ inputs.MOZ_BUILD_DATE }} ]];then
-            export MOZ_BUILD_DATE=${{ inputs.MOZ_BUILD_DATE }}
+          if [[ -n "${{ inputs.MOZ_BUILD_DATE }}" ]];then
+            export MOZ_BUILD_DATE="${{ inputs.MOZ_BUILD_DATE }}"
           fi
           bash .github/workflows/src/release-build.sh
 

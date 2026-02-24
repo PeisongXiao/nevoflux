@@ -361,8 +361,8 @@ jobs:
           if test ${{ inputs.generate-gpo }} = true; then
             export ZEN_GA_GENERATE_PROFILE=1
           fi
-          if [[ -n ${{ inputs.MOZ_BUILD_DATE }} ]];then
-            export MOZ_BUILD_DATE=${{ inputs.MOZ_BUILD_DATE }}
+          if [[ -n "${{ inputs.MOZ_BUILD_DATE }}" ]];then
+            export MOZ_BUILD_DATE="${{ inputs.MOZ_BUILD_DATE }}"
           fi
           bash .github/workflows/src/release-build.sh
 
