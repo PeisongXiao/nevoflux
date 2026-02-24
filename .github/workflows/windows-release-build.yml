@@ -193,12 +193,12 @@ jobs:
         run: |
           PLATFORM="windows"
           ARCH="${{ matrix.arch }}"
-          ASSET_NAME="nevoflux-agent-${PLATFORM}-${ARCH}.exe"
+          ARCHIVE_NAME="nevoflux-agent-${PLATFORM}-${ARCH}.zip"
           mkdir -p /tmp/agent/
           for attempt in 1 2 3 4 5; do
-            gh release download latest \
+            gh release download \
               --repo dorisgyl/nevoflux-agent \
-              --pattern "${ASSET_NAME}" \
+              --pattern "${ARCHIVE_NAME}" \
               --dir /tmp/agent/ && break
             if [ $attempt -lt 5 ]; then
               echo "::warning::Download attempt $attempt/5 failed. Retrying in $((attempt * 15))s..."
@@ -207,9 +207,11 @@ jobs:
               echo "::warning::Agent binary download failed after 5 attempts, continuing..."
             fi
           done
-          if [ -f "/tmp/agent/${ASSET_NAME}" ]; then
+          if [ -f "/tmp/agent/${ARCHIVE_NAME}" ]; then
             mkdir -p build/AppDir/distribution/bin/
-            mv "/tmp/agent/${ASSET_NAME}" build/AppDir/distribution/bin/nevoflux-agent.exe
+            cd /tmp/agent && unzip -o "${ARCHIVE_NAME}" && cd -
+            mv /tmp/agent/nevoflux-agent.exe build/AppDir/distribution/bin/nevoflux-agent.exe || \
+              mv /tmp/agent/nevoflux-agent build/AppDir/distribution/bin/nevoflux-agent.exe || true
             echo "Agent binary installed: build/AppDir/distribution/bin/nevoflux-agent.exe"
           fi
         env:
