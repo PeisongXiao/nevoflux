@@ -91,8 +91,21 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          brew update || true
-          brew install cairo gnu-tar mercurial watchman || true
+          BREW_PACKAGES="cairo gnu-tar mercurial watchman"
+          MISSING=""
+          for pkg in $BREW_PACKAGES; do
+            if ! brew list "$pkg" &>/dev/null; then
+              MISSING="$MISSING $pkg"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "Installing missing brew packages:$MISSING"
+            brew update || true
+            brew install $MISSING || true
+          else
+            echo "All brew dependencies already installed, skipping."
+          fi
+
           sudo pip3 install setuptools || true
 
           export PATH="$(python3 -m site --user-base)/bin":$PATH
