@@ -144,7 +144,27 @@ jobs:
       - name: Load surfer CI setup
         run: npm run surfer -- ci --brand ${{ inputs.release-branch }} --display-version ${{ inputs.build-version }}
 
+      - name: Check engine source version
+        id: engine-check
+        run: |
+          DESIRED_VERSION=$(node -p "require('./surfer.json').version.version")
+          echo "Target engine version: $DESIRED_VERSION"
+          if [ -f engine/config/milestone.txt ]; then
+            CURRENT_VERSION=$(grep -v '^#' engine/config/milestone.txt | grep -v '^$' | tail -1)
+            echo "Current engine version: $CURRENT_VERSION"
+            if [ "$CURRENT_VERSION" = "$DESIRED_VERSION" ]; then
+              echo "Engine source already at version $DESIRED_VERSION, skipping download."
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "Version mismatch ($CURRENT_VERSION != $DESIRED_VERSION), will download."
+          else
+            echo "No engine source found, will download."
+          fi
+          echo "skip=false" >> $GITHUB_OUTPUT
+
       - name: Download Firefox source and dependencies
+        if: steps.engine-check.outputs.skip != 'true'
         run: |
           for attempt in 1 2 3 4 5; do
             npm run download && break
@@ -245,6 +265,11 @@ jobs:
           mkdir -p ~/.zen-keys
           echo "${{ secrets.ZEN_SAFEBROWSING_API_KEY }}" > ~/.zen-keys/safebrowsing.dat
 
+      - name: Clean stale build artifacts
+        run: |
+          rm -rf engine/obj-${{ matrix.arch }}-apple-darwin/
+          echo "Cleaned stale build artifacts for ${{ matrix.arch }}"
+
       - name: Build NevoFlux
         env:
           SURFER_COMPAT: ${{ matrix.arch }}
@@ -252,8 +277,8 @@ jobs:
           RUSTUP_TOOLCHAIN: '1.83'
           # Disable PGO for x86_64 cross-compile: can't run x86_64 binary on ARM64 runner
           ZEN_GA_DISABLE_PGO: ${{ matrix.arch == 'x86_64' && 'true' || '' }}
-          # Disable LTO for x86_64 cross-compile: ld64 linker bug check conflicts with MOZ_AUTOMATION
-          ZEN_DISABLE_LTO: ${{ matrix.arch == 'x86_64' && '1' || '' }}
+          # Disable LTO for macOS: ld64 linker bug check conflicts with MOZ_AUTOMATION
+          ZEN_DISABLE_LTO: '1'
         run: |
           export SURFER_PLATFORM="darwin"
           # Use local Xcode SDK to avoid 403 errors downloading from Mozilla servers
@@ -280,28 +305,46 @@ jobs:
         run: |
           rm -rf ~/.zen-keys
 
+      - name: Inject distribution files into package
+        run: |
+          set -ex
+          ARCH="${{ matrix.arch }}"
+          OBJ_DIR="engine/obj-${ARCH}-apple-darwin"
+          STAGING_APP=$(find "$OBJ_DIR/dist" -maxdepth 3 -name "*.app" -type d 2>/dev/null | head -1)
+          if [ -d "build/AppDir/distribution" ] && [ -n "$STAGING_APP" ]; then
+            mkdir -p "$STAGING_APP/Contents/Resources/distribution"
+            cp -r build/AppDir/distribution/* "$STAGING_APP/Contents/Resources/distribution/"
+            ls -la "$STAGING_APP/Contents/Resources/distribution/"
+            # Re-create DMG with distribution files included
+            rm -f dist/*.dmg
+            STAGING_PARENT=$(dirname "$STAGING_APP")
+            hdiutil create -volname "NevoFlux" -srcfolder "$STAGING_PARENT" -ov -format UDZO "dist/nevoflux-${ARCH}.dmg"
+            echo "DMG re-created with distribution files"
+          else
+            echo "::warning::Distribution files or staging app not found, skipping injection"
+          fi
+
       - name: Rename artifacts
         run: |
-          echo "Tarballing DMG"
           set -ex
-          mv ./dist/*.dmg ./zen-${{ matrix.arch }}-apple-darwin-dist.dmg
-          mv ./engine/obj-${{ matrix.arch }}-apple-darwin/dist/host/bin/mar ./zen-macos-host-mar
+          mv ./dist/*.dmg ./nevoflux-${{ matrix.arch }}-apple-darwin.dmg
+          mv ./engine/obj-${{ matrix.arch }}-apple-darwin/dist/host/bin/mar ./nevoflux-macos-host-mar
           mv ./engine/obj-${{ matrix.arch }}-apple-darwin/dist/bin/platform.ini ./platform.ini
 
       - name: Upload dist dmg
         uses: actions/upload-artifact@v4
         with:
           retention-days: 1
-          name: zen-${{ matrix.arch }}-apple-darwin-dist.dmg
-          path: ./zen-${{ matrix.arch }}-apple-darwin-dist.dmg
+          name: nevoflux-${{ matrix.arch }}-apple-darwin.dmg
+          path: ./nevoflux-${{ matrix.arch }}-apple-darwin.dmg
 
       - name: Upload host mar
         uses: actions/upload-artifact@v4
         if: matrix.arch == 'aarch64'
         with:
           retention-days: 1
-          name: zen-macos-host-mar
-          path: ./zen-macos-host-mar
+          name: nevoflux-macos-host-mar
+          path: ./nevoflux-macos-host-mar
 
       - name: Upload platform.ini
         uses: actions/upload-artifact@v4

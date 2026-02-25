@@ -258,7 +258,27 @@ jobs:
       - name: Load Surfer CI setup
         run: npm run surfer -- ci --brand ${{ inputs.update_branch }} --display-version ${{ needs.build-data.outputs.version }}
 
+      - name: Check engine source version
+        id: engine-check
+        run: |
+          DESIRED_VERSION=$(node -p "require('./surfer.json').version.version")
+          echo "Target engine version: $DESIRED_VERSION"
+          if [ -f engine/config/milestone.txt ]; then
+            CURRENT_VERSION=$(grep -v '^#' engine/config/milestone.txt | grep -v '^$' | tail -1)
+            echo "Current engine version: $CURRENT_VERSION"
+            if [ "$CURRENT_VERSION" = "$DESIRED_VERSION" ]; then
+              echo "Engine source already at version $DESIRED_VERSION, skipping download."
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "Version mismatch ($CURRENT_VERSION != $DESIRED_VERSION), will download."
+          else
+            echo "No engine source found, will download."
+          fi
+          echo "skip=false" >> $GITHUB_OUTPUT
+
       - name: Download Firefox source and dependencies
+        if: steps.engine-check.outputs.skip != 'true'
         run: |
           for attempt in 1 2 3 4 5; do
             npm run download --verbose && break
@@ -292,15 +312,15 @@ jobs:
           tar \
             --exclude='./.git' \
             --use-compress-program=zstd \
-            -hcf zen.source.tar.zst \
+            -hcf nevoflux.source.tar.zst \
             -C engine .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           retention-days: 5
-          name: zen.source.tar.zst
-          path: ./zen.source.tar.zst
+          name: nevoflux.source.tar.zst
+          path: ./nevoflux.source.tar.zst
 
   windows-step-1:
     name: Windows build step 1 (PGO build)
@@ -313,7 +333,7 @@ jobs:
       use-sccache: ${{ inputs.use-sccache }}
       build-version: ${{ needs.build-data.outputs.version }}
       generate-gpo: true
-      profile-data-path-archive: zen-windows-profile-data-and-jarlog.zip
+      profile-data-path-archive: nevoflux-windows-profile-data-and-jarlog.zip
       release-branch: ${{ inputs.update_branch }}
       MOZ_BUILD_DATE: ${{needs.buildid.outputs.buildids}}
 
@@ -326,7 +346,7 @@ jobs:
     needs: [windows-step-1, build-data]
     with:
       build-version: ${{ needs.build-data.outputs.version }}
-      profile-data-path-archive: zen.win64-pgo-stage-1.zip
+      profile-data-path-archive: nevoflux.win64-pgo-stage-1.zip
       release-branch: ${{ inputs.update_branch }}
 
   windows-step-3:
@@ -411,13 +431,13 @@ jobs:
       - name: Download Linux build
         uses: actions/download-artifact@v4
         with:
-          name: zen.linux-${{ matrix.arch }}.tar.xz
+          name: nevoflux.linux-${{ matrix.arch }}.tar.xz
 
       - name: Execute AppImage build
         run: |
           set -eux
           export ARCH=${{ matrix.arch }}
-          UPINFO="gh-releases-zsync|$GITHUB_REPOSITORY_OWNER|desktop|latest|zen-$ARCH.AppImage.zsync"
+          UPINFO="gh-releases-zsync|$GITHUB_REPOSITORY_OWNER|desktop|latest|nevoflux-$ARCH.AppImage.zsync"
           rm build/AppDir/.DirIcon || true
           cp configs/branding/release/logo128.png build/AppDir/usr/share/icons/hicolor/128x128/apps/zen.png
           cp configs/branding/release/logo128.png build/AppDir/zen.png && ln -s zen.png build/AppDir/.DirIcon
@@ -456,24 +476,24 @@ jobs:
           ls -al
           find .
           ls -al "$APPDIR"
-          ./appimagetool-x86_64.AppImage -u "$UPINFO" "$APPDIR" zen-"$ARCH".AppImage --runtime-file ./uruntime-appimage-squashfs-lite-"$ARCH"
+          ./appimagetool-x86_64.AppImage -u "$UPINFO" "$APPDIR" nevoflux-"$ARCH".AppImage --runtime-file ./uruntime-appimage-squashfs-lite-"$ARCH"
           mkdir dist
-          mv zen*AppImage* dist/.
+          mv nevoflux*AppImage* dist/.
           unset ARCH
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           retention-days: 5
-          name: zen-${{ matrix.arch }}.AppImage
-          path: ./dist/zen-${{ matrix.arch }}.AppImage
+          name: nevoflux-${{ matrix.arch }}.AppImage
+          path: ./dist/nevoflux-${{ matrix.arch }}.AppImage
 
       - name: Upload artifact (ZSync)
         uses: actions/upload-artifact@v4
         with:
           retention-days: 5
-          name: zen-${{ matrix.arch }}.AppImage.zsync
-          path: ./dist/zen-${{ matrix.arch }}.AppImage.zsync
+          name: nevoflux-${{ matrix.arch }}.AppImage.zsync
+          path: ./dist/nevoflux-${{ matrix.arch }}.AppImage.zsync
 
   release:
     if: ${{ inputs.create_release }}
@@ -536,20 +556,20 @@ jobs:
           mkdir -p windows-release
           if [ "${{ inputs.sign_windows }}" = "true" ]; then
             # Signed binaries from windows-binaries repo
-            cp .github/workflows/object/windows-x64-signed-x86_64/zen.win-x86_64.zip windows-release/
-            cp .github/workflows/object/windows-x64-signed-arm64/zen.win-arm64.zip windows-release/
+            cp .github/workflows/object/windows-x64-signed-x86_64/nevoflux.win-x86_64.zip windows-release/
+            cp .github/workflows/object/windows-x64-signed-arm64/nevoflux.win-arm64.zip windows-release/
             cp .github/workflows/object/windows-x64-signed-x86_64/windows.mar windows-release/
             cp .github/workflows/object/windows-x64-signed-arm64/windows-arm64.mar windows-release/
-            cp .github/workflows/object/windows-x64-signed-x86_64/zen.installer.exe windows-release/
-            cp .github/workflows/object/windows-x64-signed-arm64/zen.installer-arm64.exe windows-release/
+            cp .github/workflows/object/windows-x64-signed-x86_64/nevoflux.installer.exe windows-release/
+            cp .github/workflows/object/windows-x64-signed-arm64/nevoflux.installer-arm64.exe windows-release/
           else
             # Unsigned binaries from CI artifacts (already downloaded by actions/download-artifact)
-            cp zen.win-x86_64.zip/zen.win-x86_64.zip windows-release/ || true
-            cp zen.win-arm64.zip/zen.win-arm64.zip windows-release/ || true
+            cp nevoflux.win-x86_64.zip/nevoflux.win-x86_64.zip windows-release/ || true
+            cp nevoflux.win-arm64.zip/nevoflux.win-arm64.zip windows-release/ || true
             cp windows.mar/windows.mar windows-release/ || true
             cp windows-arm64.mar/windows-arm64.mar windows-release/ || true
-            cp zen.installer.exe/zen.installer.exe windows-release/ || true
-            cp zen.installer-arm64.exe/zen.installer-arm64.exe windows-release/ || true
+            cp nevoflux.installer.exe/nevoflux.installer.exe windows-release/ || true
+            cp nevoflux.installer-arm64.exe/nevoflux.installer-arm64.exe windows-release/ || true
           fi
 
       - name: Release
@@ -563,23 +583,23 @@ jobs:
           name: 'Release build - ${{ needs.build-data.outputs.version }} (${{ needs.build-data.outputs.build_date }})'
           body_path: release_notes.md
           files: |
-            ./zen.source.tar.zst/*
-            ./zen.linux-x86_64.tar.xz/*
-            ./zen.linux-aarch64.tar.xz/*
-            ./zen-x86_64.AppImage/*
-            ./zen-x86_64.AppImage.zsync/*
-            ./zen-aarch64.AppImage/*
-            ./zen-aarch64.AppImage.zsync/*
-            ./windows-release/zen.win-x86_64.zip
-            ./windows-release/zen.win-arm64.zip
+            ./nevoflux.source.tar.zst/*
+            ./nevoflux.linux-x86_64.tar.xz/*
+            ./nevoflux.linux-aarch64.tar.xz/*
+            ./nevoflux-x86_64.AppImage/*
+            ./nevoflux-x86_64.AppImage.zsync/*
+            ./nevoflux-aarch64.AppImage/*
+            ./nevoflux-aarch64.AppImage.zsync/*
+            ./windows-release/nevoflux.win-x86_64.zip
+            ./windows-release/nevoflux.win-arm64.zip
             ./linux.mar/*
             ./linux-aarch64.mar/*
             ./windows-release/windows.mar
             ./windows-release/windows-arm64.mar
             ./macos.mar/*
-            ./windows-release/zen.installer.exe
-            ./windows-release/zen.installer-arm64.exe
-            ./zen.macos-universal.dmg/*
+            ./windows-release/nevoflux.installer.exe
+            ./windows-release/nevoflux.installer-arm64.exe
+            ./nevoflux.macos-universal.dmg/*
 
   prepare-flatpak:
     if: ${{ inputs.create_release && inputs.build_flatpak }}
@@ -657,12 +677,12 @@ jobs:
       - name: Download Linux x86_64 build
         uses: actions/download-artifact@v4
         with:
-          name: zen.linux-x86_64.tar.xz
+          name: nevoflux.linux-x86_64.tar.xz
 
       - name: Download Linux aarch64 build
         uses: actions/download-artifact@v4
         with:
-          name: zen.linux-aarch64.tar.xz
+          name: nevoflux.linux-aarch64.tar.xz
 
       - name: Update repository
         uses: actions/checkout@v4
@@ -693,8 +713,8 @@ jobs:
           python3 ./zen-browser/scripts/prepare-flatpak-release.py \
             --flatpak-archive archive.tar \
             --version ${{ needs.build-data.outputs.version }} \
-            --linux-archive zen.linux-x86_64.tar.xz \
-            --linux-aarch64-archive zen.linux-aarch64.tar.xz \
+            --linux-archive nevoflux.linux-x86_64.tar.xz \
+            --linux-aarch64-archive nevoflux.linux-aarch64.tar.xz \
             --output app.zen_browser.zen.yml \
             --template-root ./zen-browser/build/flatpak
 
@@ -707,8 +727,8 @@ jobs:
         run: |
           rm -rf zen-browser
           rm -rf archive.tar
-          rm -rf zen.linux-x86_64.tar.xz
-          rm -rf zen.linux-aarch64.tar.xz
+          rm -rf nevoflux.linux-x86_64.tar.xz
+          rm -rf nevoflux.linux-aarch64.tar.xz
 
       - name: Upload Flatpak manifest
         uses: actions/upload-artifact@v4
