@@ -35,6 +35,11 @@ on:
         required: false
         default: false
         type: 'boolean'
+      display_version:
+        description: 'Display version (e.g. 0.1.0). If set, overrides surfer.json displayVersion'
+        required: false
+        default: ''
+        type: 'string'
       use-sccache:
         description: 'Use sccache'
         required: true
@@ -72,6 +77,11 @@ on:
         required: false
         default: false
         type: 'boolean'
+      display_version:
+        description: 'Display version (e.g. 0.1.0). If set, overrides surfer.json displayVersion'
+        required: false
+        default: ''
+        type: 'string'
       use-sccache:
         description: 'Use sccache'
         required: true
@@ -157,8 +167,13 @@ jobs:
         run: |
           npm run surfer -- ci --brand ${{ inputs.update_branch }} --bump prerelease
 
-      - name: Bump version without new version
-        if: ${{ !inputs.update_version }}
+      - name: Set display version
+        if: ${{ inputs.display_version != '' }}
+        run: |
+          npm run surfer -- ci --brand ${{ inputs.update_branch }} --display-version ${{ inputs.display_version }}
+
+      - name: Configure CI brand
+        if: ${{ !inputs.update_version && inputs.display_version == '' }}
         run: |
           npm run surfer -- ci --brand ${{ inputs.update_branch }}
 
