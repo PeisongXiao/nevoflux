@@ -53,8 +53,8 @@ let contentStorePersistUnsubscribe = null;
 
 this.nevoflux = class extends ExtensionAPI {
   onStartup() {
-    NevofluxNativeHostRegistrar.ensureRegistered().catch(err => {
-      console.error("[NevoFlux] Failed to register native messaging hosts:", err);
+    NevofluxNativeHostRegistrar.ensureRegistered().catch((err) => {
+      console.error('[NevoFlux] Failed to register native messaging hosts:', err);
     });
   }
 

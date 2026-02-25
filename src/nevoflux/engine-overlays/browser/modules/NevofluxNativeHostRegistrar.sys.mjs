@@ -4,46 +4,44 @@
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  ObjectUtils: "resource://gre/modules/ObjectUtils.sys.mjs",
+  ObjectUtils: 'resource://gre/modules/ObjectUtils.sys.mjs',
 });
 
 export const NevofluxNativeHostRegistrar = {
   HOSTS: [
-    { name: "com.nevoflux.agent", description: "NevoFlux AI Agent" },
-    { name: "com.nevoflux.agent.mcp", description: "NevoFlux MCP Agent" },
+    { name: 'com.nevoflux.agent', description: 'NevoFlux AI Agent' },
+    { name: 'com.nevoflux.agent.mcp', description: 'NevoFlux MCP Agent' },
   ],
-  EXTENSION_ID: "agent@nevoflux.com",
+  EXTENSION_ID: 'agent@nevoflux.com',
 
   _getAgentBinaryFile() {
-    let dir = Services.dirsvc.get("GreD", Ci.nsIFile);
-    dir.append("distribution");
-    dir.append("bin");
-    dir.append(
-      AppConstants.platform === "win" ? "nevoflux-agent.exe" : "nevoflux-agent"
-    );
+    let dir = Services.dirsvc.get('GreD', Ci.nsIFile);
+    dir.append('distribution');
+    dir.append('bin');
+    dir.append(AppConstants.platform === 'win' ? 'nevoflux-agent.exe' : 'nevoflux-agent');
     return dir;
   },
 
   _getManifestFolder() {
-    if (AppConstants.platform === "win") {
+    if (AppConstants.platform === 'win') {
       return PathUtils.join(
-        Services.dirsvc.get("AppData", Ci.nsIFile).path,
-        "Mozilla",
-        "NativeMessagingHosts"
+        Services.dirsvc.get('AppData', Ci.nsIFile).path,
+        'Mozilla',
+        'NativeMessagingHosts'
       );
-    } else if (AppConstants.platform === "macosx") {
+    } else if (AppConstants.platform === 'macosx') {
       return PathUtils.join(
-        Services.dirsvc.get("Home", Ci.nsIFile).path,
-        "Library",
-        "Application Support",
-        "Mozilla",
-        "NativeMessagingHosts"
+        Services.dirsvc.get('Home', Ci.nsIFile).path,
+        'Library',
+        'Application Support',
+        'Mozilla',
+        'NativeMessagingHosts'
       );
     }
     return PathUtils.join(
-      Services.dirsvc.get("Home", Ci.nsIFile).path,
-      ".mozilla",
-      "native-messaging-hosts"
+      Services.dirsvc.get('Home', Ci.nsIFile).path,
+      '.mozilla',
+      'native-messaging-hosts'
     );
   },
 
@@ -52,7 +50,7 @@ export const NevofluxNativeHostRegistrar = {
       name: hostInfo.name,
       description: hostInfo.description,
       path: binaryPath,
-      type: "stdio",
+      type: 'stdio',
       allowed_extensions: [this.EXTENSION_ID],
     };
 
@@ -72,35 +70,26 @@ export const NevofluxNativeHostRegistrar = {
       await IOUtils.writeJSON(manifestPath, jsonContent);
     }
 
-    if (AppConstants.platform === "win") {
+    if (AppConstants.platform === 'win') {
       this._writeWindowsRegKey(hostInfo.name, manifestPath);
     }
   },
 
   _writeWindowsRegKey(hostName, manifestPath) {
-    let wrk = Cc["@mozilla.org/windows-registry-key;1"].createInstance(
-      Ci.nsIWindowsRegKey
-    );
+    let wrk = Cc['@mozilla.org/windows-registry-key;1'].createInstance(Ci.nsIWindowsRegKey);
     try {
       let regPath = `Software\\Mozilla\\NativeMessagingHosts\\${hostName}`;
       try {
-        wrk.create(
-          wrk.ROOT_KEY_CURRENT_USER,
-          regPath,
-          wrk.ACCESS_ALL
-        );
-        if (wrk.readStringValue("") === manifestPath) {
+        wrk.create(wrk.ROOT_KEY_CURRENT_USER, regPath, wrk.ACCESS_ALL);
+        if (wrk.readStringValue('') === manifestPath) {
           return;
         }
       } catch (e) {
         // Key doesn't exist or has no value; will be written below.
       }
-      wrk.writeStringValue("", manifestPath);
+      wrk.writeStringValue('', manifestPath);
     } catch (e) {
-      console.error(
-        `[NevoFlux] Failed to write registry key for ${hostName}:`,
-        e
-      );
+      console.error(`[NevoFlux] Failed to write registry key for ${hostName}:`, e);
     } finally {
       wrk.close();
     }
@@ -110,9 +99,9 @@ export const NevofluxNativeHostRegistrar = {
     let binFile = this._getAgentBinaryFile();
     if (!binFile.exists()) {
       console.warn(
-        "[NevoFlux] Agent binary not found at",
+        '[NevoFlux] Agent binary not found at',
         binFile.path,
-        "- skipping native host registration"
+        '- skipping native host registration'
       );
       return;
     }
@@ -124,10 +113,7 @@ export const NevofluxNativeHostRegistrar = {
       try {
         await this._writeManifest(folder, hostInfo, binFile.path);
       } catch (e) {
-        console.error(
-          `[NevoFlux] Failed to write manifest for ${hostInfo.name}:`,
-          e
-        );
+        console.error(`[NevoFlux] Failed to write manifest for ${hostInfo.name}:`, e);
       }
     }
   },
