@@ -46,6 +46,8 @@ export default defineConfig([
         Bundler: 'readable',
         CanvasRuntime: 'readable',
         Babel: 'readable',
+        // NevoFlux native host registrar (lazy-loaded via ChromeUtils.defineESModuleGetters)
+        NevofluxNativeHostRegistrar: 'readable',
         // Zen sidebar globals
         gSidebarRevampEnabled: 'readable',
         gAllowTransparentBrowser: 'readable',
