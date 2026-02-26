@@ -123,6 +123,10 @@ jobs:
               }
           }
 
+      - name: Install zip (for extension packaging)
+        if: ${{ matrix.arch == 'x86_64' }}
+        run: choco install zip -y --no-progress
+
       - name: Import patches
         if: ${{ matrix.arch == 'x86_64' }}
         env:
