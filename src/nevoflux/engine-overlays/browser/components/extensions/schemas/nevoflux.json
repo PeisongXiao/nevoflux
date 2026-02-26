@@ -1,7 +1,22 @@
 [
   {
+    "namespace": "manifest",
+    "types": [
+      {
+        "$extend": "OptionalPermission",
+        "choices": [
+          {
+            "type": "string",
+            "enum": ["nevoflux"]
+          }
+        ]
+      }
+    ]
+  },
+  {
     "namespace": "nevoflux",
     "description": "NevoFlux browser automation and data extraction API",
+    "permissions": ["nevoflux"],
     "types": [
       {
         "id": "ApiResult",

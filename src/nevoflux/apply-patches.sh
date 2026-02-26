@@ -135,7 +135,20 @@ if [ -f "${PANELUI_JS}" ]; then
   fi
 fi
 
-# 10. Package nevoflux-agent extension as XPI
+# 10. Add nevoflux chrome resources to package manifest
+PACKAGE_MANIFEST="${ENGINE_DIR}/browser/installer/package-manifest.in"
+if [ -f "${PACKAGE_MANIFEST}" ]; then
+  if ! grep -q 'nevoflux@JAREXT@' "${PACKAGE_MANIFEST}"; then
+    echo "Adding nevoflux chrome to package-manifest.in..."
+    sedi '/devtools-startup@JAREXT@/i\
+; NevoFlux pages\
+@RESPATH@/browser/chrome/nevoflux@JAREXT@\
+@RESPATH@/browser/chrome/nevoflux.manifest\
+' "${PACKAGE_MANIFEST}"
+  fi
+fi
+
+# 11. Package nevoflux-agent extension as XPI
 if [ -f "${ROOT_DIR}/scripts/package-extension.sh" ]; then
   echo "Packaging nevoflux-agent extension..."
   bash "${ROOT_DIR}/scripts/package-extension.sh"

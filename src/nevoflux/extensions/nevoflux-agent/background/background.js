@@ -470,6 +470,11 @@ class NativeChannel {
         this.onStatusChange(false, error.message);
       }
 
+      // Schedule retry on initial connection failure (e.g., native host not yet registered)
+      if (!this.isIntentionalDisconnect) {
+        this.scheduleReconnect();
+      }
+
       return false;
     }
   }
