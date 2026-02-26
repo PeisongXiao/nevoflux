@@ -103,12 +103,12 @@ jobs:
       - name: Download x86_64 DMG from artifacts
         uses: actions/download-artifact@v4
         with:
-          name: zen-x86_64-apple-darwin-dist.dmg
+          name: nevoflux-x86_64-apple-darwin.dmg
 
       - name: Download aarch64 DMG from artifacts
         uses: actions/download-artifact@v4
         with:
-          name: zen-aarch64-apple-darwin-dist.dmg
+          name: nevoflux-aarch64-apple-darwin.dmg
 
       - name: Remove any existing .app folders
         run: |
@@ -125,11 +125,11 @@ jobs:
           mkdir -p ./obj-x86_64-apple-darwin/dist
           mkdir -p ./obj-aarch64-apple-darwin/dist
           ./mach python -m mozbuild.action.unpack_dmg \
-            ../zen-x86_64-apple-darwin-dist.dmg \
+            ../nevoflux-x86_64-apple-darwin.dmg \
             ./obj-x86_64-apple-darwin/dist
           echo "Extracting aarch64 .app from dmg"
           ./mach python -m mozbuild.action.unpack_dmg \
-            ../zen-aarch64-apple-darwin-dist.dmg \
+            ../nevoflux-aarch64-apple-darwin.dmg \
             ./obj-aarch64-apple-darwin/dist
 
       - name: Find first .app folder name
@@ -201,7 +201,7 @@ jobs:
             --background ./browser/branding/release/background.png \
             --icon ./browser/branding/release/firefox.icns \
             --dsstore ./browser/branding/release/dsstore \
-            ./obj-x86_64-apple-darwin/dist/ ../zen-macOS-universal-temp.dmg
+            ./obj-x86_64-apple-darwin/dist/ ../nevoflux-macOS-universal-temp.dmg
 
       - name: Remove sensitive information
         if: ${{ inputs.sign_macos }}
@@ -212,33 +212,33 @@ jobs:
         if: ${{ inputs.sign_macos }}
         run: |
           set -ex
-          hdiutil convert zen-macOS-universal-temp.dmg -format UDZO -imagekey zlib-level=9 -o zen.macos-universal.dmg
-          codesign -s "${{ secrets.macOS_AppleDeveloperId }}" zen.macos-universal.dmg
-          xcrun notarytool submit "zen.macos-universal.dmg" \
+          hdiutil convert nevoflux-macOS-universal-temp.dmg -format UDZO -imagekey zlib-level=9 -o nevoflux.macos-universal.dmg
+          codesign -s "${{ secrets.macOS_AppleDeveloperId }}" nevoflux.macos-universal.dmg
+          xcrun notarytool submit "nevoflux.macos-universal.dmg" \
             --apple-id "${{ secrets.macOS_AppleAccountId }}" \
             --team-id "${{ secrets.macOS_AppleDeveloperIdTeamId }}" \
             --password "${{ secrets.macOS_AppleDeveloperIdPassword }}" \
             --no-s3-acceleration \
             --wait
-          xcrun stapler staple "zen.macos-universal.dmg"
+          xcrun stapler staple "nevoflux.macos-universal.dmg"
 
       - name: Create unsigned DMG
         if: ${{ !inputs.sign_macos }}
         run: |
           set -ex
-          hdiutil convert zen-macOS-universal-temp.dmg -format UDZO -imagekey zlib-level=9 -o zen.macos-universal.dmg
+          hdiutil convert nevoflux-macOS-universal-temp.dmg -format UDZO -imagekey zlib-level=9 -o nevoflux.macos-universal.dmg
 
       - name: Download host mar
         uses: actions/download-artifact@v4
         with:
-          name: zen-macos-host-mar
+          name: nevoflux-macos-host-mar
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           retention-days: 5
-          name: zen.macos-universal.dmg
-          path: ./zen.macos-universal.dmg
+          name: nevoflux.macos-universal.dmg
+          path: ./nevoflux.macos-universal.dmg
 
       - name: Download platform.ini
         uses: actions/download-artifact@v4
@@ -256,8 +256,8 @@ jobs:
           mv ./platform.ini ./engine/obj-x86_64-apple-darwin/dist/bin/platform.ini
           export SURFER_PLATFORM="darwin"
           export ZEN_RELEASE=1
-          # full path to zen-macos-host-mar
-          export MAR=$(pwd)/zen-macos-host-mar
+          # full path to nevoflux-macos-host-mar
+          export MAR=$(pwd)/nevoflux-macos-host-mar
           chmod +x $MAR
           echo "MAR=$MAR"
           npm run package -- --verbose
