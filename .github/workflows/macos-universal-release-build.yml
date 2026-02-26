@@ -201,9 +201,24 @@ jobs:
       - name: Regenerate precomplete after unify
         run: |
           set -ex
-          cd engine/obj-x86_64-apple-darwin/dist/${{ env.APP_NAME }}.app/Contents/Resources
+          APP_PATH="engine/obj-x86_64-apple-darwin/dist/${{ env.APP_NAME }}.app"
+          echo "=== App bundle structure ==="
+          ls -la "$APP_PATH/" || true
+          ls -la "$APP_PATH/Contents/" || true
+          ls -la "$APP_PATH/Contents/Resources/" 2>/dev/null || echo "Contents/Resources not found"
+          ls -la "$APP_PATH/Contents/MacOS/" 2>/dev/null || echo "Contents/MacOS not found"
+          # Determine correct path for precomplete generation
+          if [ -d "$APP_PATH/Contents/Resources" ]; then
+            PRECOMPLETE_DIR="$APP_PATH/Contents/Resources"
+          elif [ -d "$APP_PATH/Contents" ]; then
+            PRECOMPLETE_DIR="$APP_PATH/Contents"
+          else
+            PRECOMPLETE_DIR="$APP_PATH"
+          fi
+          echo "Generating precomplete in: $PRECOMPLETE_DIR"
+          cd "$PRECOMPLETE_DIR"
           python3 "$GITHUB_WORKSPACE/engine/config/createprecomplete.py"
-          echo "precomplete file regenerated"
+          echo "precomplete file regenerated at: $(find "$GITHUB_WORKSPACE/$APP_PATH" -name precomplete 2>/dev/null)"
 
       - name: Import APPLE DEVELOPER ID CERTIFICATE for .app
         if: ${{ inputs.sign_macos }}
