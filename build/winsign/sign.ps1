@@ -2,26 +2,284 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+# ==========================================================================
+# NevoFlux Windows Code Signing Script
+# ==========================================================================
+# Adapted from Zen Browser's build/winsign/sign.ps1 for use with
+# Certum Open Source Code Signing Certificate (SimplySign Cloud).
+#
+# Usage:
+#   # Standard (SimplySign already connected, certificate loaded):
+#   .\sign.ps1 -SignIdentity "Open Source Developer, YULIN GAN" -GithubRunId <run-id>
+#
+#   # With automatic SimplySign login (reads CERTUM_OTP_URI & CERTUM_USERID from env):
+#   .\sign.ps1 -SignIdentity "Open Source Developer, YULIN GAN" -GithubRunId <run-id> -AutoConnect
+#
+#   # Use certificate thumbprint instead of CN (more reliable):
+#   .\sign.ps1 -CertThumbprint "ABCDEF1234567890" -GithubRunId <run-id>
+#
+# Environment Variables (for -AutoConnect):
+#   CERTUM_OTP_URI  - otpauth:// URI from SimplySign QR code
+#   CERTUM_USERID   - SimplySign login email
+#
+# Prerequisites:
+#   - SimplySign Desktop installed (or winget available for auto-install)
+#   - Windows SDK (signtool.exe)
+#   - GitHub CLI (gh) authenticated
+#   - Node.js + npm
+#   - mozilla-build (for l10n scripts)
+#
+# Note: NevoFlux uses a pinless SimplySign card — signing executes
+# immediately without PIN prompts, ideal for batch/automated signing.
+# ==========================================================================
+
 param(
-    [string][Parameter(Mandatory=$true)]$SignIdentity,
-    [string][Parameter(Mandatory=$true)]$GithubRunId
+    [string]$SignIdentity,
+    [string]$CertThumbprint,
+    [string][Parameter(Mandatory=$true)]$GithubRunId,
+    [switch]$AutoConnect,
+    [switch]$SkipUpload
 )
 
 $ErrorActionPreference = "Stop"
 
+# ==========================================================================
+# Configuration - Change these for your fork
+# ==========================================================================
+
+$GITHUB_OWNER = "dorisgyl"
+$GITHUB_REPO = "nevoflux"
+$GITHUB_BINARIES_REPO = "nevoflux-windows-binaries"
+$APP_NAME = "nevoflux"                    # Must match surfer.json binName
+$INSTALLER_NAME = "$APP_NAME.installer"   # NSIS output name pattern
+
+# Timestamp server - Certum's RFC 3161 server
+# Using /tr (RFC 3161) instead of /t (legacy Authenticode) for better compatibility
+$TIMESTAMP_URL = "http://time.certum.pl"
+
+# ==========================================================================
+# Validate parameters
+# ==========================================================================
+
+if (-not $SignIdentity -and -not $CertThumbprint) {
+    throw "You must specify either -SignIdentity or -CertThumbprint.`n" +
+          "  Example: .\sign.ps1 -SignIdentity 'Open Source Developer, YULIN GAN' -GithubRunId 12345`n" +
+          "  Example: .\sign.ps1 -CertThumbprint 'ABCDEF...' -GithubRunId 12345"
+}
+
+# ==========================================================================
+# SimplySign Auto-Connect (TOTP Automation)
+# ==========================================================================
+
+function Connect-SimplySign {
+    <#
+    .SYNOPSIS
+    Automatically generate TOTP and login to SimplySign Desktop.
+    Reads CERTUM_OTP_URI and CERTUM_USERID from environment variables.
+    #>
+
+    $OtpUri = $env:CERTUM_OTP_URI
+    $UserId = $env:CERTUM_USERID
+
+    if (-not $OtpUri) { throw "CERTUM_OTP_URI environment variable not set. Extract from SimplySign QR code." }
+    if (-not $UserId) { throw "CERTUM_USERID environment variable not set. This is your SimplySign login email." }
+
+    echo "=== Auto-connecting to SimplySign ==="
+
+    # --- Parse otpauth:// URI ---
+    # Format: otpauth://totp/SimplySign:user@email.com?secret=BASE32SECRET&issuer=SimplySign&digits=6&period=30
+    $uri = [Uri]$OtpUri
+    $queryParams = @{}
+    foreach ($part in $uri.Query.TrimStart('?') -split '&') {
+        $kv = $part -split '=', 2
+        if ($kv.Count -eq 2) { $queryParams[$kv[0]] = [Uri]::UnescapeDataString($kv[1]) }
+    }
+
+    $Secret = $queryParams['secret']
+    $Digits = if ($queryParams['digits']) { [int]$queryParams['digits'] } else { 6 }
+    $Period = if ($queryParams['period']) { [int]$queryParams['period'] } else { 30 }
+
+    if (-not $Secret) { throw "No 'secret' parameter found in OTP URI" }
+
+    # --- Generate TOTP token ---
+    Add-Type -Language CSharp @"
+using System;
+using System.Security.Cryptography;
+
+public static class NevoFluxTotp {
+    private const string B32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+    private static byte[] Base32Decode(string input) {
+        input = input.TrimEnd('=').ToUpperInvariant();
+        byte[] output = new byte[input.Length * 5 / 8];
+        int bitBuffer = 0, bitsInBuffer = 0, outputIndex = 0;
+        foreach (char c in input) {
+            int val = B32_ALPHABET.IndexOf(c);
+            if (val < 0) throw new ArgumentException("Invalid Base32 character: " + c);
+            bitBuffer = (bitBuffer << 5) | val;
+            bitsInBuffer += 5;
+            if (bitsInBuffer >= 8) {
+                output[outputIndex++] = (byte)(bitBuffer >> (bitsInBuffer - 8));
+                bitsInBuffer -= 8;
+            }
+        }
+        return output;
+    }
+
+    public static string Generate(string secret, int digits, int period) {
+        byte[] key = Base32Decode(secret);
+        long counter = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / period;
+        byte[] counterBytes = BitConverter.GetBytes(counter);
+        if (BitConverter.IsLittleEndian) Array.Reverse(counterBytes);
+
+        using (var hmac = new HMACSHA1(key)) {
+            byte[] hash = hmac.ComputeHash(counterBytes);
+            int offset = hash[hash.Length - 1] & 0x0F;
+            int binary = ((hash[offset] & 0x7F) << 24) |
+                         ((hash[offset + 1] & 0xFF) << 16) |
+                         ((hash[offset + 2] & 0xFF) << 8)  |
+                          (hash[offset + 3] & 0xFF);
+            return (binary % (int)Math.Pow(10, digits)).ToString(new string('0', digits));
+        }
+    }
+}
+"@
+
+    $totp = [NevoFluxTotp]::Generate($Secret, $Digits, $Period)
+    echo "TOTP token generated"
+
+    # --- Find SimplySign Desktop ---
+    $ssPath = @(
+        "C:\Program Files\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+        "C:\Program Files (x86)\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+        "${env:ProgramFiles}\Certum\proCertum SmartSign\SimplySignDesktop.exe",
+        "${env:LOCALAPPDATA}\Programs\SimplySign Desktop\SimplySignDesktop.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if (-not $ssPath) {
+        echo "SimplySign Desktop not found. Attempting winget install..."
+        winget install Certum.SmartSignSimplySignDesktop --accept-source-agreements --accept-package-agreements --silent 2>$null
+        Start-Sleep -Seconds 10
+        $ssPath = Get-ChildItem "C:\Program Files*" -Recurse -Filter "SimplySignDesktop.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+        if (-not $ssPath) {
+            throw "Could not find or install SimplySign Desktop. Install manually from https://support.certum.eu/"
+        }
+    }
+
+    echo "Launching SimplySign Desktop: $ssPath"
+    $proc = Start-Process -FilePath $ssPath -PassThru
+    echo "Waiting for SimplySign Desktop to start (icon appears in system tray)..."
+    Start-Sleep -Seconds 8
+
+    # --- Fill login window ---
+    # The login dialog has two fields:
+    #   1. Identyfikator: your SimplySign registered email
+    #   2. Token: the 6-digit TOTP from SimplySign mobile app
+    $wshell = New-Object -ComObject WScript.Shell
+
+    $focused = $false
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        $focused = $wshell.AppActivate('Logowanie')
+        if (-not $focused) { $focused = $wshell.AppActivate('SimplySign Desktop') }
+        if (-not $focused) { $focused = $wshell.AppActivate($proc.Id) }
+        if ($focused) { break }
+        Start-Sleep -Milliseconds 500
+    }
+
+    if (-not $focused) {
+        echo "WARNING: Could not find SimplySign login window."
+        echo "The app may already be connected, or the login dialog didn't auto-open."
+        echo "If not connected, please right-click the SimplySign tray icon and log in manually within 60 seconds..."
+        Start-Sleep -Seconds 30
+    } else {
+        Start-Sleep -Milliseconds 500
+        $wshell.SendKeys("$UserId{TAB}$totp{ENTER}")
+        echo "Credentials sent: Identyfikator=$UserId, Token=****** (6 digits)"
+    }
+
+    # --- Wait for certificate to become available ---
+    echo "Waiting for certificate to become available in certificate store..."
+    $maxWait = 60
+    $certFound = $false
+
+    for ($i = 0; $i -lt $maxWait; $i += 3) {
+        Start-Sleep -Seconds 3
+        $certs = Get-ChildItem Cert:\CurrentUser\My -ErrorAction SilentlyContinue | Where-Object {
+            $_.Subject -like "*Open Source Developer*" -or
+            ($SignIdentity -and $_.Subject -like "*$SignIdentity*")
+        }
+        if ($certs.Count -gt 0) {
+            $certFound = $true
+            echo "Certificate loaded successfully!"
+            echo "  Subject: $($certs[0].Subject)"
+            echo "  Thumbprint: $($certs[0].Thumbprint)"
+            echo "  Expires: $($certs[0].NotAfter)"
+
+            if (-not $CertThumbprint) {
+                $script:CertThumbprint = $certs[0].Thumbprint
+                echo "  Using thumbprint for signing: $CertThumbprint"
+            }
+            break
+        }
+    }
+
+    if (-not $certFound) {
+        echo "WARNING: Certificate not detected in store after ${maxWait}s."
+        echo "Proceeding anyway - signing may fail if SimplySign isn't fully connected."
+    }
+}
+
+# ==========================================================================
+# Helper: Build signtool arguments
+# ==========================================================================
+
+function Get-SignToolArgs {
+    <#
+    Returns the base signtool arguments for signing.
+    Uses /sha1 (thumbprint) if available - recommended method.
+    Falls back to /n (CN identity string) for compatibility.
+    Uses /tr (RFC 3161 timestamp) instead of /t (legacy Authenticode).
+    #>
+    $args = @()
+
+    if ($CertThumbprint) {
+        $args += "/sha1", $CertThumbprint
+    } elseif ($SignIdentity) {
+        $args += "/n", $SignIdentity
+    }
+
+    $args += "/tr", $TIMESTAMP_URL
+    $args += "/td", "sha256"
+    $args += "/fd", "sha256"
+    $args += "/v"
+
+    return $args
+}
+
+# ==========================================================================
+# Main Script
+# ==========================================================================
+
+echo ""
+echo "============================================================"
+echo "  NevoFlux Windows Code Signing"
+echo "============================================================"
+echo ""
+
+# --- Step 0: Auto-connect SimplySign if requested ---
+
+if ($AutoConnect) {
+    Connect-SimplySign
+}
+
+# --- Step 1: Prepare environment ---
+
 echo "Preparing environment"
-git pull origin dev --recurse
+git pull origin main --recurse
 mkdir windsign-temp -ErrorAction SilentlyContinue
 
-# Download in parallel
-
-#show output too
-#Start-Job -Name "DownloadGitObjectsRepo" -ScriptBlock {
-#    param($PWD)
-#    echo "Downloading git objects repo to $PWD\windsign-temp\windows-binaries"
-#    git clone https://github.com/zen-browser/windows-binaries.git $PWD\windsign-temp\windows-binaries
-#    echo "Downloaded git objects repo to"
-#} -Verbose -ArgumentList $PWD -Debug
+# --- Step 2: Parallel downloads ---
 
 Start-Job -Name "DownloadGitl10n" -ScriptBlock {
     param($PWD)
@@ -40,28 +298,30 @@ Start-Job -Name "SurferInit" -ScriptBlock {
     npm run ci -- $version
 } -Verbose -ArgumentList $PWD -Debug
 
+# --- Step 3: Download build artifacts ---
+
 echo "Downloading artifacts info"
-$artifactsInfo=gh api repos/zen-browser/desktop/actions/runs/$GithubRunId/artifacts
+$artifactsInfo = gh api repos/$GITHUB_OWNER/$GITHUB_REPO/actions/runs/$GithubRunId/artifacts
 $token = gh auth token
 
 function New-TemporaryDirectory {
-    $tmp = [System.IO.Path]::GetTempPath() # Not $env:TEMP, see https://stackoverflow.com/a/946017
+    $tmp = [System.IO.Path]::GetTempPath()
     $name = (New-Guid).ToString("N")
     New-Item -ItemType Directory -Path (Join-Path $tmp $name)
 }
 
 function DownloadFile($url, $targetFile) {
-   $uri = New-Object "System.Uri" "$url"
-   $request = [System.Net.HttpWebRequest]::Create($uri)
-   $request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
-   $request.Headers.Add("Authorization", "Bearer $token")
-   $response = $request.GetResponse()
-   $totalLength = [System.Math]::Floor($response.get_ContentLength()/1024)
-   $responseStream = $response.GetResponseStream()
-   $targetStream = New-Object -TypeName System.IO.FileStream -ArgumentList $targetFile, Create
-   $buffer = new-object byte[] 10KB
-   $count = $responseStream.Read($buffer,0,$buffer.length)
-   $downloadedBytes = $count
+    $uri = New-Object "System.Uri" "$url"
+    $request = [System.Net.HttpWebRequest]::Create($uri)
+    $request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    $request.Headers.Add("Authorization", "Bearer $token")
+    $response = $request.GetResponse()
+    $totalLength = [System.Math]::Floor($response.get_ContentLength()/1024)
+    $responseStream = $response.GetResponseStream()
+    $targetStream = New-Object -TypeName System.IO.FileStream -ArgumentList $targetFile, Create
+    $buffer = new-object byte[] 10KB
+    $count = $responseStream.Read($buffer,0,$buffer.length)
+    $downloadedBytes = $count
 
     while ($count -gt 0) {
         $targetStream.Write($buffer, 0, $count)
@@ -70,21 +330,43 @@ function DownloadFile($url, $targetFile) {
         Write-Progress -activity "Downloading file '$($url.split('/') | Select -Last 1)'" -status "Downloaded ($([System.Math]::Floor($downloadedBytes/1024))K of $($totalLength)K): " -PercentComplete ((([System.Math]::Floor($downloadedBytes/1024)) / $totalLength)  * 100)
     }
 
-   Write-Progress -activity "Finished downloading file '$($url.split('/') | Select -Last 1)'"
+    Write-Progress -activity "Finished downloading file '$($url.split('/') | Select -Last 1)'"
 
-   $targetStream.Flush()
-   $targetStream.Close()
-   $targetStream.Dispose()
-   $responseStream.Dispose()
+    $targetStream.Flush()
+    $targetStream.Close()
+    $targetStream.Dispose()
+    $responseStream.Dispose()
 }
 
 function DownloadArtifacts($name) {
     echo "Downloading artifacts for $name"
-    $artifactUrl=$($artifactsInfo | jq -r --arg NAME "windows-x64-obj-$name" '.artifacts[] | select(.name == $NAME) | .archive_download_url')
+    $artifactName = "windows-x64-obj-$name"
+    $artifactUrl = $($artifactsInfo | jq -r --arg NAME $artifactName '.artifacts[] | select(.name == $NAME) | .archive_download_url')
+
+    if (-not $artifactUrl -or $artifactUrl -eq "null") {
+        # Try alternative naming patterns
+        $altNames = @(
+            "nevoflux-windows-obj-$name",
+            "nevoflux-$name-obj",
+            "windows-$name-obj"
+        )
+        foreach ($altName in $altNames) {
+            $artifactUrl = $($artifactsInfo | jq -r --arg NAME $altName '.artifacts[] | select(.name == $NAME) | .archive_download_url')
+            if ($artifactUrl -and $artifactUrl -ne "null") {
+                $artifactName = $altName
+                echo "Found artifact with alternative name: $altName"
+                break
+            }
+        }
+    }
+
+    if (-not $artifactUrl -or $artifactUrl -eq "null") {
+        throw "Could not find artifact matching pattern for '$name'. Available artifacts:`n$(($artifactsInfo | jq -r '.artifacts[].name') -join "`n")"
+    }
+
     echo "Artifact URL: $artifactUrl"
 
-    # download the artifact
-    $outputPath="$PWD\windsign-temp\windows-x64-obj-$name"
+    $outputPath = "$PWD\windsign-temp\windows-x64-obj-$name"
     $tempDir = New-TemporaryDirectory
     $tempFile = Join-Path $tempDir "artifact-$($name).zip"
 
@@ -102,35 +384,59 @@ function DownloadArtifacts($name) {
 DownloadArtifacts arm64
 DownloadArtifacts x86_64
 
-# Wait for the jobs to finish
 Wait-Job -Name "UnzipArtifactarm64"
 Wait-Job -Name "UnzipArtifactx86_64"
 
+# --- Step 4: Sign all binaries (exe + dll) ---
+
 mkdir engine\obj-x86_64-pc-windows-msvc\ -ErrorAction SilentlyContinue
 
-# Collect all .exe and .dll files into a list
+echo ""
+echo "=== Signing all binaries ==="
+echo ""
+
 $files = Get-ChildItem windsign-temp\windows-x64-obj-x86_64\ -Recurse -Include *.exe
 $files += Get-ChildItem windsign-temp\windows-x64-obj-x86_64\ -Recurse -Include *.dll
-
 $files += Get-ChildItem windsign-temp\windows-x64-obj-arm64\ -Recurse -Include *.exe
 $files += Get-ChildItem windsign-temp\windows-x64-obj-arm64\ -Recurse -Include *.dll
 
-signtool.exe sign /n "$SignIdentity" /t http://time.certum.pl/ /fd sha256 /v $files
+echo "Found $($files.Count) files to sign"
 
-$env:ZEN_RELEASE="true"
-$env:SURFER_SIGNING_MODE="true"
-$env:SCCACHE_GHA_ENABLED="false"
+$signArgs = Get-SignToolArgs
+signtool.exe sign @signArgs $files
+
+if ($LASTEXITCODE -ne 0) {
+    echo "WARNING: Some files may have failed to sign. Check output above."
+    echo "Retrying in 5 seconds..."
+    Start-Sleep -Seconds 5
+    signtool.exe sign @signArgs $files
+    if ($LASTEXITCODE -ne 0) {
+        throw "Signing failed after retry. Please check SimplySign connection and certificate."
+    }
+}
+
+echo "All binaries signed successfully"
+
+# --- Step 5: Wait for parallel jobs ---
+
+$env:ZEN_RELEASE = "true"
+$env:SURFER_SIGNING_MODE = "true"
+$env:SCCACHE_GHA_ENABLED = "false"
 Wait-Job -Name "SurferInit"
 Wait-Job -Name "DownloadGitl10n"
 
+# --- Step 6: Package and organize per architecture ---
+
 function SignAndPackage($name) {
-    echo "Executing on $name"
+    echo ""
+    echo "=== Processing architecture: $name ==="
+    echo ""
+
     rmdir .\dist -Recurse -ErrorAction SilentlyContinue
-    rmdir engine\obj-$name-pc-windows-msvc\ -Recurse -ErrorAction SilentlyContinue
-    $objName=$name
-    # instead of arm, use aarch64
+
+    $objName = $name
     if ($name -eq "arm64") {
-        $objName="aarch64"
+        $objName = "aarch64"
     }
 
     echo "Removing old obj dir"
@@ -140,25 +446,25 @@ function SignAndPackage($name) {
     cp windsign-temp\windows-x64-obj-$name engine\obj-$objName-pc-windows-msvc\ -Recurse
 
     echo "Copying setup.exe into obj dir"
-    $env:ZEN_SETUP_EXE_PATH="$PWD\windsign-temp\windows-x64-obj-$name\browser\installer\windows\instgen\setup.exe"
+    $env:ZEN_SETUP_EXE_PATH = "$PWD\windsign-temp\windows-x64-obj-$name\browser\installer\windows\instgen\setup.exe"
 
     if ($name -eq "arm64") {
-        $env:WIN32_REDIST_DIR="$PWD\win-cross\vs2022\VC\Redist\MSVC\14.38.33135\arm64\Microsoft.VC143.CRT"
+        $env:WIN32_REDIST_DIR = "$PWD\win-cross\vs2022\VC\Redist\MSVC\14.38.33135\arm64\Microsoft.VC143.CRT"
     } else {
-        $env:WIN32_REDIST_DIR="$PWD\win-cross\vs2022\VC\Redist\MSVC\14.38.33135\x64\Microsoft.VC143.CRT"
+        $env:WIN32_REDIST_DIR = "$PWD\win-cross\vs2022\VC\Redist\MSVC\14.38.33135\x64\Microsoft.VC143.CRT"
     }
 
-    $env:MAR="..\\build\\winsign\\mar.exe"
+    $env:MAR = "..\build\winsign\mar.exe"
+
     if ($name -eq "arm64") {
-        $env:SURFER_COMPAT="aarch64"
+        $env:SURFER_COMPAT = "aarch64"
     } else {
-        $env:SURFER_COMPAT="x86_64"
+        $env:SURFER_COMPAT = "x86_64"
     }
     echo "Compat Mode? $env:SURFER_COMPAT"
 
-    # Configure each time since we are cloning from a linux environment into
-    # a windows environment, and the build system is not smart enough to detect that
-    # we are on a different platform.
+    # Reconfigure - necessary because artifacts come from a Linux cross-compile
+    # environment and the build system needs to detect we're on Windows now
     cd .\engine
     echo "Configuring for $name"
     .\mach configure
@@ -167,18 +473,11 @@ function SignAndPackage($name) {
     echo "Packaging $name"
     npm run package -- --verbose
 
-    # In the release script, we do the following:
-    #  tar -xvf .github/workflows/object/windows-x64-signed-x86_64.tar.gz -C windows-x64-signed-x86_64
-    # We need to create a tar with the same structure and no top-level directory
-    # Inside, we need:
-    #  - update_manifest/*
-    #  - windows.mar
-    #  - zen.installer.exe
-    echo "Creating tar for $name"
+    echo "Creating output structure for $name"
     rm .\windsign-temp\windows-x64-signed-$name -Recurse -ErrorAction SilentlyContinue
     mkdir windsign-temp\windows-x64-signed-$name
 
-    # Move the MAR, add the `-arm64` suffix if needed
+    # Move the MAR update file
     echo "Moving MAR for $name"
     if ($name -eq "arm64") {
         mv .\dist\output.mar windsign-temp\windows-x64-signed-$name\windows-$name.mar
@@ -186,20 +485,37 @@ function SignAndPackage($name) {
         mv .\dist\output.mar windsign-temp\windows-x64-signed-$name\windows.mar
     }
 
-    # Move the installer
+    # Move the NSIS installer
     echo "Moving installer for $name"
-    if ($name -eq "arm64") {
-        mv .\dist\zen.installer.exe windsign-temp\windows-x64-signed-$name\zen.installer-$name.exe
-    } else {
-        mv .\dist\zen.installer.exe windsign-temp\windows-x64-signed-$name\zen.installer.exe
+    $installerFile = Get-ChildItem .\dist\ -Filter "$APP_NAME.installer*.exe" -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    if (-not $installerFile) {
+        $installerFile = Get-ChildItem .\dist\ -Filter "*.installer*.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
     }
 
-    # Move the manifest
+    if (-not $installerFile) {
+        throw "Could not find installer exe in .\dist\. Contents: $(Get-ChildItem .\dist\ | Select-Object -ExpandProperty Name)"
+    }
+
+    echo "Found installer: $($installerFile.Name)"
+
+    if ($name -eq "arm64") {
+        mv $installerFile.FullName windsign-temp\windows-x64-signed-$name\$APP_NAME.installer-$name.exe
+    } else {
+        mv $installerFile.FullName windsign-temp\windows-x64-signed-$name\$APP_NAME.installer.exe
+    }
+
+    # Move the update manifests
     mv .\dist\update\. windsign-temp\windows-x64-signed-$name\update_manifest
 
-    # note: We need to sign it into a parent folder, called windows-x64-signed-$name
-    rmdir .\windsign-temp\windows-binaries\windows-x64-signed-$name -Recurse -ErrorAction SilentlyContinue
-    mv windsign-temp\windows-x64-signed-$name .\windsign-temp\windows-binaries -Force
+    # Stage for commit to binaries repo
+    if (-not $SkipUpload) {
+        rmdir .\windsign-temp\$GITHUB_BINARIES_REPO\windows-x64-signed-$name -Recurse -ErrorAction SilentlyContinue
+        mv windsign-temp\windows-x64-signed-$name .\windsign-temp\$GITHUB_BINARIES_REPO -Force
+    }
+
     rmdir engine\obj-$objName-pc-windows-msvc\ -Recurse -ErrorAction SilentlyContinue
 
     echo "Finished $name"
@@ -208,26 +524,95 @@ function SignAndPackage($name) {
 SignAndPackage arm64
 SignAndPackage x86_64
 
-$files = Get-ChildItem .\windsign-temp\windows-binaries -Recurse -Include *.exe
-signtool.exe sign /n "$SignIdentity" /t http://time.certum.pl/ /fd sha256 /v $files
+# --- Step 7: Sign the installer executables ---
 
-echo "All artifacts signed and packaged, ready for release!"
-echo "Commiting the changes to the repository"
-cd windsign-temp\windows-binaries
-git add .
-git commit -m "Sign and package windows artifacts"
-git push
-cd ..\..
+echo ""
+echo "=== Signing installers ==="
+echo ""
 
-# Cleaning up
+if (-not $SkipUpload) {
+    $installerFiles = Get-ChildItem .\windsign-temp\$GITHUB_BINARIES_REPO -Recurse -Include *.exe
+} else {
+    $installerFiles = Get-ChildItem .\windsign-temp\windows-x64-signed-* -Recurse -Include *.exe
+}
 
-echo "All done!"
-echo "All the artifacts (x86_64 and arm46) are signed and packaged, get a rest now!"
-Read-Host "Press Enter to continue"
+echo "Signing $($installerFiles.Count) installer file(s)"
+$signArgs = Get-SignToolArgs
+signtool.exe sign @signArgs $installerFiles
+
+if ($LASTEXITCODE -ne 0) {
+    echo "Retrying installer signing..."
+    Start-Sleep -Seconds 5
+    signtool.exe sign @signArgs $installerFiles
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to sign installer executables"
+    }
+}
+
+# Verify signatures
+echo ""
+echo "=== Verifying signatures ==="
+echo ""
+foreach ($file in $installerFiles) {
+    echo "Verifying: $($file.Name)"
+    signtool.exe verify /pa /all $file.FullName
+    if ($LASTEXITCODE -eq 0) {
+        echo "  OK"
+    } else {
+        echo "  VERIFICATION FAILED for $($file.Name)"
+    }
+}
+
+# --- Step 8: Upload to binaries repo ---
+
+echo ""
+echo "=== All artifacts signed and packaged, ready for release! ==="
+
+if (-not $SkipUpload) {
+    if (-not (Test-Path "windsign-temp\$GITHUB_BINARIES_REPO\.git")) {
+        echo "Cloning $GITHUB_BINARIES_REPO..."
+        git clone https://github.com/$GITHUB_OWNER/$GITHUB_BINARIES_REPO.git windsign-temp\$GITHUB_BINARIES_REPO 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            echo "WARNING: Could not clone $GITHUB_BINARIES_REPO."
+            echo "If the repo doesn't exist yet, create it on GitHub first."
+            echo "Signed files are in: windsign-temp\windows-x64-signed-*"
+            $SkipUpload = $true
+        }
+    }
+
+    if (-not $SkipUpload) {
+        echo "Committing changes to $GITHUB_BINARIES_REPO"
+        cd windsign-temp\$GITHUB_BINARIES_REPO
+        git add .
+        git commit -m "Sign and package windows artifacts (run: $GithubRunId)"
+        git push
+        cd ..\..
+        echo "Pushed to $GITHUB_BINARIES_REPO successfully"
+    }
+}
+
+# --- Step 9: Cleanup ---
+
+echo ""
+echo "============================================================"
+echo "  All done!"
+echo "  Both x86_64 and arm64 artifacts are signed and packaged."
+echo "============================================================"
+echo ""
+
+if (-not $SkipUpload) {
+    echo "Signed artifacts pushed to: https://github.com/$GITHUB_OWNER/$GITHUB_BINARIES_REPO"
+} else {
+    echo "Signed artifacts location:"
+    echo "  windsign-temp\windows-x64-signed-x86_64\"
+    echo "  windsign-temp\windows-x64-signed-arm64\"
+}
+
+echo ""
+Read-Host "Press Enter to clean up temp files and continue"
 
 echo "Cleaning up"
 rmdir windsign-temp\windows-x64-obj-x86_64 -Recurse -ErrorAction SilentlyContinue
 rmdir windsign-temp\windows-x64-obj-arm64 -Recurse -ErrorAction SilentlyContinue
 
-echo "Opening visual studio code"
-code .
+echo "Done!"
