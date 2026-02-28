@@ -248,6 +248,11 @@ fn handle_stream_chunk(mut ctx: AppContext, payload: StreamChunkPayload) {
         handle_tool_event(ctx, event);
     }
 
+    // Process thinking event if present
+    if let Some(thinking_event) = payload.thinking_event {
+        handle_thinking_event(ctx, thinking_event);
+    }
+
     // New protocol: content + done flag (no stream_id needed)
     if payload.done {
         // Stream complete - finalize accumulated content and tool_calls into a message
@@ -284,6 +289,7 @@ fn handle_stream_chunk(mut ctx: AppContext, payload: StreamChunkPayload) {
                 arguments: String::new(),
                 duration_ms: entry.duration_ms,
                 status,
+                kind: entry.kind,
             }
         }).collect();
 
@@ -299,6 +305,7 @@ fn handle_stream_chunk(mut ctx: AppContext, payload: StreamChunkPayload) {
                     arguments: tc.arguments.clone(),
                     duration_ms: None,
                     status: None,
+                    kind: ActivityKind::Tool,
                 }
             }).collect();
 
@@ -426,6 +433,7 @@ fn handle_tool_event(mut ctx: AppContext, event: shared_protocol::ToolEvent) {
                 summary,
                 status: LiveToolStatus::Running,
                 duration_ms: None,
+                kind: ActivityKind::Tool,
             });
         }
         ToolEvent::Auth { tool_id, request } => {
@@ -457,6 +465,52 @@ fn handle_tool_event(mut ctx: AppContext, event: shared_protocol::ToolEvent) {
                     if req.tool_id == tool_id {
                         *auth = None;
                     }
+                }
+            });
+        }
+    }
+}
+
+/// Handle thinking/reasoning events from the agent stream
+fn handle_thinking_event(mut ctx: AppContext, event: shared_protocol::ThinkingEvent) {
+    use shared_protocol::ThinkingEvent;
+
+    match event {
+        ThinkingEvent::Start { thinking_id } => {
+            tracing::debug!("Thinking started: {}", thinking_id);
+            ctx.live_tools.write().push(LiveToolEntry {
+                id: thinking_id,
+                name: "Thinking".into(),
+                icon: "\u{1F4AD}".into(),
+                summary: "Reasoning...".into(),
+                status: LiveToolStatus::Running,
+                duration_ms: None,
+                kind: ActivityKind::Thinking { content: String::new() },
+            });
+        }
+        ThinkingEvent::Delta { thinking_id, content } => {
+            let mut tools = ctx.live_tools.write();
+            if let Some(entry) = tools.iter_mut().find(|e| e.id == thinking_id) {
+                if let ActivityKind::Thinking { content: ref mut c } = entry.kind {
+                    c.push_str(&content);
+                    // Update summary to first ~50 chars (single pass)
+                    let mut chars = c.chars();
+                    let summary: String = chars.by_ref().take(50).collect();
+                    let has_more = chars.next().is_some();
+                    entry.summary = if has_more {
+                        format!("{}...", summary)
+                    } else {
+                        summary
+                    };
+                }
+            }
+        }
+        ThinkingEvent::End { thinking_id, duration_ms } => {
+            tracing::debug!("Thinking ended: {}", thinking_id);
+            ctx.live_tools.with_mut(|tools| {
+                if let Some(entry) = tools.iter_mut().find(|e| e.id == thinking_id) {
+                    entry.status = LiveToolStatus::Success;
+                    entry.duration_ms = duration_ms;
                 }
             });
         }
@@ -880,9 +934,38 @@ fn refresh_avatar(mut ctx: AppContext) {
     });
 }
 
-/// Handle file.pick response - add picked files to context
+/// Handle file.pick response - add picked files to context or show mode choice
 fn handle_file_pick_response(mut ctx: AppContext, data: serde_json::Value) {
     tracing::info!("Received file.pick response: {:?}", data);
+
+    // Check for choose_mode (Linux "both" mode workaround)
+    if data.get("choose_mode").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let options: Vec<String> = data.get("options")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
+        if options.is_empty() {
+            tracing::error!("choose_mode response with empty options");
+            ctx.pending_file_pick.write().take();
+            return;
+        }
+
+        // Recover original request params from pending state
+        let (multiple, title) = ctx.pending_file_pick.read()
+            .as_ref()
+            .map(|p| (p.multiple, p.title.clone()))
+            .unwrap_or((false, None));
+
+        ctx.pending_file_pick.write().take();
+        ctx.pending_mode_choice.set(Some(crate::state::PendingModeChoice {
+            options,
+            multiple,
+            title,
+        }));
+        tracing::info!("Mode choice required — showing inline picker");
+        return;
+    }
 
     // Check if cancelled
     let cancelled = data.get("cancelled").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -968,6 +1051,7 @@ fn handle_session_resolve_response(mut ctx: AppContext, data: serde_json::Value)
                             .and_then(|m| m.get("duration_ms"))
                             .and_then(|v| v.as_u64()),
                         status: Some(ToolCallStatus::Success),
+                        kind: ActivityKind::Tool,
                     };
 
                     // Attach to preceding assistant Markdown message
@@ -1221,6 +1305,8 @@ fn handle_internal_message(mut ctx: AppContext, message: InternalMessage) {
                     title: payload.title,
                     favicon_url: payload.favicon_url,
                 });
+                // Clear pending mode choice on tab switch
+                ctx.pending_mode_choice.set(None);
             });
         }
         InternalMessage::AskUserRequest(payload) => {
