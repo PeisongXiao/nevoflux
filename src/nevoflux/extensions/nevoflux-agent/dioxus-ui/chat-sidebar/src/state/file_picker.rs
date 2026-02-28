@@ -47,8 +47,22 @@ impl PickedFile {
     }
 }
 
-/// Pending file pick request
+/// Pending file pick request — stores original params for re-send on mode choice
 #[derive(Debug, Clone)]
 pub struct PendingFilePick {
     pub request_id: String,
+    pub multiple: bool,
+    pub title: Option<String>,
+}
+
+/// Pending mode choice when Linux can't do "both" in a single dialog.
+/// The user must choose between picking files or directories.
+#[derive(Debug, Clone)]
+pub struct PendingModeChoice {
+    /// Available mode options (e.g. ["files", "directories"])
+    pub options: Vec<String>,
+    /// Preserved `multiple` value from the original request
+    pub multiple: bool,
+    /// Preserved `title` value from the original request
+    pub title: Option<String>,
 }

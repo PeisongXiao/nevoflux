@@ -349,7 +349,11 @@ pub fn TextInput(disabled: bool) -> Element {
             ).await {
                 Ok(request_id) => {
                     tracing::info!("File picker request sent: {}", request_id);
-                    ctx.pending_file_pick.write().replace(crate::state::PendingFilePick { request_id });
+                    ctx.pending_file_pick.write().replace(crate::state::PendingFilePick {
+                        request_id,
+                        multiple: true,
+                        title: Some("Select files".to_string()),
+                    });
                 }
                 Err(e) => {
                     tracing::error!("Failed to send pick files request: {}", e);
@@ -890,8 +894,8 @@ pub fn TextInput(disabled: bool) -> Element {
                         button {
                             class: "input-action-btn",
                             disabled: disabled,
-                            title: "Attach file",
-                            aria_label: "Attach file",
+                            title: "Select files or directories",
+                            aria_label: "Select files or directories",
                             onclick: handle_attach_click,
                             svg {
                                 width: "16px",
@@ -903,7 +907,7 @@ pub fn TextInput(disabled: bool) -> Element {
                                 stroke_linecap: "round",
                                 stroke_linejoin: "round",
                                 path {
-                                    d: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                                    d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
                                 }
                             }
                         }

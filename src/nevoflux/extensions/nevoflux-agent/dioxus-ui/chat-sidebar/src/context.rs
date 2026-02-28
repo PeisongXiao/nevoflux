@@ -11,8 +11,8 @@ use dioxus::prelude::*;
 
 use crate::state::{
     AgentStatusState, AskUserState, ConnectionState, HistoryState, LiveToolEntry, MaximizeState,
-    McpConfigState, Message, PendingFilePick, PermissionRequestState, PickedFile, SessionState,
-    SkillItem, StreamingState, TabContext,
+    McpConfigState, Message, PendingFilePick, PendingModeChoice, PermissionRequestState,
+    PickedFile, SessionState, SkillItem, StreamingState, TabContext,
 };
 use shared_protocol::ToolAuthRequest;
 use shared_protocol::ChatMode;
@@ -49,6 +49,8 @@ pub struct AppContext {
     pub picked_files: Signal<Vec<PickedFile>>,
     /// Pending file pick request
     pub pending_file_pick: Signal<Option<PendingFilePick>>,
+    /// Pending mode choice for Linux file picker (choose files vs directories)
+    pub pending_mode_choice: Signal<Option<PendingModeChoice>>,
     /// Current chat mode (chat, browser, agent)
     pub chat_mode: Signal<ChatMode>,
     /// Available skills for skill selector
@@ -65,6 +67,8 @@ pub struct AppContext {
     pub pending_tool_auth: Signal<Option<ToolAuthRequest>>,
     /// User avatar data URL (from settings)
     pub avatar_url: Signal<Option<String>>,
+    /// Whether the sidebar is in minimized rail mode
+    pub minimized: Signal<bool>,
     /// Whether mock mode is enabled
     pub mock_enabled: bool,
 }
@@ -89,6 +93,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
     let ask_user = use_signal(|| None::<AskUserState>);
     let picked_files = use_signal(Vec::<PickedFile>::new);
     let pending_file_pick = use_signal(|| None::<PendingFilePick>);
+    let pending_mode_choice = use_signal(|| None::<PendingModeChoice>);
     let chat_mode = use_signal(ChatMode::default);
     let available_skills = use_signal(Vec::<SkillItem>::new);
     let maximize = use_signal(parse_maximize_params);
@@ -97,6 +102,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
     let live_tools = use_signal(Vec::<LiveToolEntry>::new);
     let pending_tool_auth = use_signal(|| None::<ToolAuthRequest>);
     let avatar_url = use_signal(|| None::<String>);
+    let minimized = use_signal(|| false);
 
     // Build context
     let mut ctx = AppContext {
@@ -113,6 +119,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
         ask_user,
         picked_files,
         pending_file_pick,
+        pending_mode_choice,
         chat_mode,
         available_skills,
         maximize,
@@ -121,6 +128,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
         live_tools,
         pending_tool_auth,
         avatar_url,
+        minimized,
         mock_enabled,
     };
 
@@ -235,6 +243,66 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
                 &wasm_bindgen::JsValue::from_f64(target_tab_id as f64),
             );
         }
+    });
+
+    // ResizeObserver to detect minimized rail mode (width < 100px)
+    use_effect(move || {
+        use wasm_bindgen::prelude::*;
+        use wasm_bindgen::closure::Closure;
+
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return,
+        };
+        let document = match window.document() {
+            Some(d) => d,
+            None => return,
+        };
+        let body = match document.body() {
+            Some(b) => b,
+            None => return,
+        };
+
+        // Use Closure::wrap for FnMut (Signal::set requires &mut self)
+        let mut minimized_signal = minimized;
+        let mut prev_mini = false;
+        let cb = Closure::<dyn FnMut(JsValue)>::wrap(Box::new(move |entries: JsValue| {
+            if let Ok(arr) = entries.dyn_into::<js_sys::Array>() {
+                if let Some(entry) = arr.get(0).dyn_into::<js_sys::Object>().ok() {
+                    if let Ok(cr) = js_sys::Reflect::get(&entry, &JsValue::from_str("contentRect")) {
+                        if let Ok(width) = js_sys::Reflect::get(&cr, &JsValue::from_str("width")) {
+                            if let Some(w) = width.as_f64() {
+                                let is_mini = w < 100.0;
+                                if prev_mini != is_mini {
+                                    prev_mini = is_mini;
+                                    minimized_signal.set(is_mini);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }));
+
+        // Create ResizeObserver via js_sys
+        let observer_ctor = js_sys::Reflect::get(
+            &js_sys::global(),
+            &JsValue::from_str("ResizeObserver"),
+        );
+        if let Ok(ctor) = observer_ctor {
+            if let Ok(ctor_fn) = ctor.dyn_into::<js_sys::Function>() {
+                if let Ok(observer) = js_sys::Reflect::construct(&ctor_fn, &js_sys::Array::of1(cb.as_ref())) {
+                    if let Ok(observe_fn) = js_sys::Reflect::get(&observer, &JsValue::from_str("observe")) {
+                        if let Ok(observe) = observe_fn.dyn_into::<js_sys::Function>() {
+                            let _ = observe.call1(&observer, &body);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Leak the closure so it stays alive for the lifetime of the app
+        cb.forget();
     });
 
     rsx! { {children} }
