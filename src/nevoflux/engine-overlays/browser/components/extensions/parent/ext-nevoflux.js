@@ -49,7 +49,7 @@ let interceptCounter = 0;
 const CAPTURE_MAX_AGE_MS = 300000;
 
 // Module-level: unsubscribe handle for ContentStore persist callback
-let contentStorePersistUnsubscribe = null;
+let __contentStorePersistUnsubscribe = null;
 
 this.nevoflux = class extends ExtensionAPI {
   onStartup() {
@@ -2145,10 +2145,10 @@ this.nevoflux = class extends ExtensionAPI {
             const unsubscribe = NevofluxContentStore.onPersist((op, key, value) => {
               fire.async(op, key, value);
             });
-            contentStorePersistUnsubscribe = unsubscribe;
+            _contentStorePersistUnsubscribe = unsubscribe;
             return () => {
               unsubscribe();
-              contentStorePersistUnsubscribe = null;
+              _contentStorePersistUnsubscribe = null;
             };
           },
         }).api(),

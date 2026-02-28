@@ -51,7 +51,7 @@ export class NevofluxParent extends JSWindowActorParent {
     if (this._dialogObserver) return;
 
     this._dialogObserver = {
-      observe: (subject, topic, data) => {
+      observe: (subject, topic, _data) => {
         if (topic === 'common-dialog-loaded') {
           // Store dialog reference for this window
           const dominated = subject.opener;

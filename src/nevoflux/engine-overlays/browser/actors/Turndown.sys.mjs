@@ -18,7 +18,7 @@ var TurndownService = (function () {
     for (var i = 1; i < arguments.length; i++) {
       var source = arguments[i];
       for (var key in source) {
-        if (source.hasOwnProperty(key)) destination[key] = source[key];
+        if (Object.prototype.hasOwnProperty.call(source, key)) destination[key] = source[key];
       }
     }
     return destination;
@@ -230,7 +230,7 @@ var TurndownService = (function () {
         node.firstChild.nodeName === 'CODE'
       );
     },
-    replacement: function (content, node, options) {
+    replacement: function (content, node, _options) {
       return '\n\n    ' + node.firstChild.textContent.replace(/\n/g, '\n    ') + '\n\n';
     },
   };
@@ -317,7 +317,7 @@ var TurndownService = (function () {
       return replacement;
     },
     references: [],
-    append: function (options) {
+    append: function (_options) {
       var references = '';
       if (this.references.length) {
         references = '\n\n' + this.references.join('\n') + '\n\n';

@@ -697,7 +697,7 @@ export class NevofluxChild extends JSWindowActorChild {
         s2 = {};
       acc.getState(s1, s2);
       const state = s1.value || 0;
-      const extraState = s2.value || 0;
+      const _extraState = s2.value || 0;
       // nsIAccessibleStates constants (from accessible/interfaces/nsIAccessibleStates.idl)
       if (state & 0x01) states.disabled = true; // STATE_UNAVAILABLE
       if (state & 0x02) states.selected = true; // STATE_SELECTED
@@ -2977,7 +2977,7 @@ export class NevofluxChild extends JSWindowActorChild {
 
   // ========== Mouse Control ==========
 
-  mouseMove({ x, y, steps = 1 }) {
+  mouseMove({ x, y, steps: _steps = 1 }) {
     const win = this.document?.defaultView || this.contentWindow;
     if (!win) {
       return {
