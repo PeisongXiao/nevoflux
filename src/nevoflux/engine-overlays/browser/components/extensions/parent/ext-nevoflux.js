@@ -2106,7 +2106,10 @@ this.nevoflux = class extends ExtensionAPI {
         async setSidebarWidth(width) {
           const win = Services.wm.getMostRecentWindow('navigator:browser');
           if (!win) {
-            return { success: false, error: { code: -1, message: 'No browser window', recoverable: true } };
+            return {
+              success: false,
+              error: { code: -1, message: 'No browser window', recoverable: true },
+            };
           }
           const sidebarBox = win.document.getElementById('sidebar-box');
           if (sidebarBox) {

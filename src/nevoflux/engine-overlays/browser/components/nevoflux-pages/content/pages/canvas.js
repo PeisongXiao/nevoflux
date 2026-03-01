@@ -263,9 +263,13 @@ const Canvas = {
       await navigator.clipboard.writeText(this._artifact.content);
       const btn = document.getElementById('btn-copy');
       const originalSvg = btn.innerHTML;
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      btn.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
       btn.classList.add('success');
-      setTimeout(() => { btn.innerHTML = originalSvg; btn.classList.remove('success'); }, 1500);
+      setTimeout(() => {
+        btn.innerHTML = originalSvg;
+        btn.classList.remove('success');
+      }, 1500);
     } catch (e) {
       console.error('Failed to copy:', e);
     }
@@ -463,9 +467,13 @@ const Canvas = {
       await navigator.clipboard.writeText(url);
       const btn = document.getElementById('btn-share');
       const originalSvg = btn.innerHTML;
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      btn.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
       btn.classList.add('success');
-      setTimeout(() => { btn.innerHTML = originalSvg; btn.classList.remove('success'); }, 1500);
+      setTimeout(() => {
+        btn.innerHTML = originalSvg;
+        btn.classList.remove('success');
+      }, 1500);
     } catch (e) {
       console.error('Failed to copy link:', e);
     }
@@ -1181,7 +1189,10 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(markdo
     const empty = document.getElementById('empty-state');
     if (loading) loading.style.display = 'flex';
     if (empty) empty.style.display = 'none';
-    if (this._iframe) { this._iframe.remove(); this._iframe = null; }
+    if (this._iframe) {
+      this._iframe.remove();
+      this._iframe = null;
+    }
   },
 
   _hideLoading() {

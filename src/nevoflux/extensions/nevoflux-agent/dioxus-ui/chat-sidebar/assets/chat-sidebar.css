@@ -1173,7 +1173,9 @@ body {
   color: var(--nevo-text);
   font-size: var(--nevo-font-size-sm);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .mode-choice-btn:hover {
@@ -4017,7 +4019,8 @@ body {
 }
 
 @keyframes rail-pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }

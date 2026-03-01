@@ -1108,186 +1108,191 @@ if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onContentStoreCh
 // =============================================================================
 
 if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onBridgeRequest) {
-browser.nevoflux.onBridgeRequest.addListener(async (id, type, payload) => {
-  console.log(`[NevoFlux] Bridge request: ${type} (${id})`);
-  let result;
-  try {
-    switch (type) {
-      case 'exec_tool':
-        result = await executeBrowserTool(payload, 'bridge');
-        break;
+  browser.nevoflux.onBridgeRequest.addListener(async (id, type, payload) => {
+    console.log(`[NevoFlux] Bridge request: ${type} (${id})`);
+    let result;
+    try {
+      switch (type) {
+        case 'exec_tool':
+          result = await executeBrowserTool(payload, 'bridge');
+          break;
 
-      case 'send_to_agent': {
-        const sent = channelManager.sendToAgent(payload);
-        result = { success: sent };
-        break;
-      }
-
-      case 'sidebar_send':
-        broadcastToSidebar(payload);
-        result = { success: true };
-        break;
-
-      case 'sidebar:open':
-        try {
-          await browser.sidebarAction.open();
-          result = { success: true };
-        } catch (err) {
-          result = { success: false, error: { code: -1, message: err.message } };
+        case 'send_to_agent': {
+          const sent = channelManager.sendToAgent(payload);
+          result = { success: sent };
+          break;
         }
-        break;
 
-      case 'sidebar:sendMessage': {
-        try {
-          const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          const injectMsg = {
-            type: 'canvas_chat_inject',
-            payload: {
-              session_id: '',
-              message_id: messageId,
-              content: payload.message,
-            },
-          };
+        case 'sidebar_send':
+          broadcastToSidebar(payload);
+          result = { success: true };
+          break;
 
-          // Broadcast to sidebar — sidebar adds user message + sends to agent
+        case 'sidebar:open':
           try {
-            await browser.runtime.sendMessage(injectMsg);
-            console.log('[NevoFlux] canvas_chat_inject sent to sidebar');
-          } catch (e) {
-            // Sidebar not open — send directly to agent as fallback
-            console.warn('[NevoFlux] Sidebar not available, sending directly to agent:', e.message);
-            const canvasHint = await getActiveCanvasHint();
-            const msgContent = canvasHint ? canvasHint + '\n\n' + payload.message : payload.message;
+            await browser.sidebarAction.open();
+            result = { success: true };
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+          }
+          break;
+
+        case 'sidebar:sendMessage': {
+          try {
+            const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const injectMsg = {
+              type: 'canvas_chat_inject',
+              payload: {
+                session_id: '',
+                message_id: messageId,
+                content: payload.message,
+              },
+            };
+
+            // Broadcast to sidebar — sidebar adds user message + sends to agent
+            try {
+              await browser.runtime.sendMessage(injectMsg);
+              console.log('[NevoFlux] canvas_chat_inject sent to sidebar');
+            } catch (e) {
+              // Sidebar not open — send directly to agent as fallback
+              console.warn(
+                '[NevoFlux] Sidebar not available, sending directly to agent:',
+                e.message
+              );
+              const canvasHint = await getActiveCanvasHint();
+              const msgContent = canvasHint
+                ? canvasHint + '\n\n' + payload.message
+                : payload.message;
+              channelManager.sendToAgent({
+                type: 'chat_message',
+                payload: {
+                  session_id: `canvas_${Date.now()}`,
+                  message_id: messageId,
+                  content: msgContent,
+                  mode: 'chat',
+                  attachments: [],
+                  local_files: [],
+                  tab_id: null,
+                  tab_ids: [],
+                },
+              });
+            }
+
+            result = { success: true };
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+          }
+          break;
+        }
+
+        case 'agent:chat': {
+          try {
+            const sessionId =
+              payload.sessionId || `cs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+            // Track this canvas session
+            canvasSessions.set(sessionId, { active: true, messageId });
+            _activeCanvasSessionId = sessionId;
+
+            // Always send directly to agent with canvas sessionId.
+            // This ensures streaming responses carry the canvas sessionId so
+            // handleChatMessage can route them back via bridgePush.
+            const agentChatHint = await getActiveCanvasHint();
+            const agentChatContent = agentChatHint
+              ? agentChatHint + '\n\n' + payload.message
+              : payload.message;
             channelManager.sendToAgent({
               type: 'chat_message',
               payload: {
-                session_id: `canvas_${Date.now()}`,
+                session_id: sessionId,
                 message_id: messageId,
-                content: msgContent,
-                mode: 'chat',
+                content: agentChatContent,
+                mode: 'agent',
                 attachments: [],
                 local_files: [],
                 tab_id: null,
                 tab_ids: [],
               },
             });
+
+            // Notify sidebar for UI display only (fire-and-forget).
+            // Sidebar will show the user message but NOT re-send to agent.
+            try {
+              await browser.runtime.sendMessage({
+                type: 'canvas_chat_inject',
+                payload: {
+                  session_id: sessionId,
+                  message_id: messageId,
+                  content: payload.message,
+                  source: 'canvas',
+                },
+              });
+            } catch (_e) {
+              // Sidebar not open — that's fine, agent message already sent above
+            }
+
+            result = { success: true, sessionId };
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
           }
-
-          result = { success: true };
-        } catch (err) {
-          result = { success: false, error: { code: -1, message: err.message } };
+          break;
         }
-        break;
-      }
 
-      case 'agent:chat': {
-        try {
-          const sessionId =
-            payload.sessionId || `cs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        case 'agent:cancel': {
+          const sessionId = payload.sessionId;
+          canvasSessions.delete(sessionId);
+          result = { success: true };
+          break;
+        }
 
-          // Track this canvas session
-          canvasSessions.set(sessionId, { active: true, messageId });
-          _activeCanvasSessionId = sessionId;
-
-          // Always send directly to agent with canvas sessionId.
-          // This ensures streaming responses carry the canvas sessionId so
-          // handleChatMessage can route them back via bridgePush.
-          const agentChatHint = await getActiveCanvasHint();
-          const agentChatContent = agentChatHint
-            ? agentChatHint + '\n\n' + payload.message
-            : payload.message;
-          channelManager.sendToAgent({
-            type: 'chat_message',
-            payload: {
-              session_id: sessionId,
-              message_id: messageId,
-              content: agentChatContent,
-              mode: 'agent',
-              attachments: [],
-              local_files: [],
-              tab_id: null,
-              tab_ids: [],
-            },
-          });
-
-          // Notify sidebar for UI display only (fire-and-forget).
-          // Sidebar will show the user message but NOT re-send to agent.
+        case 'sidebar:restoreSession': {
           try {
-            await browser.runtime.sendMessage({
-              type: 'canvas_chat_inject',
-              payload: {
-                session_id: sessionId,
-                message_id: messageId,
-                content: payload.message,
-                source: 'canvas',
+            // Store pending session restore for the sidebar to pick up on init
+            await browser.storage.local.set({
+              'pending:restoreSession': {
+                sessionId: payload.sessionId,
+                timestamp: Date.now(),
               },
             });
-          } catch (_e) {
-            // Sidebar not open — that's fine, agent message already sent above
+            // Open sidebar (triggers init which reads pending actions)
+            await browser.sidebarAction.open();
+            result = { success: true };
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
           }
-
-          result = { success: true, sessionId };
-        } catch (err) {
-          result = { success: false, error: { code: -1, message: err.message } };
+          break;
         }
-        break;
-      }
 
-      case 'agent:cancel': {
-        const sessionId = payload.sessionId;
-        canvasSessions.delete(sessionId);
-        result = { success: true };
-        break;
-      }
+        case 'agent:command': {
+          // Forward a system_command to the native agent and wait for matching system_response.
+          // The response comes back asynchronously via handleChatMessage → system_response interception.
+          const { command, params: cmdParams } = payload;
+          const requestId = `brcmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      case 'sidebar:restoreSession': {
-        try {
-          // Store pending session restore for the sidebar to pick up on init
-          await browser.storage.local.set({
-            'pending:restoreSession': {
-              sessionId: payload.sessionId,
-              timestamp: Date.now(),
-            },
+          pendingAgentCommands.set(requestId, id);
+
+          channelManager.sendToAgent({
+            type: MessageTypes.SYSTEM_COMMAND,
+            payload: { command, request_id: requestId, params: cmdParams || {} },
           });
-          // Open sidebar (triggers init which reads pending actions)
-          await browser.sidebarAction.open();
-          result = { success: true };
-        } catch (err) {
-          result = { success: false, error: { code: -1, message: err.message } };
+
+          // Don't call bridgeRespond here — wait for system_response
+          return;
         }
-        break;
+
+        default:
+          result = { success: false, error: { code: -1, message: `Unknown bridge type: ${type}` } };
       }
-
-      case 'agent:command': {
-        // Forward a system_command to the native agent and wait for matching system_response.
-        // The response comes back asynchronously via handleChatMessage → system_response interception.
-        const { command, params: cmdParams } = payload;
-        const requestId = `brcmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-        pendingAgentCommands.set(requestId, id);
-
-        channelManager.sendToAgent({
-          type: MessageTypes.SYSTEM_COMMAND,
-          payload: { command, request_id: requestId, params: cmdParams || {} },
-        });
-
-        // Don't call bridgeRespond here — wait for system_response
-        return;
-      }
-
-      default:
-        result = { success: false, error: { code: -1, message: `Unknown bridge type: ${type}` } };
+    } catch (err) {
+      console.error(`[NevoFlux] Bridge request error (${type}):`, err);
+      result = { success: false, error: { code: -1, message: err.message } };
     }
-  } catch (err) {
-    console.error(`[NevoFlux] Bridge request error (${type}):`, err);
-    result = { success: false, error: { code: -1, message: err.message } };
-  }
 
-  browser.nevoflux.bridgeRespond(id, result).catch((err) => {
-    console.error(`[NevoFlux] bridgeRespond failed for ${id}:`, err);
+    browser.nevoflux.bridgeRespond(id, result).catch((err) => {
+      console.error(`[NevoFlux] bridgeRespond failed for ${id}:`, err);
+    });
   });
-});
 } else {
   console.warn('[NevoFlux] browser.nevoflux API not available, Bridge handler disabled');
 }

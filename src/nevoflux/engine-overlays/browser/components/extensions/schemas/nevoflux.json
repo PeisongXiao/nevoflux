@@ -1532,9 +1532,7 @@
         "type": "function",
         "async": "promise",
         "description": "Set the sidebar panel width in pixels",
-        "parameters": [
-          { "name": "width", "type": "integer" }
-        ],
+        "parameters": [{ "name": "width", "type": "integer" }],
         "returns": { "$ref": "ApiResult" }
       }
     ],
