@@ -4,12 +4,6 @@
     "AppAutoUpdate": false,
     "ManualAppUpdateOnly": true,
     "BackgroundAppUpdate": false,
-    "ExtensionSettings": {
-      "agent@nevoflux.com": {
-        "installation_mode": "force_installed",
-        "install_url": "file://{0}/distribution/extensions/agent@nevoflux.com.xpi"
-      }
-    },
     "Preferences": {
       "xpinstall.signatures.required": {
         "Value": false,

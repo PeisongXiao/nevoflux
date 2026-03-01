@@ -6,7 +6,7 @@ index 52bca068f90cd8e214900e8f3159e1f7e37fb3e8..bfb5a38258141ed28def7c9a340a6125
  
  project_flag(
      env="MOZ_APP_VENDOR",
-+    default="Zen Team",
++    default="NevoFlux Team",
      nargs=1,
      help='Used for application.ini\'s "Vendor" field, which also impacts profile location and user-visible fields',
  )
@@ -14,7 +14,7 @@ index 52bca068f90cd8e214900e8f3159e1f7e37fb3e8..bfb5a38258141ed28def7c9a340a6125
  
  project_flag(
      "MOZ_APP_PROFILE",
-+    default="zen",
++    default="nevoflux",
      nargs=1,
      help='Used for application.ini\'s "Profile" field, which controls profile location',
  )
