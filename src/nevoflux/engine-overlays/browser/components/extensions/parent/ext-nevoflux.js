@@ -49,7 +49,7 @@ let interceptCounter = 0;
 const CAPTURE_MAX_AGE_MS = 300000;
 
 // Module-level: unsubscribe handle for ContentStore persist callback
-let __contentStorePersistUnsubscribe = null;
+let contentStorePersistUnsubscribe = null; // eslint-disable-line no-unused-vars
 
 this.nevoflux = class extends ExtensionAPI {
   onStartup() {
@@ -171,7 +171,7 @@ this.nevoflux = class extends ExtensionAPI {
 
         // ========== Navigation (browser_use mode) ==========
 
-        async open(tabId, url, options = {}) {
+        async open(tabId, url, _options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
           const tab = extension.tabManager.get(resolvedTabId);
 
@@ -207,7 +207,7 @@ this.nevoflux = class extends ExtensionAPI {
           }
         },
 
-        async reload(tabId, options = {}) {
+        async reload(tabId, _options = {}) {
           const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
           const tab = extension.tabManager.get(resolvedTabId);
 
@@ -1110,7 +1110,7 @@ this.nevoflux = class extends ExtensionAPI {
             createdAt: Date.now(),
           };
 
-          const { urlPattern, resourceTypes, recordBody = false } = options;
+          const { urlPattern, resourceTypes, recordBody: _recordBody = false } = options;
 
           // Create webRequest listener
           const listener = (details) => {
@@ -1187,6 +1187,7 @@ this.nevoflux = class extends ExtensionAPI {
 
         async intercept(options) {
           const handle = `intercept_${++interceptCounter}`;
+          // eslint-disable-next-line no-unused-vars
           const { urlPattern, handler, mockResponse, modifyHeaders, resourceTypes } = options;
 
           const interceptData = {
@@ -1380,7 +1381,7 @@ this.nevoflux = class extends ExtensionAPI {
             }, timeout);
 
             downloadListener = {
-              observe: (subject, topic, data) => {
+              observe: (subject, topic, _data) => {
                 if (topic === 'dl-start') {
                   cleanup();
 
@@ -2145,10 +2146,10 @@ this.nevoflux = class extends ExtensionAPI {
             const unsubscribe = NevofluxContentStore.onPersist((op, key, value) => {
               fire.async(op, key, value);
             });
-            _contentStorePersistUnsubscribe = unsubscribe;
+            contentStorePersistUnsubscribe = unsubscribe;
             return () => {
               unsubscribe();
-              _contentStorePersistUnsubscribe = null;
+              contentStorePersistUnsubscribe = null;
             };
           },
         }).api(),
@@ -2158,7 +2159,7 @@ this.nevoflux = class extends ExtensionAPI {
 
   // ========== Helper Methods ==========
 
-  getActiveTabId(extension) {
+  getActiveTabId(_extension) {
     // tabTracker is a global from ext-browser.js
     const activeTab = tabTracker?.activeTab;
     if (!activeTab) {
@@ -2494,7 +2495,7 @@ this.nevoflux = class extends ExtensionAPI {
       }, timeout);
 
       const listener = {
-        onStateChange(webProgress, request, flags, status) {
+        onStateChange(webProgress, request, flags, _status) {
           const isStop = flags & Ci.nsIWebProgressListener.STATE_STOP;
           const isNetwork = flags & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
 
