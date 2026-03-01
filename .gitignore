@@ -35,5 +35,4 @@ docs/plans/
 # Test lab
 tool_test_lab/
 
-# Generated policies (contains machine-specific paths)
-build/AppDir/distribution/policies.json
+# Distribution policies are now committed (template paths, not machine-specific)

@@ -37,8 +37,8 @@ on:
         type: 'boolean'
       display_version:
         description: 'Display version (e.g. 0.1.0). If set, overrides surfer.json displayVersion'
-        required: false
-        default: ''
+        required: true
+        default: '0.1.0'
         type: 'string'
       use-sccache:
         description: 'Use sccache'
@@ -79,8 +79,8 @@ on:
         type: 'boolean'
       display_version:
         description: 'Display version (e.g. 0.1.0). If set, overrides surfer.json displayVersion'
-        required: false
-        default: ''
+        required: true
+        default: '0.1.0'
         type: 'string'
       use-sccache:
         description: 'Use sccache'

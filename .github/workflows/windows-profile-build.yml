@@ -10,7 +10,7 @@ on:
         description: 'The version to build'
         required: true
         type: string
-        default: '0.0.1'
+        default: '0.1.0'
       profile-data-path-archive:
         description: 'The path to the zip archive containing the profile data'
         required: false
