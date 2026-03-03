@@ -40,14 +40,17 @@
         "id": "SnapshotOptions",
         "type": "object",
         "properties": {
-          "interactive": { "type": "boolean", "optional": true },
-          "compact": { "type": "boolean", "optional": true },
-          "depth": { "type": "integer", "optional": true },
-          "root": { "type": "string", "optional": true },
-          "useA11y": { "type": "boolean", "optional": true },
-          "domFallback": { "type": "boolean", "optional": true },
-          "include_hidden": { "type": "boolean", "optional": true },
-          "viewport_only": { "type": "boolean", "optional": true }
+          "root":          { "type": "string",  "optional": true, "description": "CSS selector for root element" },
+          "useA11y":       { "type": "boolean", "optional": true, "description": "Use accessibility tree (default: true)" },
+          "domFallback":   { "type": "boolean", "optional": true, "description": "DOM gap-fill scan (default: true)" },
+          "viewport_only": { "type": "boolean", "optional": true, "description": "Viewport-only elements (default: true)" },
+          "maxElements":   { "type": "integer", "optional": true, "description": "Max elements to return (default: 200)" },
+          "keywords": {
+            "type": "array",
+            "optional": true,
+            "items": { "type": "string" },
+            "description": "Keywords to locate target elements via text search"
+          }
         }
       },
       {
