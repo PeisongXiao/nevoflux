@@ -8,10 +8,6 @@
       "xpinstall.signatures.required": {
         "Value": false,
         "Status": "locked"
-      },
-      "extensions.autoDisableScopes": {
-        "Value": 0,
-        "Status": "locked"
       }
     }
   }
