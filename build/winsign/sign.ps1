@@ -149,6 +149,7 @@ public static class NevoFluxTotp {
     echo "TOTP token generated"
 
     # --- Find SimplySign Desktop ---
+    # Download from: https://support.certum.eu/en/cert-offer-software-and-libraries/
     $ssPath = @(
         "C:\Program Files\Certum\SimplySign Desktop\SimplySignDesktop.exe",
         "C:\Program Files (x86)\Certum\SimplySign Desktop\SimplySignDesktop.exe",
@@ -172,14 +173,22 @@ public static class NevoFluxTotp {
     echo "Waiting for SimplySign Desktop to start (icon appears in system tray)..."
     Start-Sleep -Seconds 8
 
-    # --- Fill login window ---
-    # The login dialog has two fields:
+    # --- Trigger "Connect to SimplySign" via tray icon right-click ---
+    # The login dialog ("Logowanie") has two fields:
     #   1. Identyfikator: your SimplySign registered email
     #   2. Token: the 6-digit TOTP from SimplySign mobile app
+    # Then click Ok to connect.
+    #
+    # Since we can't easily right-click the tray icon via SendKeys, we use
+    # AppActivate to find the login window. If SimplySign auto-opens the
+    # login dialog, we fill it. Otherwise, we try to trigger it.
+
     $wshell = New-Object -ComObject WScript.Shell
 
+    # Wait for the login window ("Logowanie" / "SimplySign Desktop")
     $focused = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        # Try various window title patterns (depends on language/version)
         $focused = $wshell.AppActivate('Logowanie')
         if (-not $focused) { $focused = $wshell.AppActivate('SimplySign Desktop') }
         if (-not $focused) { $focused = $wshell.AppActivate($proc.Id) }
@@ -190,10 +199,18 @@ public static class NevoFluxTotp {
     if (-not $focused) {
         echo "WARNING: Could not find SimplySign login window."
         echo "The app may already be connected, or the login dialog didn't auto-open."
-        echo "If not connected, please right-click the SimplySign tray icon and log in manually within 60 seconds..."
+        echo "If not connected, please right-click the SimplySign tray icon → 'Connect to SimplySign'"
+        echo "and log in manually within 60 seconds..."
         Start-Sleep -Seconds 30
     } else {
         Start-Sleep -Milliseconds 500
+
+        # The login dialog ("Logowanie") layout per Certum docs (Figure 4):
+        #   Field 1: "Identyfikator" (email) - should be the first focused field
+        #   Field 2: "Token" (TOTP code)
+        #   Button: "Ok" / "Anuluj" (Cancel)
+        #
+        # SendKeys: type email → Tab to Token field → type TOTP → Enter (= Ok)
         $wshell.SendKeys("$UserId{TAB}$totp{ENTER}")
         echo "Credentials sent: Identyfikator=$UserId, Token=****** (6 digits)"
     }
@@ -237,9 +254,11 @@ public static class NevoFluxTotp {
 function Get-SignToolArgs {
     <#
     Returns the base signtool arguments for signing.
-    Uses /sha1 (thumbprint) if available - recommended method.
-    Falls back to /n (CN identity string) for compatibility.
-    Uses /tr (RFC 3161 timestamp) instead of /t (legacy Authenticode).
+    Per Certum official documentation (Page 8):
+      signtool sign /sha1 "[thumbprint]" /tr [timestamp] /td [digest] /fd [digest] /v "[file]"
+    Uses /sha1 (thumbprint) if available - this is the recommended method.
+    Falls back to /n (CN identity string) for compatibility with upstream Zen Browser.
+    Uses /tr (RFC 3161 timestamp) instead of /t (legacy Authenticode) for better long-term validity.
     #>
     $args = @()
 
@@ -249,6 +268,8 @@ function Get-SignToolArgs {
         $args += "/n", $SignIdentity
     }
 
+    # RFC 3161 timestamp (/tr) is preferred over legacy Authenticode (/t)
+    # /td sha256 specifies the digest algorithm for the timestamp
     $args += "/tr", $TIMESTAMP_URL
     $args += "/td", "sha256"
     $args += "/fd", "sha256"
@@ -340,6 +361,11 @@ function DownloadFile($url, $targetFile) {
 
 function DownloadArtifacts($name) {
     echo "Downloading artifacts for $name"
+    # ======================================================================
+    # IMPORTANT: Change artifact name pattern to match YOUR workflow output
+    # Zen uses: windows-x64-obj-{arch}
+    # Adjust if your workflow names artifacts differently
+    # ======================================================================
     $artifactName = "windows-x64-obj-$name"
     $artifactUrl = $($artifactsInfo | jq -r --arg NAME $artifactName '.artifacts[] | select(.name == $NAME) | .archive_download_url')
 
@@ -402,11 +428,22 @@ $files += Get-ChildItem windsign-temp\windows-x64-obj-arm64\ -Recurse -Include *
 
 echo "Found $($files.Count) files to sign"
 
+# Build signtool command
+# Per Certum official docs (Page 8-10):
+#   signtool sign /sha1 "[thumbprint]" /tr http://time.certum.pl /td sha256 /fd sha256 /v "[file]"
+# Batch signing: pass all files to one signtool call for efficiency.
+# NevoFlux uses a pinless SimplySign card - signing executes immediately without PIN prompt.
 $signArgs = Get-SignToolArgs
 signtool.exe sign @signArgs $files
 
 if ($LASTEXITCODE -ne 0) {
     echo "WARNING: Some files may have failed to sign. Check output above."
+    echo "Common causes:"
+    echo "  - SimplySign not connected (run with -AutoConnect or connect manually)"
+    echo "  - Certificate thumbprint/identity mismatch"
+    echo "  - Timestamp server temporarily unavailable"
+
+    # Retry once with a delay (timestamp server can be flaky)
     echo "Retrying in 5 seconds..."
     Start-Sleep -Seconds 5
     signtool.exe sign @signArgs $files
@@ -448,6 +485,10 @@ function SignAndPackage($name) {
     echo "Copying setup.exe into obj dir"
     $env:ZEN_SETUP_EXE_PATH = "$PWD\windsign-temp\windows-x64-obj-$name\browser\installer\windows\instgen\setup.exe"
 
+    # ======================================================================
+    # MSVC Redistributables path
+    # Adjust the version number (14.38.33135) to match your VS installation
+    # ======================================================================
     if ($name -eq "arm64") {
         $env:WIN32_REDIST_DIR = "$PWD\win-cross\vs2022\VC\Redist\MSVC\14.38.33135\arm64\Microsoft.VC143.CRT"
     } else {
@@ -473,6 +514,14 @@ function SignAndPackage($name) {
     echo "Packaging $name"
     npm run package -- --verbose
 
+    # ======================================================================
+    # Organize output files
+    # Structure matches what the release workflow expects:
+    #   windows-x64-signed-{arch}/
+    #     ├── windows[-arm64].mar
+    #     ├── nevoflux.installer[-arm64].exe
+    #     └── update_manifest/
+    # ======================================================================
     echo "Creating output structure for $name"
     rm .\windsign-temp\windows-x64-signed-$name -Recurse -ErrorAction SilentlyContinue
     mkdir windsign-temp\windows-x64-signed-$name
@@ -486,11 +535,17 @@ function SignAndPackage($name) {
     }
 
     # Move the NSIS installer
+    # ======================================================================
+    # IMPORTANT: The installer filename is derived from surfer.json binName.
+    # If your surfer.json sets binName to "nevoflux", the output will be
+    # "nevoflux.installer.exe". Adjust the pattern below if different.
+    # ======================================================================
     echo "Moving installer for $name"
     $installerFile = Get-ChildItem .\dist\ -Filter "$APP_NAME.installer*.exe" -ErrorAction SilentlyContinue |
         Select-Object -First 1
 
     if (-not $installerFile) {
+        # Fallback: look for any installer exe
         $installerFile = Get-ChildItem .\dist\ -Filter "*.installer*.exe" -ErrorAction SilentlyContinue |
             Select-Object -First 1
     }
@@ -555,6 +610,7 @@ echo "=== Verifying signatures ==="
 echo ""
 foreach ($file in $installerFiles) {
     echo "Verifying: $($file.Name)"
+    # Per Certum docs: signtool verify /pa /all [file]
     signtool.exe verify /pa /all $file.FullName
     if ($LASTEXITCODE -eq 0) {
         echo "  OK"

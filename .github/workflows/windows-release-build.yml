@@ -282,7 +282,10 @@ jobs:
             # Copy models directory if present in release archive
             if [ -d "/tmp/agent/models" ]; then
               cp -r /tmp/agent/models build/AppDir/distribution/bin/models
-              echo "Models directory installed"
+              echo "Models directory installed:"
+              find build/AppDir/distribution/bin/models -type f | head -20
+            else
+              echo "::warning::No models directory found in agent release archive"
             fi
           else
             echo "::notice::No agent binary available for ${PLATFORM}-${ARCH}, build continues without it."
@@ -420,6 +423,8 @@ jobs:
             cp -r build/AppDir/distribution/* "$BIN_DIR/distribution/"
             echo "Distribution files injected into $BIN_DIR/distribution/ before packaging:"
             ls -la "$BIN_DIR/distribution/"
+            echo "Distribution bin contents:"
+            ls -la "$BIN_DIR/distribution/bin/" 2>/dev/null || echo "No bin/ subdirectory"
           else
             echo "::warning::Distribution files or bin directory not found"
           fi
