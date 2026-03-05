@@ -807,9 +807,10 @@ export class NevofluxChild extends JSWindowActorChild {
             extras.push({
               node: captureNode,
               tag: captureNode.tagName,
-              text: (signal === 'tag'
-                ? this._getFullText(captureNode)
-                : this._getDirectText(captureNode).trim().slice(0, 60)),
+              text:
+                signal === 'tag'
+                  ? this._getFullText(captureNode)
+                  : this._getDirectText(captureNode).trim().slice(0, 60),
               signal,
               viewportRect: {
                 x: captureRect.x,

@@ -2947,15 +2947,21 @@ async function tryCoordinateClickFallback(tabId, element_id) {
   const elemRect = elemRef?.rect;
 
   if (!elemRef) {
-    console.log(`[NevoFlux] Coordinate fallback: element ${element_id} (normalized: ${normalizedId}) not in refs`);
+    console.log(
+      `[NevoFlux] Coordinate fallback: element ${element_id} (normalized: ${normalizedId}) not in refs`
+    );
     return null;
   }
   if (!elemRect) {
-    console.log(`[NevoFlux] Coordinate fallback: element ${element_id} has no rect. Ref keys: ${Object.keys(elemRef).join(',')}`);
+    console.log(
+      `[NevoFlux] Coordinate fallback: element ${element_id} has no rect. Ref keys: ${Object.keys(elemRef).join(',')}`
+    );
     return null;
   }
   if (elemRect.width <= 0 || elemRect.height <= 0) {
-    console.log(`[NevoFlux] Coordinate fallback: element ${element_id} has zero-size rect: ${JSON.stringify(elemRect)}`);
+    console.log(
+      `[NevoFlux] Coordinate fallback: element ${element_id} has zero-size rect: ${JSON.stringify(elemRect)}`
+    );
     return null;
   }
 
@@ -3113,7 +3119,9 @@ async function executeClickByIdViaApi(tabId, params, timeout_ms) {
       const curTabData = snapshotRefs.get(tabId);
       const elementRef = curTabData?.refs?.[normalizedId];
       if (elementRef?.signal === 'cursor') {
-        console.log(`[NevoFlux] ?cursor element ${element_id} click ineffective, trying coordinate fallback`);
+        console.log(
+          `[NevoFlux] ?cursor element ${element_id} click ineffective, trying coordinate fallback`
+        );
         const coordFallback = await tryCoordinateClickFallback(tabId, element_id);
         if (coordFallback?.result?.effective) return coordFallback;
       }
