@@ -23,6 +23,29 @@ pub use activity_feed::DoneFeed;
 pub use live_tool_feed::LiveToolFeed;
 
 use dioxus::prelude::*;
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen(inline_js = r#"
+export function copyTextFallback(text) {
+    // execCommand fallback — works in extension sidebar where
+    // navigator.clipboard.writeText is blocked by security context
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) return true;
+    } catch (_) {}
+    return false;
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(js_name = copyTextFallback)]
+    pub fn copy_text_fallback(text: &str) -> bool;
+}
 use crate::context::use_app_context;
 
 /// Message area container - shows welcome screen or message list

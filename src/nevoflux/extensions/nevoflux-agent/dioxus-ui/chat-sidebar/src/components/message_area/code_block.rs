@@ -5,6 +5,7 @@
 //! Code block component
 
 use dioxus::prelude::*;
+use super::copy_text_fallback;
 
 /// Code block component with language label and copy button
 #[component]
@@ -13,20 +14,30 @@ pub fn CodeBlock(language: String, code: String) -> Element {
     let code_for_copy = code.clone();
 
     let handle_copy = move |_| {
-        // Copy to clipboard
         let code_clone = code_for_copy.clone();
+
+        // Try synchronous execCommand fallback first (works in extension sidebar)
+        if copy_text_fallback(&code_clone) {
+            copied.set(true);
+            spawn(async move {
+                gloo::timers::future::TimeoutFuture::new(2000).await;
+                copied.set(false);
+            });
+            return;
+        }
+
+        // Async Clipboard API fallback
         spawn(async move {
             if let Some(window) = web_sys::window() {
                 let navigator = window.navigator();
                 let clipboard = navigator.clipboard();
-                let _ = wasm_bindgen_futures::JsFuture::from(
+                if wasm_bindgen_futures::JsFuture::from(
                     clipboard.write_text(&code_clone)
-                ).await;
-                copied.set(true);
-
-                // Reset after 2 seconds
-                gloo::timers::future::TimeoutFuture::new(2000).await;
-                copied.set(false);
+                ).await.is_ok() {
+                    copied.set(true);
+                    gloo::timers::future::TimeoutFuture::new(2000).await;
+                    copied.set(false);
+                }
             }
         });
     };

@@ -2520,9 +2520,9 @@ async function executeGetContentViaApi(tabId, params) {
       const text = await browser.nevoflux.getText(tabId, selector);
       return { success: true, result: { selector, text } };
     } else {
-      // Get full page snapshot
-      const result = await browser.nevoflux.snapshot(tabId, params);
-      return result.success !== undefined ? result : { success: true, result };
+      // Get full page snapshot — route through executeSnapshotViaApi
+      // so refs are stored (needed for click_by_id, fill_by_id, etc.)
+      return await executeSnapshotViaApi(tabId, params);
     }
   } catch (error) {
     return { success: false, error: { code: -1, message: error.message, recoverable: true } };
@@ -2687,11 +2687,19 @@ async function executeQueryAllViaApi(tabId, params) {
 }
 
 // Store element refs from snapshot for later use by click_by_id, fill_by_id, etc.
-// Key: tabId, Value: { refs: {element_id -> {selector, role, name, tagName}}, timestamp }
+// Key: tabId, Value: { refs: {element_id -> ref}, timestamp }
+//
+// MERGE STRATEGY: New snapshot refs are merged INTO existing refs rather than
+// replacing them. This prevents rapid auto-snapshots (e.g. Kimi framework
+// appending "Current page state" to every tool response) from invalidating
+// element IDs between the AI reading the tree and issuing a click command.
+// Each ref entry carries its own `_ts` (timestamp) for per-entry expiry.
 const snapshotRefs = new Map();
 
-// Cleanup old snapshots after 5 minutes
-const SNAPSHOT_MAX_AGE_MS = 300000;
+// Per-entry max age: entries older than this are pruned on access
+const REF_ENTRY_MAX_AGE_MS = 60000; // 60 seconds
+// Full cleanup threshold
+const SNAPSHOT_MAX_AGE_MS = 300000; // 5 minutes
 
 function cleanupOldSnapshots() {
   const now = Date.now();
@@ -2740,16 +2748,38 @@ async function executeSnapshotViaApi(tabId, params) {
       }
     }
 
+    // Merge new refs into existing refs instead of replacing.
+    // New entries overwrite old ones with the same ID; old entries that
+    // aren't in the new snapshot are kept (with their original timestamp)
+    // until they expire via REF_ENTRY_MAX_AGE_MS.
+    const now = Date.now();
+    const existing = snapshotRefs.get(tabId);
+    const mergedRefs = {};
+
+    // Carry forward non-expired old entries
+    if (existing?.refs) {
+      for (const [id, ref] of Object.entries(existing.refs)) {
+        if (now - (ref._ts || existing.timestamp) < REF_ENTRY_MAX_AGE_MS) {
+          mergedRefs[id] = ref;
+        }
+      }
+    }
+
+    // Overlay new entries (always fresher, overwrite old)
+    for (const [id, ref] of Object.entries(numericRefs)) {
+      mergedRefs[id] = { ...ref, _ts: now };
+    }
+
     snapshotRefs.set(tabId, {
-      refs: numericRefs,
-      timestamp: Date.now(),
+      refs: mergedRefs,
+      timestamp: now,
     });
 
     // Cleanup old snapshots periodically
     cleanupOldSnapshots();
 
     console.log(
-      `[NevoFlux] Stored ${Object.keys(numericRefs).length} element refs for tab ${tabId}`
+      `[NevoFlux] Stored ${Object.keys(numericRefs).length} new + ${Object.keys(mergedRefs).length - Object.keys(numericRefs).length} carried-over = ${Object.keys(mergedRefs).length} total refs for tab ${tabId}`
     );
     console.log(
       `[NevoFlux] First 5 elements:`,
@@ -2829,7 +2859,7 @@ async function getElementSelector(tabId, elementId, getChildren = false) {
 
   if (!elementRef) {
     console.warn(
-      `[NevoFlux] Element ID ${elementId} (normalized: ${normalizedId}) not found in snapshot refs.`
+      `[NevoFlux] Element ID ${elementId} (normalized: ${normalizedId}) not found in snapshot refs (merged).`
     );
     // Log nearby IDs to help debug
     const allIds = Object.keys(tabData.refs)
@@ -2893,19 +2923,46 @@ async function getElementSelector(tabId, elementId, getChildren = false) {
 }
 
 /**
+ * Normalize an element ID to its numeric form.
+ * Handles "e34" -> 34, "34" -> 34, and passthrough for numbers.
+ */
+function normalizeElementId(elementId) {
+  if (typeof elementId === 'string' && elementId.startsWith('e')) {
+    return parseInt(elementId.substring(1), 10);
+  }
+  if (typeof elementId === 'string') {
+    return parseInt(elementId, 10);
+  }
+  return elementId;
+}
+
+/**
  * Try a coordinate-based click fallback using stored rect from snapshotRefs.
  * Returns a success result object or null if fallback not possible / not effective.
  */
 async function tryCoordinateClickFallback(tabId, element_id) {
+  const normalizedId = normalizeElementId(element_id);
   const tabData = snapshotRefs.get(tabId);
-  const elemRect = tabData?.refs?.[element_id]?.rect;
+  const elemRef = tabData?.refs?.[normalizedId];
+  const elemRect = elemRef?.rect;
 
-  if (!elemRect || elemRect.width <= 0 || elemRect.height <= 0) return null;
+  if (!elemRef) {
+    console.log(`[NevoFlux] Coordinate fallback: element ${element_id} (normalized: ${normalizedId}) not in refs`);
+    return null;
+  }
+  if (!elemRect) {
+    console.log(`[NevoFlux] Coordinate fallback: element ${element_id} has no rect. Ref keys: ${Object.keys(elemRef).join(',')}`);
+    return null;
+  }
+  if (elemRect.width <= 0 || elemRect.height <= 0) {
+    console.log(`[NevoFlux] Coordinate fallback: element ${element_id} has zero-size rect: ${JSON.stringify(elemRect)}`);
+    return null;
+  }
 
   const centerX = elemRect.x + elemRect.width / 2;
   const centerY = elemRect.y + elemRect.height / 2;
   console.log(
-    `[NevoFlux] Trying coordinate click at (${centerX}, ${centerY}) for element ${element_id}`
+    `[NevoFlux] Trying coordinate click at (${centerX}, ${centerY}) for element ${element_id}, rect=${JSON.stringify(elemRect)}`
   );
 
   try {
@@ -2970,7 +3027,27 @@ async function executeClickByIdViaApi(tabId, params, timeout_ms) {
     }
 
     // Handle both single selector (string) and multiple selectors (array)
-    const selectorList = Array.isArray(selectors) ? selectors : [selectors];
+    // Filter out null/empty selectors (e.g. ?cursor/?tag elements with no CSS selector)
+    const rawList = Array.isArray(selectors) ? selectors : [selectors];
+    const selectorList = rawList.filter((s) => s != null && s !== '');
+
+    // If all selectors were null/empty, go straight to coordinate fallback
+    if (selectorList.length === 0) {
+      console.log(
+        `[NevoFlux] Element ${element_id} found in refs but has no CSS selectors, trying coordinate click`
+      );
+      const coordFallback = await tryCoordinateClickFallback(tabId, element_id);
+      if (coordFallback) return coordFallback;
+
+      return {
+        success: false,
+        error: {
+          code: -1,
+          message: `Element ID ${element_id} has no CSS selector and coordinate click failed.`,
+          recoverable: true,
+        },
+      };
+    }
 
     console.log(
       `[NevoFlux] Trying to click element ${element_id}, ${selectorList.length} candidate(s)`
@@ -3027,6 +3104,20 @@ async function executeClickByIdViaApi(tabId, params, timeout_ms) {
     // All attempts had no detectable effect
     // Return last result if any click was executed (might still have worked, just not detected)
     if (lastResult) {
+      // For ?cursor elements (text with cursor:pointer but no own handler),
+      // try coordinate click — physical events bubble to ancestor handlers.
+      // Guard: only ?cursor. Other signals mean the element IS interactive,
+      // so "not effective" is a detection miss, not a real failure.
+      // Double-clicking would break toggles/modals.
+      const normalizedId = normalizeElementId(element_id);
+      const curTabData = snapshotRefs.get(tabId);
+      const elementRef = curTabData?.refs?.[normalizedId];
+      if (elementRef?.signal === 'cursor') {
+        console.log(`[NevoFlux] ?cursor element ${element_id} click ineffective, trying coordinate fallback`);
+        const coordFallback = await tryCoordinateClickFallback(tabId, element_id);
+        if (coordFallback?.result?.effective) return coordFallback;
+      }
+
       console.log(
         `[NevoFlux] All ${selectorList.length} attempts had no detectable effect, returning last result`
       );

@@ -35,4 +35,8 @@ docs/plans/
 # Test lab
 tool_test_lab/
 
+# Distribution extensions — only keep .xpi files
+build/AppDir/distribution/extensions/*
+!build/AppDir/distribution/extensions/*.xpi
+
 # Distribution policies are now committed (template paths, not machine-specific)

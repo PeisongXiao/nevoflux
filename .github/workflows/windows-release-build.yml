@@ -275,7 +275,11 @@ jobs:
 
           if [ -f "/tmp/agent/${ARCHIVE_NAME}" ]; then
             mkdir -p build/AppDir/distribution/bin/
+            echo "Archive contents:"
+            unzip -l "/tmp/agent/${ARCHIVE_NAME}" | head -20
             cd /tmp/agent && unzip -o "${ARCHIVE_NAME}" && cd -
+            echo "Extracted contents of /tmp/agent/:"
+            ls -la /tmp/agent/
             mv /tmp/agent/nevoflux-agent.exe build/AppDir/distribution/bin/nevoflux-agent.exe || \
               mv /tmp/agent/nevoflux-agent build/AppDir/distribution/bin/nevoflux-agent.exe || true
             echo "Agent binary installed: build/AppDir/distribution/bin/nevoflux-agent.exe"

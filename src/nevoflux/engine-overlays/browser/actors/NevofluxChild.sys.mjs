@@ -807,7 +807,9 @@ export class NevofluxChild extends JSWindowActorChild {
             extras.push({
               node: captureNode,
               tag: captureNode.tagName,
-              text: this._getDirectText(captureNode).trim().slice(0, 60),
+              text: (signal === 'tag'
+                ? this._getFullText(captureNode)
+                : this._getDirectText(captureNode).trim().slice(0, 60)),
               signal,
               viewportRect: {
                 x: captureRect.x,
@@ -935,7 +937,8 @@ export class NevofluxChild extends JSWindowActorChild {
     return null;
   }
 
-  // Find nearest interactive ancestor for cursor-promoted elements (max 5 levels up)
+  // Find nearest interactive ancestor for cursor-promoted elements (max 10 levels up)
+  // Checks tag name, ARIA role, and event listeners (via InspectorUtils)
   _findInteractiveAncestor(el) {
     const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
     const INTERACTIVE_ARIA = new Set([
@@ -951,10 +954,22 @@ export class NevofluxChild extends JSWindowActorChild {
       'option',
     ]);
     let p = el.parentElement;
-    for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
+    for (let i = 0; i < 10 && p; i++, p = p.parentElement) {
       if (INTERACTIVE_TAGS.has(p.tagName)) return p;
       const role = p.getAttribute('role');
       if (role && INTERACTIVE_ARIA.has(role)) return p;
+      // Check for event listeners (catches React event delegation, etc.)
+      try {
+        if (typeof InspectorUtils !== 'undefined') {
+          const unwrapped = p.wrappedJSObject || p;
+          const listeners = InspectorUtils.getEventListenerInfoFor(unwrapped);
+          if (listeners?.length > 0) {
+            for (const l of listeners) {
+              if (INTERACTIVE_EVENTS.has(l.type)) return p;
+            }
+          }
+        }
+      } catch {}
     }
     return null;
   }
@@ -977,6 +992,19 @@ export class NevofluxChild extends JSWindowActorChild {
       }
     }
     return t.replace(/\s+/g, ' ');
+  }
+
+  /**
+   * Get full visible text content from an element's subtree.
+   * Unlike _getDirectText, does NOT exclude child interactive elements.
+   * Uses innerText (respects CSS visibility) to avoid pulling in
+   * screen-reader-only text, <script>/<style> content, or hidden elements.
+   * Falls back to textContent if innerText is unavailable (off-screen nodes).
+   * Used for ?tag elements where we want the complete readable label.
+   */
+  _getFullText(el, maxLen = 80) {
+    const raw = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+    return raw.slice(0, maxLen);
   }
 
   /**
@@ -1495,6 +1523,15 @@ export class NevofluxChild extends JSWindowActorChild {
     const cssPath = this._buildCssPath(node, doc);
     if (cssPath && this._isUniqueSelector(cssPath, node, doc)) {
       selectors.push({ type: 'css', strategy: 'css', value: cssPath });
+    }
+
+    // Last resort: data-ai-id attribute (always unique, set during Phase 5)
+    // Ensures every element has at least one usable CSS selector.
+    if (selectors.length === 0 || !selectors.some((s) => s.type === 'css')) {
+      const aiId = node.getAttribute('data-ai-id');
+      if (aiId) {
+        selectors.push({ type: 'css', strategy: 'ai-id', value: `[data-ai-id="${aiId}"]` });
+      }
     }
 
     return selectors;

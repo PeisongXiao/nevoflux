@@ -413,6 +413,25 @@ DownloadArtifacts x86_64
 Wait-Job -Name "UnzipArtifactarm64"
 Wait-Job -Name "UnzipArtifactx86_64"
 
+# --- Pause: Ensure SimplySign is connected before signing ---
+
+if (-not $AutoConnect) {
+    echo ""
+    echo "============================================================"
+    echo "  Downloads complete. Ready to sign."
+    echo ""
+    echo "  Please ensure SimplySign Desktop is connected:"
+    echo "    1. Right-click SimplySign tray icon"
+    echo "    2. Connect to SimplySign (enter email + token)"
+    echo "    3. Wait for 'Connected' notification"
+    echo "============================================================"
+    echo ""
+
+    do {
+        $answer = Read-Host "SimplySign connected? Press [Y] to start signing"
+    } while ($answer -notin @('Y', 'y'))
+}
+
 # --- Step 4: Sign all binaries (exe + dll) ---
 
 mkdir engine\obj-x86_64-pc-windows-msvc\ -ErrorAction SilentlyContinue

@@ -7,7 +7,7 @@
 use dioxus::prelude::*;
 use crate::context::use_app_context;
 use crate::state::{Message, MessageContent, MessageRole, MessageStatus};
-use super::{ActivityFeed, DoneFeed, CodeBlock, ErrorCard};
+use super::{ActivityFeed, DoneFeed, CodeBlock, ErrorCard, copy_text_fallback};
 
 /// Single message bubble component
 #[component]
@@ -235,16 +235,25 @@ fn UserMessageToolbar(
 
     let handle_copy = move |_| {
         let text = content_for_copy.clone();
+        if copy_text_fallback(&text) {
+            copied.set(true);
+            spawn(async move {
+                gloo::timers::future::TimeoutFuture::new(2000).await;
+                copied.set(false);
+            });
+            return;
+        }
         spawn(async move {
             if let Some(window) = web_sys::window() {
                 let navigator = window.navigator();
                 let clipboard = navigator.clipboard();
-                let _ = wasm_bindgen_futures::JsFuture::from(
+                if wasm_bindgen_futures::JsFuture::from(
                     clipboard.write_text(&text)
-                ).await;
-                copied.set(true);
-                gloo::timers::future::TimeoutFuture::new(2000).await;
-                copied.set(false);
+                ).await.is_ok() {
+                    copied.set(true);
+                    gloo::timers::future::TimeoutFuture::new(2000).await;
+                    copied.set(false);
+                }
             }
         });
     };
@@ -352,16 +361,25 @@ fn AssistantMessageToolbar(content: String) -> Element {
 
     let handle_copy = move |_| {
         let text = content_for_copy.clone();
+        if copy_text_fallback(&text) {
+            copied.set(true);
+            spawn(async move {
+                gloo::timers::future::TimeoutFuture::new(2000).await;
+                copied.set(false);
+            });
+            return;
+        }
         spawn(async move {
             if let Some(window) = web_sys::window() {
                 let navigator = window.navigator();
                 let clipboard = navigator.clipboard();
-                let _ = wasm_bindgen_futures::JsFuture::from(
+                if wasm_bindgen_futures::JsFuture::from(
                     clipboard.write_text(&text)
-                ).await;
-                copied.set(true);
-                gloo::timers::future::TimeoutFuture::new(2000).await;
-                copied.set(false);
+                ).await.is_ok() {
+                    copied.set(true);
+                    gloo::timers::future::TimeoutFuture::new(2000).await;
+                    copied.set(false);
+                }
             }
         });
     };
