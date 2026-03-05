@@ -164,14 +164,17 @@ if [ -f "${PACKAGE_MANIFEST}" ]; then
   fi
 fi
 
-# 12. Add distribution directory to package manifest (for policies.json, extensions, agent binary)
+# 12. Distribution files (policies.json, extensions, agent binary) are injected
+#     into the final package by CI workflows AFTER mach package completes.
+#     Do NOT add distribution/** to package-manifest.in — it breaks Linux PGO
+#     builds where mach package runs during the instrumented build phase before
+#     distribution files are available.
+#     Remove the entry if a previous import added it.
 if [ -f "${PACKAGE_MANIFEST}" ]; then
-  if ! grep -q 'distribution/' "${PACKAGE_MANIFEST}"; then
-    echo "Adding distribution directory to package-manifest.in..."
-    # Append at end of file
-    echo '' >> "${PACKAGE_MANIFEST}"
-    echo '; NevoFlux distribution files (policies, extensions, agent binary)' >> "${PACKAGE_MANIFEST}"
-    echo '@RESPATH@/distribution/**' >> "${PACKAGE_MANIFEST}"
+  if grep -q '@RESPATH@/distribution/\*\*' "${PACKAGE_MANIFEST}"; then
+    echo "Removing distribution/** from package-manifest.in (handled post-package by CI)..."
+    sedi '/; NevoFlux distribution files/d' "${PACKAGE_MANIFEST}"
+    sedi '/@RESPATH@\/distribution\/\*\*/d' "${PACKAGE_MANIFEST}"
   fi
 fi
 

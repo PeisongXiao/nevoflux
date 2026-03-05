@@ -236,6 +236,17 @@ jobs:
             echo "::warning::docs/reference/templates/ not found, skipping soul templates"
           fi
 
+      - name: Verify distribution essentials
+        run: |
+          set -e
+          echo "Checking distribution directory contents:"
+          find build/AppDir/distribution -type f | head -30
+          if [ ! -d "build/AppDir/distribution/bin/models" ]; then
+            echo "::error::models directory missing from distribution — agent release archive may not include it"
+            exit 1
+          fi
+          echo "✓ models directory present"
+
       - name: Build language packs
         run: |
           for attempt in 1 2 3 4 5; do

@@ -304,6 +304,17 @@ jobs:
             echo "::warning::docs/reference/templates/ not found, skipping soul templates"
           fi
 
+      - name: Verify distribution essentials
+        run: |
+          set -e
+          echo "Checking distribution directory contents:"
+          find build/AppDir/distribution -type f | head -30
+          if [ ! -d "build/AppDir/distribution/bin/models" ]; then
+            echo "::error::models directory missing from distribution — agent release archive may not include it"
+            exit 1
+          fi
+          echo "✓ models directory present"
+
       - name: Bootstrap
         if: ${{ !(inputs.generate-gpo && matrix.arch == 'aarch64') }}
         run: |
@@ -411,24 +422,6 @@ jobs:
           fi
           bash .github/workflows/src/release-build.sh
 
-      - name: Inject distribution files before packaging
-        if: ${{ !(inputs.generate-gpo && matrix.arch == 'aarch64') }}
-        run: |
-          set -ex
-          ARCH="${{ matrix.arch }}"
-          OBJ_DIR="engine/obj-${ARCH}-pc-windows-msvc"
-          BIN_DIR="$OBJ_DIR/dist/bin"
-          if [ -d "build/AppDir/distribution" ] && [ -d "$BIN_DIR" ]; then
-            mkdir -p "$BIN_DIR/distribution"
-            cp -r build/AppDir/distribution/* "$BIN_DIR/distribution/"
-            echo "Distribution files injected into $BIN_DIR/distribution/ before packaging:"
-            ls -la "$BIN_DIR/distribution/"
-            echo "Distribution bin contents:"
-            ls -la "$BIN_DIR/distribution/bin/" 2>/dev/null || echo "No bin/ subdirectory"
-          else
-            echo "::warning::Distribution files or bin directory not found"
-          fi
-
       - name: Package
         if: ${{ !(inputs.generate-gpo && matrix.arch == 'aarch64') }}
         env:
@@ -441,21 +434,30 @@ jobs:
           export ZEN_RELEASE=1
           npm run package
 
-      - name: Verify distribution files in package and rename
+      - name: Inject distribution files into package and rename
         if: ${{ !(inputs.generate-gpo && matrix.arch == 'aarch64') }}
         run: |
           set -ex
           VERSION=$(npm run --silent surfer -- get version | xargs)
           SUFFIX="${{ matrix.arch == 'aarch64' && '-aarch64' || '' }}"
           ZIP_NAME="nevoflux-${VERSION}.en-US.win64${SUFFIX}.zip"
-          # Verify distribution files are in the zip
-          if [ -f "dist/${ZIP_NAME}" ]; then
-            echo "Checking distribution files in zip:"
-            unzip -l "dist/${ZIP_NAME}" | grep -i distribution/ || echo "::warning::No distribution files found in zip"
+          if [ -d "build/AppDir/distribution" ] && [ -f "dist/${ZIP_NAME}" ]; then
+            # Get the top-level directory in the zip (e.g., "nevoflux")
+            TOP_DIR=$(unzip -Z1 "dist/${ZIP_NAME}" | head -1 | cut -d/ -f1)
+            # Stage distribution files with correct path prefix
+            STAGING=$(mktemp -d)
+            mkdir -p "$STAGING/$TOP_DIR/distribution"
+            cp -r build/AppDir/distribution/* "$STAGING/$TOP_DIR/distribution/"
+            cd "$STAGING"
+            zip -r "$OLDPWD/dist/${ZIP_NAME}" "$TOP_DIR/distribution/"
+            cd "$OLDPWD"
+            rm -rf "$STAGING"
+            echo "Distribution files injected into zip:"
+            unzip -l "dist/${ZIP_NAME}" | grep -i distribution/ | head -20
+          else
+            echo "::warning::Distribution files or zip not found"
           fi
           mv "./dist/${ZIP_NAME}" nevoflux.win64.zip
-          ls ./dist
-          ls .
 
       - name: Remove API Keys
         run: |
