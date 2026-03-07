@@ -13,7 +13,7 @@ fi
 export GH_TOKEN="$GITHUB_TOKEN"
 
 # Create draft release if it doesn't exist
-if ! gh release view "$VERSION" --repo "$GITHUB_REPO" &>/dev/null; then
+if ! gh release view "$VERSION" --repo "$GITHUB_REPO" &> /dev/null; then
   echo "Creating draft release $VERSION ..."
   gh release create "$VERSION" \
     --repo "$GITHUB_REPO" \
