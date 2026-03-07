@@ -583,6 +583,7 @@ steps:
 
 timeout: '18000s'
 options:
-  machineType: 'E2_HIGHCPU_32'
+  pool:
+    name: 'projects/nevoflux/locations/us-west1/workerPools/nevoflux-browser'
   diskSizeGb: 200
   logging: CLOUD_LOGGING_ONLY
