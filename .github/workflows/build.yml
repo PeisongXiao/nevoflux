@@ -337,59 +337,17 @@ jobs:
           name: nevoflux.source.tar.zst
           path: ./nevoflux.source.tar.zst
 
-  windows-step-1:
-    name: Windows build step 1 (PGO build)
-    uses: ./.github/workflows/windows-release-build.yml
-    needs: [build-data, buildid]
-    permissions:
-      contents: write
-    secrets: inherit
-    with:
-      use-sccache: ${{ inputs.use-sccache }}
-      build-version: ${{ needs.build-data.outputs.version }}
-      generate-gpo: true
-      profile-data-path-archive: nevoflux-windows-profile-data-and-jarlog.zip
-      release-branch: ${{ inputs.update_branch }}
-      MOZ_BUILD_DATE: ${{needs.buildid.outputs.buildids}}
-
   windows-step-2:
     name: Windows build step 2 (Generate profile data)
     uses: ./.github/workflows/windows-profile-build.yml
     permissions:
       contents: write
     secrets: inherit
-    needs: [windows-step-1, build-data]
+    needs: [build-data]
     with:
       build-version: ${{ needs.build-data.outputs.version }}
       profile-data-path-archive: nevoflux.win64-pgo-stage-1.zip
       release-branch: ${{ inputs.update_branch }}
-
-  windows-step-3:
-    name: Windows build step 3 (build with profile data)
-    uses: ./.github/workflows/windows-release-build.yml
-    permissions:
-      contents: write
-    secrets: inherit
-    needs: [build-data, windows-step-2, buildid]
-    with:
-      build-version: ${{ needs.build-data.outputs.version }}
-      generate-gpo: false
-      release-branch: ${{ inputs.update_branch }}
-      MOZ_BUILD_DATE: ${{needs.buildid.outputs.buildids}}
-      use-sccache: ${{ inputs.use-sccache }}
-
-  linux:
-    name: Linux build
-    uses: ./.github/workflows/linux-release-build.yml
-    permissions:
-      contents: write
-    secrets: inherit
-    needs: [build-data, buildid]
-    with:
-      build-version: ${{ needs.build-data.outputs.version }}
-      release-branch: ${{ inputs.update_branch }}
-      MOZ_BUILD_DATE: ${{needs.buildid.outputs.buildids}}
-      use-sccache: ${{ inputs.use-sccache }}
 
   mac:
     name: macOS build
@@ -416,105 +374,20 @@ jobs:
       release-branch: ${{ inputs.update_branch }}
       sign_macos: ${{ inputs.sign_macos || false }}
 
-  appimage:
-    name: AppImage build - Linux ${{ matrix.arch }}
-    permissions:
-      contents: write
-    runs-on: [self-hosted, linux, x64]
-    strategy:
-      matrix:
-        arch: [x86_64, aarch64]
-    needs: [linux]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          token: ${{ secrets.DEPLOY_KEY }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: '.nvmrc'
-
-      - name: Install dependencies
-        run: |
-          npm ci
-          sudo apt-get update || true
-          sudo apt-get -y install libfuse2 desktop-file-utils appstream
-
-      - name: Download Linux build
-        uses: actions/download-artifact@v4
-        with:
-          name: nevoflux.linux-${{ matrix.arch }}.tar.xz
-
-      - name: Execute AppImage build
-        run: |
-          set -eux
-          export ARCH=${{ matrix.arch }}
-          UPINFO="gh-releases-zsync|$GITHUB_REPOSITORY_OWNER|desktop|latest|nevoflux-$ARCH.AppImage.zsync"
-          rm build/AppDir/.DirIcon || true
-          cp configs/branding/release/logo128.png build/AppDir/usr/share/icons/hicolor/128x128/apps/zen.png
-          cp configs/branding/release/logo128.png build/AppDir/zen.png && ln -s zen.png build/AppDir/.DirIcon
-
-          APPDIR=build/AppDir
-          tar -xvf *.tar.* && rm -rf *.tar.*
-          cp -a nevoflux/* $APPDIR/ && rm -rf nevoflux
-          for attempt in 1 2 3 4 5; do
-            wget "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" && break
-            if [ $attempt -lt 5 ]; then
-              echo "::warning::Download attempt $attempt/5 failed. Retrying in $((attempt * 15))s..."
-              sleep $((attempt * 15))
-            else
-              echo "::error::Download failed after 5 attempts"
-              exit 1
-            fi
-          done
-          for attempt in 1 2 3 4 5; do
-            wget "https://github.com/VHSgunzo/uruntime/releases/latest/download/uruntime-appimage-squashfs-lite-$ARCH" && break
-            if [ $attempt -lt 5 ]; then
-              echo "::warning::Download attempt $attempt/5 failed. Retrying in $((attempt * 15))s..."
-              sleep $((attempt * 15))
-            else
-              echo "::error::Download failed after 5 attempts"
-              exit 1
-            fi
-          done
-          chmod +x *.AppImage
-          chmod +x ./uruntime-appimage-squashfs-lite-"$ARCH"
-          chmod +x ./build/AppDir/AppRun
-
-          # keep the uruntime mountpoint (massively speeds up launch time)
-          sed -i 's|URUNTIME_MOUNT=[0-9]|URUNTIME_MOUNT=0|' ./uruntime-appimage-squashfs-lite-"$ARCH"
-
-          echo "AppDir: $APPDIR"
-          ls -al
-          find .
-          ls -al "$APPDIR"
-          ./appimagetool-x86_64.AppImage -u "$UPINFO" "$APPDIR" nevoflux-"$ARCH".AppImage --runtime-file ./uruntime-appimage-squashfs-lite-"$ARCH"
-          mkdir dist
-          mv nevoflux*AppImage* dist/.
-          unset ARCH
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          retention-days: 5
-          name: nevoflux-${{ matrix.arch }}.AppImage
-          path: ./dist/nevoflux-${{ matrix.arch }}.AppImage
-
-      - name: Upload artifact (ZSync)
-        uses: actions/upload-artifact@v4
-        with:
-          retention-days: 5
-          name: nevoflux-${{ matrix.arch }}.AppImage.zsync
-          path: ./dist/nevoflux-${{ matrix.arch }}.AppImage.zsync
+  wait-gcb:
+    name: Wait for Cloud Build artifacts
+    uses: ./.github/workflows/wait-for-gcb.yml
+    needs: [build-data]
+    secrets: inherit
+    with:
+      version: ${{ needs.build-data.outputs.version }}
+      timeout-minutes: 180
 
   release:
     if: ${{ inputs.create_release }}
     permissions: write-all
     name: Release
-    needs: [build-data, linux, windows-step-3, check-release, mac-uni, appimage, source, lint]
+    needs: [build-data, wait-gcb, windows-step-2, check-release, mac-uni, source, lint]
     runs-on: ubuntu-latest
     environment:
       name: Deploy-Release
@@ -526,8 +399,40 @@ jobs:
           submodules: recursive
           token: ${{ secrets.DEPLOY_KEY }}
 
-      - name: Download artifact
+      - name: Download macOS universal DMG
         uses: actions/download-artifact@v4
+        with:
+          name: nevoflux.macos-universal.dmg
+
+      - name: Download macOS MAR
+        uses: actions/download-artifact@v4
+        with:
+          name: macos.mar
+
+      - name: Download source tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: nevoflux.source.tar.zst
+
+      - name: Download macOS update manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: macos_update_manifest
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCS_SERVICE_ACCOUNT_KEY }}
+
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Download update manifests from GCS
+        run: |
+          VERSION="${{ needs.build-data.outputs.version }}"
+          mkdir -p linux_update_manifest_x86_64 linux_update_manifest_aarch64
+          gsutil -m cp -r "gs://nevoflux-builds/${VERSION}/linux_update_manifest_x86_64/*" linux_update_manifest_x86_64/
+          gsutil -m cp -r "gs://nevoflux-builds/${VERSION}/linux_update_manifest_aarch64/*" linux_update_manifest_aarch64/
 
       - name: Checkout updates repository
         uses: actions/checkout@v4
@@ -566,61 +471,53 @@ jobs:
           RELEASE_BRANCH: ${{ inputs.update_branch }}
         run: bash .github/workflows/src/generate_release_notes.sh
 
-      - name: Prepare Windows binaries for release
+      - name: Upload signed Windows binaries to release
+        if: ${{ inputs.sign_windows }}
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_KEY }}
         run: |
-          mkdir -p windows-release
-          if [ "${{ inputs.sign_windows }}" = "true" ]; then
-            # Signed binaries from windows-binaries repo
-            cp .github/workflows/object/windows-x64-signed-x86_64/nevoflux.win-x86_64.zip windows-release/
-            cp .github/workflows/object/windows-x64-signed-arm64/nevoflux.win-arm64.zip windows-release/
-            cp .github/workflows/object/windows-x64-signed-x86_64/windows.mar windows-release/
-            cp .github/workflows/object/windows-x64-signed-arm64/windows-arm64.mar windows-release/
-            cp .github/workflows/object/windows-x64-signed-x86_64/nevoflux.installer.exe windows-release/
-            cp .github/workflows/object/windows-x64-signed-arm64/nevoflux.installer-arm64.exe windows-release/
-          else
-            # Unsigned binaries from CI artifacts (already downloaded by actions/download-artifact)
-            cp nevoflux.win-x86_64.zip/nevoflux.win-x86_64.zip windows-release/ || true
-            cp nevoflux.win-arm64.zip/nevoflux.win-arm64.zip windows-release/ || true
-            cp windows.mar/windows.mar windows-release/ || true
-            cp windows-arm64.mar/windows-arm64.mar windows-release/ || true
-            cp nevoflux.installer.exe/nevoflux.installer.exe windows-release/ || true
-            cp nevoflux.installer-arm64.exe/nevoflux.installer-arm64.exe windows-release/ || true
-          fi
+          VERSION="${{ needs.build-data.outputs.version }}"
+          # Upload signed Windows binaries (overwrite unsigned ones from GCB)
+          for f in \
+            .github/workflows/object/windows-x64-signed-x86_64/nevoflux.win-x86_64.zip \
+            .github/workflows/object/windows-x64-signed-arm64/nevoflux.win-arm64.zip \
+            .github/workflows/object/windows-x64-signed-x86_64/windows.mar \
+            .github/workflows/object/windows-x64-signed-arm64/windows-arm64.mar \
+            .github/workflows/object/windows-x64-signed-x86_64/nevoflux.installer.exe \
+            .github/workflows/object/windows-x64-signed-arm64/nevoflux.installer-arm64.exe; do
+            [ -f "$f" ] && gh release upload "$VERSION" "$f" --clobber || true
+          done
 
-      - name: Release
-        uses: softprops/action-gh-release@v2.2.2
-        with:
-          token: ${{ secrets.DEPLOY_KEY }}
-          tag_name: ${{ needs.build-data.outputs.version }}
-          prerelease: false
-          fail_on_unmatched_files: false
-          generate_release_notes: false
-          name: 'Release build - ${{ needs.build-data.outputs.version }} (${{ needs.build-data.outputs.build_date }})'
-          body_path: release_notes.md
-          files: |
-            ./nevoflux.source.tar.zst/*
-            ./nevoflux.linux-x86_64.tar.xz/*
-            ./nevoflux.linux-aarch64.tar.xz/*
-            ./nevoflux-x86_64.AppImage/*
-            ./nevoflux-x86_64.AppImage.zsync/*
-            ./nevoflux-aarch64.AppImage/*
-            ./nevoflux-aarch64.AppImage.zsync/*
-            ./windows-release/nevoflux.win-x86_64.zip
-            ./windows-release/nevoflux.win-arm64.zip
-            ./linux.mar/*
-            ./linux-aarch64.mar/*
-            ./windows-release/windows.mar
-            ./windows-release/windows-arm64.mar
-            ./macos.mar/*
-            ./windows-release/nevoflux.installer.exe
-            ./windows-release/nevoflux.installer-arm64.exe
-            ./nevoflux.macos-universal.dmg/*
+      - name: Upload macOS and source artifacts to release
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          VERSION="${{ needs.build-data.outputs.version }}"
+          # Upload macOS and source artifacts (Linux/Windows already uploaded by GCB)
+          for dir in nevoflux.source.tar.zst nevoflux.macos-universal.dmg macos.mar; do
+            if [ -d "$dir" ]; then
+              for f in "$dir"/*; do
+                [ -f "$f" ] && gh release upload "$VERSION" "$f" --clobber || true
+              done
+            fi
+          done
+
+      - name: Finalize release
+        if: ${{ inputs.create_release }}
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          VERSION="${{ needs.build-data.outputs.version }}"
+          gh release edit "$VERSION" \
+            --draft=false \
+            --title "Release build - $VERSION (${{ needs.build-data.outputs.build_date }})" \
+            --notes-file release_notes.md
 
   prepare-flatpak:
     if: ${{ inputs.create_release && inputs.build_flatpak }}
     permissions: write-all
     name: Prepare Flatpak
-    needs: [release, linux, build-data]
+    needs: [release, wait-gcb, build-data]
     runs-on: ubuntu-latest
 
     steps:
@@ -689,15 +586,19 @@ jobs:
           repository: flathub/app.zen_browser.zen
           token: ${{ secrets.DEPLOY_KEY }}
 
-      - name: Download Linux x86_64 build
-        uses: actions/download-artifact@v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-          name: nevoflux.linux-x86_64.tar.xz
+          credentials_json: ${{ secrets.GCS_SERVICE_ACCOUNT_KEY }}
 
-      - name: Download Linux aarch64 build
-        uses: actions/download-artifact@v4
-        with:
-          name: nevoflux.linux-aarch64.tar.xz
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Download Linux builds from GCS
+        run: |
+          VERSION="${{ needs.build-data.outputs.version }}"
+          gsutil cp "gs://nevoflux-builds/${VERSION}/nevoflux.linux-x86_64.tar.xz" .
+          gsutil cp "gs://nevoflux-builds/${VERSION}/nevoflux.linux-aarch64.tar.xz" .
 
       - name: Update repository
         uses: actions/checkout@v4
