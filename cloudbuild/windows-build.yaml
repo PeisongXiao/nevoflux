@@ -251,8 +251,8 @@ steps:
       - |
         set -ex
         gsutil cp /workspace/artifacts/nevoflux.win64-pgo-stage-1.zip \
-          "gs://nevoflux-builds/${TAG_NAME}/pgo-stage-1.zip"
-        echo "PGO stage 1 zip uploaded to gs://nevoflux-builds/${TAG_NAME}/pgo-stage-1.zip"
+          "gs://nevoflux-builds/${TAG_NAME}/${COMMIT_SHA}/pgo-stage-1.zip"
+        echo "PGO stage 1 zip uploaded to gs://nevoflux-builds/${TAG_NAME}/${COMMIT_SHA}/pgo-stage-1.zip"
 
   # ===================================================================
   # 5. wait-for-pgo - Poll for PGO profile data from GHA
@@ -266,7 +266,7 @@ steps:
       - |
         set -ex
         chmod +x cloudbuild/scripts/wait-for-pgo.sh
-        cloudbuild/scripts/wait-for-pgo.sh ${TAG_NAME}
+        cloudbuild/scripts/wait-for-pgo.sh ${TAG_NAME} ${COMMIT_SHA}
         # Move downloaded profile data to /workspace for next steps
         mv merged.profdata /workspace/merged.profdata
         mv en-US.log /workspace/en-US.log

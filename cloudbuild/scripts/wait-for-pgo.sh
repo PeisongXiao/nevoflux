@@ -2,18 +2,20 @@
 set -e
 
 VERSION="$1"
+COMMIT_SHA="$2"
 BUCKET="gs://nevoflux-builds"
-MARKER="${BUCKET}/${VERSION}/done-marker"
+PREFIX="${BUCKET}/${VERSION}/${COMMIT_SHA}"
+MARKER="${PREFIX}/done-marker"
 TIMEOUT=7200 # 2 hours
 INTERVAL=30
 
-echo "Waiting for PGO profile data at ${BUCKET}/${VERSION}/ ..."
+echo "Waiting for PGO profile data at ${PREFIX}/ ..."
 elapsed=0
 while [ $elapsed -lt $TIMEOUT ]; do
-  if gsutil -q stat "$MARKER" 2> /dev/null; then
+  if gsutil -q stat "$MARKER" 2>/dev/null; then
     echo "PGO profile data is ready."
-    gsutil cp "${BUCKET}/${VERSION}/merged.profdata" ./merged.profdata
-    gsutil cp "${BUCKET}/${VERSION}/en-US.log" ./en-US.log
+    gsutil cp "${PREFIX}/merged.profdata" ./merged.profdata
+    gsutil cp "${PREFIX}/en-US.log" ./en-US.log
     echo "Downloaded profile data."
     exit 0
   fi

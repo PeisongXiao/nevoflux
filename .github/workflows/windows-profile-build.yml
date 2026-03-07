@@ -21,6 +21,11 @@ on:
         required: true
         type: string
         default: 'release'
+      commit-sha:
+        description: 'Git commit SHA for GCS path uniqueness'
+        required: false
+        type: string
+        default: ''
   workflow_call:
     inputs:
       build-version:
@@ -34,6 +39,10 @@ on:
       release-branch:
         description: 'The branch to build'
         required: true
+        type: string
+      commit-sha:
+        description: 'Git commit SHA for GCS path uniqueness'
+        required: false
         type: string
 
 jobs:
@@ -80,11 +89,32 @@ jobs:
         if: ${{ matrix.arch == 'x86_64' }}
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Download PGO stage 1 from GCS
+      - name: Wait for and download PGO stage 1 from GCS
         if: ${{ matrix.arch == 'x86_64' }}
+        env:
+          GCS_PATH: gs://nevoflux-builds/${{ inputs.build-version }}/${{ inputs.commit-sha || github.sha }}
         run: |
+          $timeout = 7200
+          $interval = 30
+          $elapsed = 0
+          $gcsFile = "$env:GCS_PATH/pgo-stage-1.zip"
+          Write-Host "Waiting for PGO stage 1 at $gcsFile ..."
+          while ($elapsed -lt $timeout) {
+              $result = gsutil -q stat $gcsFile 2>&1
+              if ($LASTEXITCODE -eq 0) {
+                  Write-Host "PGO stage 1 is ready."
+                  break
+              }
+              Write-Host "Waiting... ($elapsed`s / $timeout`s)"
+              Start-Sleep -Seconds $interval
+              $elapsed += $interval
+          }
+          if ($elapsed -ge $timeout) {
+              Write-Host "::error::Timed out waiting for PGO stage 1"
+              exit 1
+          }
           New-Item -ItemType Directory -Force -Path C:\artifact
-          gsutil cp gs://nevoflux-builds/${{ inputs.build-version }}/pgo-stage-1.zip C:\artifact\${{ inputs.profile-data-path-archive }}
+          gsutil cp $gcsFile C:\artifact\${{ inputs.profile-data-path-archive }}
 
       - name: Unpack artifact
         if: ${{ matrix.arch == 'x86_64' }}
@@ -166,8 +196,10 @@ jobs:
 
       - name: Upload profile data to GCS
         if: ${{ matrix.arch == 'x86_64' }}
+        env:
+          GCS_PATH: gs://nevoflux-builds/${{ inputs.build-version }}/${{ inputs.commit-sha || github.sha }}
         run: |
-          gsutil cp merged.profdata gs://nevoflux-builds/${{ inputs.build-version }}/merged.profdata
-          gsutil cp en-US.log gs://nevoflux-builds/${{ inputs.build-version }}/en-US.log
+          gsutil cp merged.profdata $env:GCS_PATH/merged.profdata
+          gsutil cp en-US.log $env:GCS_PATH/en-US.log
           echo "done" | Out-File -FilePath done-marker -Encoding ASCII
-          gsutil cp done-marker gs://nevoflux-builds/${{ inputs.build-version }}/done-marker
+          gsutil cp done-marker $env:GCS_PATH/done-marker
