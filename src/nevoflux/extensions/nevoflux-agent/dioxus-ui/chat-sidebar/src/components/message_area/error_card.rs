@@ -29,11 +29,8 @@ pub fn ErrorCard(code: String, message: String, recoverable: bool) -> Element {
         };
 
         if let Some(text) = last_user_text {
-            let tab_context = ctx.tab_context.read();
-            let session_id = tab_context.zen_sync_id.clone()
-                .unwrap_or_else(|| ctx.session.read().id.clone());
-            let tab_id = tab_context.tab_id;
-            drop(tab_context);
+            let session_id = ctx.session.read().id.clone();
+            let tab_id = ctx.tab_context.read().tab_id;
             let mock_enabled = ctx.mock_enabled;
 
             // Add new user message

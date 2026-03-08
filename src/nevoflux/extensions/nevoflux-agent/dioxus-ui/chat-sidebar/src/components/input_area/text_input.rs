@@ -396,11 +396,8 @@ pub fn TextInput(disabled: bool) -> Element {
     let handle_screenshot_click = move |_| {
         web_sys::console::log_1(&"[NevoFlux] Screenshot button clicked".into());
 
-        let tab_context = ctx.tab_context.read();
-        let session_id = tab_context.zen_sync_id.clone()
-            .unwrap_or_else(|| ctx.session.read().id.clone());
-        let tab_id = tab_context.tab_id;
-        drop(tab_context);
+        let session_id = ctx.session.read().id.clone();
+        let tab_id = ctx.tab_context.read().tab_id;
 
         web_sys::console::log_1(&format!("[NevoFlux] Screenshot: tab_id={}, session_id={}", tab_id, session_id).into());
 
@@ -637,11 +634,8 @@ pub fn TextInput(disabled: bool) -> Element {
         };
         ctx.messages.write().push(message);
 
-        let tab_context = ctx.tab_context.read();
-        let session_id = tab_context.zen_sync_id.clone()
-            .unwrap_or_else(|| ctx.session.read().id.clone());
-        let tab_id = tab_context.tab_id;
-        drop(tab_context);
+        let session_id = ctx.session.read().id.clone();
+        let tab_id = ctx.tab_context.read().tab_id;
         let mock_enabled = ctx.mock_enabled;
         let mode = ctx.chat_mode.read().clone();
 
@@ -1136,8 +1130,7 @@ fn VoiceSendButton(
             if ctx.mock_enabled {
                 crate::mock::stop_mock_streaming();
             } else {
-                let session_id = ctx.tab_context.read().zen_sync_id.clone()
-                    .unwrap_or_else(|| ctx.session.read().id.clone());
+                let session_id = ctx.session.read().id.clone();
                 spawn(async move {
                     let _ = crate::messaging::send_stop_generation(&session_id).await;
                 });

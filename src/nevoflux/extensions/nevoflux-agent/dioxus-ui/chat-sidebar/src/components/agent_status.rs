@@ -110,8 +110,7 @@ fn StopButton() -> Element {
             crate::mock::stop_mock_streaming();
         } else {
             // Real mode: send stop message to agent
-            let session_id = ctx.tab_context.read().zen_sync_id.clone()
-                .unwrap_or_else(|| ctx.session.read().id.clone());
+            let session_id = ctx.session.read().id.clone();
             spawn(async move {
                 let _ = crate::messaging::send_stop_generation(&session_id).await;
             });

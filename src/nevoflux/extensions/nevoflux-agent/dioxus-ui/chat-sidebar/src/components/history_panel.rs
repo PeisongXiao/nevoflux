@@ -180,6 +180,7 @@ fn HistoryPanelHeader() -> Element {
                 Ok(session_id) => {
                     ctx.session.write().id = session_id.clone();
                     ctx.session.write().title = None;
+
                     ctx.messages.set(Vec::new());
                     ctx.streaming.set(None);
                     ctx.agent_status.write().hide();
@@ -282,6 +283,7 @@ fn SessionItem(session: SessionSummary, active_session_id: String) -> Element {
                     if let Ok(new_id) = nevoflux_api::new_window_session().await {
                         ctx.session.write().id = new_id.clone();
                         ctx.session.write().title = None;
+                        ctx.tab_context.write().zen_sync_id = Some(new_id.clone());
                         ctx.messages.set(Vec::new());
                         let _ = crate::messaging::send_session_resolve(&new_id).await;
                     }

@@ -26,8 +26,7 @@ pub fn PlanCard(message: Message) -> Element {
         move |_| {
             let msg_id = msg_id.clone();
             // Get session_id
-            let session_id = ctx.tab_context.read().zen_sync_id.clone()
-                .unwrap_or_else(|| ctx.session.read().id.clone());
+            let session_id = ctx.session.read().id.clone();
 
             // Deactivate this plan
             ctx.messages.with_mut(|messages| {
@@ -55,8 +54,7 @@ pub fn PlanCard(message: Message) -> Element {
         let msg_id = msg_id.clone();
         move |_| {
             let msg_id = msg_id.clone();
-            let session_id = ctx.tab_context.read().zen_sync_id.clone()
-                .unwrap_or_else(|| ctx.session.read().id.clone());
+            let session_id = ctx.session.read().id.clone();
 
             // Deactivate this plan
             ctx.messages.with_mut(|messages| {
