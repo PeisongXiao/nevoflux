@@ -4221,8 +4221,13 @@ export class NevofluxChild extends JSWindowActorChild {
     }
 
     try {
-      // Execute in page context
-      const result = win.eval(script);
+      // Execute in page context via sandbox to bypass page CSP restrictions.
+      // Uses content principal (not chrome) so no privilege escalation.
+      const sandbox = Cu.Sandbox(win, {
+        sandboxPrototype: win,
+        wantXrays: false,
+      });
+      const result = Cu.evalInSandbox(script, sandbox);
 
       if (!returnValue) {
         return { success: true };
