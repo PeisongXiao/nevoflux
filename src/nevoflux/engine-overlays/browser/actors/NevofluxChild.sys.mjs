@@ -4452,6 +4452,32 @@ export class NevofluxChild extends JSWindowActorChild {
       // Enable GFM tables
       turndownService.use(gfm);
 
+      // Unwrap layout tables: tables used for page layout (not data) can't be
+      // converted to GFM markdown tables and would be kept as raw HTML.
+      // This rule strips the table/tbody/tr wrapper and converts each cell's
+      // content into separate blocks, preserving the text content.
+      turndownService.addRule('layoutTables', {
+        filter: function (node) {
+          if (node.nodeName !== 'TABLE') return false;
+          // Heuristic: a "data table" has <th> cells; a layout table does not.
+          // Also treat tables with nested tables as layout tables.
+          const hasTh = node.querySelector('th');
+          const hasNestedTable = node.querySelector('table');
+          return !hasTh || !!hasNestedTable;
+        },
+        replacement: function (content) {
+          return '\n\n' + content + '\n\n';
+        },
+      });
+
+      // Unwrap layout table rows and cells so their content flows as text
+      turndownService.addRule('layoutTableCells', {
+        filter: ['thead', 'tbody', 'tfoot', 'tr', 'td'],
+        replacement: function (content) {
+          return content ? content.trim() + '\n' : '';
+        },
+      });
+
       // Handle images
       if (!includeImages) {
         turndownService.addRule('removeImages', {
