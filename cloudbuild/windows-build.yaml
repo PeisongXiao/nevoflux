@@ -5,13 +5,12 @@
 # Trigger substitutions expected:
 #   _GITHUB_REPO  - owner/repo  (e.g. dorisgyl/nevoflux)
 #   TAG_NAME      - release tag  (built-in for tag triggers)
-#   _BUILD_VERSION - display version string
+#   TAG_NAME      - release tag (e.g. v0.1.1), 'v' prefix is stripped automatically
 #   _RELEASE_BRANCH - brand branch (default: release)
 #   _MOZ_BUILD_DATE - optional, auto-generated when empty
 
 substitutions:
   _GITHUB_REPO: 'dorisgyl/nevoflux'
-  _BUILD_VERSION: '0.1.0'
   _RELEASE_BRANCH: 'release'
   _MOZ_BUILD_DATE: ''
 
@@ -41,8 +40,10 @@ steps:
         # ---- npm install ----
         npm ci
 
-        # ---- surfer ci ----
-        npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version ${_BUILD_VERSION}
+        # ---- surfer ci — derive version from TAG_NAME, stripping 'v' prefix ----
+        DISPLAY_VERSION="$${TAG_NAME#v}"
+        echo "Display version: $${DISPLAY_VERSION}"
+        npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version $${DISPLAY_VERSION}
 
         # ---- download Firefox source (with retries) ----
         for attempt in 1 2 3 4 5; do
@@ -306,7 +307,8 @@ steps:
         dos2unix configs/windows/mozconfig
 
         # ---- surfer ci (re-apply branding) ----
-        npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version ${_BUILD_VERSION}
+        DISPLAY_VERSION="$${TAG_NAME#v}"
+        npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version $${DISPLAY_VERSION}
 
         # ---- import ----
         npm run import -- --verbose
@@ -446,7 +448,8 @@ steps:
         dos2unix configs/windows/mozconfig
 
         # ---- surfer ci (re-apply branding) ----
-        npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version ${_BUILD_VERSION}
+        DISPLAY_VERSION="$${TAG_NAME#v}"
+        npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version $${DISPLAY_VERSION}
 
         # ---- import ----
         npm run import -- --verbose

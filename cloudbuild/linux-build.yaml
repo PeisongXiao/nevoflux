@@ -34,8 +34,10 @@ steps:
         # npm install
         npm ci
 
-        # Surfer CI setup
-        npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version ${TAG_NAME}
+        # Surfer CI setup — derive version from TAG_NAME, stripping 'v' prefix
+        DISPLAY_VERSION="$${TAG_NAME#v}"
+        echo "Display version: $${DISPLAY_VERSION}"
+        npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version $${DISPLAY_VERSION}
 
         # Download Firefox source with retries
         for attempt in 1 2 3 4 5; do
