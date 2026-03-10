@@ -8,6 +8,7 @@
 
 use dioxus::prelude::*;
 use crate::context::use_app_context;
+use crate::state::Message;
 
 /// AskUser dialog component
 ///
@@ -41,19 +42,23 @@ pub fn AskUserDialog() -> Element {
     let handle_submit = {
         let request_id = request_id.clone();
         let options = options.clone();
+        let question = request.question.clone();
         move |_| {
-            if let Some(idx) = selected_index() {
-                // Selected an option
+            let answer = if let Some(idx) = selected_index() {
                 let answer = options.get(idx).cloned().unwrap_or_default();
                 send_ask_user_response(&request_id, &answer, false, Some(idx as i32));
+                answer
             } else if allow_custom && !custom_input.read().trim().is_empty() {
-                // Custom input
                 let answer = custom_input.read().trim().to_string();
                 send_ask_user_response(&request_id, &answer, true, None);
+                answer
             } else {
-                // No selection
                 return;
-            }
+            };
+
+            // Add user reply to chat as a visible message
+            let reply_text = format!("Re: {}\n\n{}", question, answer);
+            ctx.messages.write().push(Message::user(&reply_text));
 
             // Clear the request
             ctx.ask_user.set(None);
@@ -63,8 +68,14 @@ pub fn AskUserDialog() -> Element {
     // Handle cancel
     let handle_cancel = {
         let request_id = request.request_id.clone();
+        let question = request.question.clone();
         move |_| {
             send_ask_user_cancel(&request_id);
+
+            // Add cancellation notice to chat
+            let reply_text = format!("Re: {}\n\n*Cancelled*", question);
+            ctx.messages.write().push(Message::user(&reply_text));
+
             ctx.ask_user.set(None);
         }
     };
@@ -79,22 +90,33 @@ pub fn AskUserDialog() -> Element {
     let handle_keydown = {
         let request_id = request.request_id.clone();
         let options = options.clone();
+        let question = request.question.clone();
         move |evt: KeyboardEvent| {
             if evt.key() == Key::Enter && !evt.modifiers().shift() {
                 evt.prevent_default();
 
                 // Submit if there's a selection or custom input
-                if let Some(idx) = selected_index() {
+                let answer = if let Some(idx) = selected_index() {
                     let answer = options.get(idx).cloned().unwrap_or_default();
                     send_ask_user_response(&request_id, &answer, false, Some(idx as i32));
-                    ctx.ask_user.set(None);
+                    Some(answer)
                 } else if allow_custom && !custom_input.read().trim().is_empty() {
                     let answer = custom_input.read().trim().to_string();
                     send_ask_user_response(&request_id, &answer, true, None);
+                    Some(answer)
+                } else {
+                    None
+                };
+
+                if let Some(answer) = answer {
+                    let reply_text = format!("Re: {}\n\n{}", question, answer);
+                    ctx.messages.write().push(Message::user(&reply_text));
                     ctx.ask_user.set(None);
                 }
             } else if evt.key() == Key::Escape {
                 send_ask_user_cancel(&request_id);
+                let reply_text = format!("Re: {}\n\n*Cancelled*", question);
+                ctx.messages.write().push(Message::user(&reply_text));
                 ctx.ask_user.set(None);
             }
         }

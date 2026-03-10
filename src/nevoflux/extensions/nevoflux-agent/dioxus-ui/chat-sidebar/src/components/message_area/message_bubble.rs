@@ -644,6 +644,43 @@ fn render_inline_markdown(text: &str) -> String {
             }
             result.push_str(&format!("<code>{}</code>", html_escape(&code_text)));
         }
+        // Image: ![alt](url)
+        else if ch == '!' && i + 1 < len && chars_vec[i + 1] == '[' {
+            let start = i;
+            i += 2; // skip ![
+            let mut alt_text = String::new();
+            let mut found_image = false;
+
+            // Collect alt text up to ]
+            while i < len && chars_vec[i] != ']' {
+                alt_text.push(chars_vec[i]);
+                i += 1;
+            }
+
+            // Check for ](url)
+            if i < len && chars_vec[i] == ']' && i + 1 < len && chars_vec[i + 1] == '(' {
+                i += 2; // skip ](
+                let mut url = String::new();
+                while i < len && chars_vec[i] != ')' {
+                    url.push(chars_vec[i]);
+                    i += 1;
+                }
+                if i < len && chars_vec[i] == ')' {
+                    i += 1; // skip )
+                    result.push_str(&format!(
+                        "<img src=\"{}\" alt=\"{}\" style=\"max-width:100%;border-radius:8px;\" />",
+                        html_escape(&url),
+                        html_escape(&alt_text)
+                    ));
+                    found_image = true;
+                }
+            }
+
+            if !found_image {
+                let literal: String = chars_vec[start..i.min(len)].iter().collect();
+                result.push_str(&html_escape(&literal));
+            }
+        }
         // Link: [text](url)
         else if ch == '[' {
             let start = i;

@@ -905,7 +905,7 @@ class ChannelManager {
     if (msgType === MessageTypes.BROWSER_TOOL_REQUEST) {
       const payload = message.payload;
       const action = payload?.action;
-      const DIRECT_ACTIONS = new Set(['read_artifact', 'edit_artifact']);
+      const DIRECT_ACTIONS = new Set(['read_artifact', 'edit_artifact', 'ask_user']);
       if (DIRECT_ACTIONS.has(action)) {
         console.log(`[NevoFlux] Handling ${action} directly (bypassing sidebar)`);
         executeBrowserTool(payload, 'direct')
