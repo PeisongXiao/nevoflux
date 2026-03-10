@@ -43,7 +43,12 @@ steps:
         # ---- surfer ci — derive version from TAG_NAME, stripping 'v' prefix ----
         DISPLAY_VERSION="$${TAG_NAME#v}"
         echo "Display version: $${DISPLAY_VERSION}"
-        npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version $${DISPLAY_VERSION}
+        if [ -n "$${DISPLAY_VERSION}" ]; then
+          npm run surfer -- ci --brand ${_RELEASE_BRANCH} --display-version "$${DISPLAY_VERSION}"
+        else
+          echo "WARNING: TAG_NAME not set, running surfer ci without --display-version"
+          npm run surfer -- ci --brand ${_RELEASE_BRANCH}
+        fi
 
         # ---- download Firefox source (with retries) ----
         for attempt in 1 2 3 4 5; do
