@@ -100,8 +100,10 @@ steps:
             exit 1
           fi
         done
-        tar --zstd -xf wine.tar.zst -C $$HOME/win-cross
-        rm wine.tar.zst
+        # Ensure zstd is available for .tar.zst extraction
+        which zstd || apt-get update -qq && apt-get install -y -qq zstd
+        zstd -d wine.tar.zst -o wine.tar && tar xf wine.tar -C $$HOME/win-cross
+        rm -f wine.tar.zst wine.tar
 
         # ---- VS2022 via mach python script ----
         cd engine/
