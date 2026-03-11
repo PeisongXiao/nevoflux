@@ -25,11 +25,13 @@ cd ./locales
 if [ -d "firefox-l10n/.git" ]; then
   echo "firefox-l10n already cloned, fetching updates..."
   cd firefox-l10n
-  git fetch origin || echo "Warning: git fetch failed, using existing local data"
+  git fetch --depth 1 origin $LAST_FIREFOX_L10N_COMMIT || echo "Warning: git fetch failed, using existing local data"
 else
   rm -rf firefox-l10n
-  git clone https://github.com/mozilla-l10n/firefox-l10n
+  git clone --depth 1 https://github.com/mozilla-l10n/firefox-l10n
   cd firefox-l10n
+  # Fetch the specific commit needed (shallow clone only has HEAD)
+  git fetch --depth 1 origin $LAST_FIREFOX_L10N_COMMIT
 fi
 git checkout $LAST_FIREFOX_L10N_COMMIT
 cd $CURRENT_DIR
