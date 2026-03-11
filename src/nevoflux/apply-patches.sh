@@ -198,6 +198,8 @@ if [ -f "${RULES_MK}" ]; then
     # Replace trailing $< with $(call relativize,$<) on lines containing COMPILE_C
     # (matches COMPILE_CFLAGS, COMPILE_CXXFLAGS, COMPILE_CMFLAGS, COMPILE_CMMFLAGS)
     sedi '/COMPILE_C/s/\$<$/$(call relativize,$<)/' "${RULES_MK}"
+    # Also fix resource compilation (.res) rule: create_res.py passes $< to clang-cl
+    sedi '/create_res\.py/s/\$<$/$(call relativize,$<)/' "${RULES_MK}"
   fi
 fi
 
