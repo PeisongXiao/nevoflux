@@ -306,7 +306,7 @@ steps:
   # ===================================================================
   - id: windows-x86_64-final
     name: 'gcr.io/$PROJECT_ID/nevoflux-builder:latest'
-    waitFor: ['windows-setup']
+    waitFor: ['windows-pgo-stage1']
     entrypoint: bash
     env:
       - 'SURFER_COMPAT=x86_64'
@@ -485,7 +485,7 @@ steps:
   # ===================================================================
   - id: windows-aarch64
     name: 'gcr.io/$PROJECT_ID/nevoflux-builder:latest'
-    waitFor: ['windows-setup']
+    waitFor: ['windows-x86_64-final']
     entrypoint: bash
     env:
       - 'SURFER_COMPAT=aarch64'
