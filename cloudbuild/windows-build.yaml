@@ -298,38 +298,21 @@ steps:
       - |
         set -ex
         gsutil cp /workspace/artifacts/nevoflux.win64-pgo-stage-1.zip \
-          "gs://nevoflux-builds/${TAG_NAME}/${COMMIT_SHA}/pgo-stage-1.zip"
-        echo "PGO stage 1 zip uploaded to gs://nevoflux-builds/${TAG_NAME}/${COMMIT_SHA}/pgo-stage-1.zip"
+          "gs://nevoflux-builds/${TAG_NAME}/pgo-stage-1.zip"
+        echo "PGO stage 1 zip uploaded to gs://nevoflux-builds/${TAG_NAME}/pgo-stage-1.zip"
 
   # ===================================================================
-  # 5. wait-for-pgo - Poll for PGO profile data from GHA
-  # ===================================================================
-  - id: wait-for-pgo
-    name: 'gcr.io/$PROJECT_ID/nevoflux-builder:latest'
-    waitFor: ['upload-pgo-stage1']
-    entrypoint: bash
-    args:
-      - '-c'
-      - |
-        set -ex
-        chmod +x cloudbuild/scripts/wait-for-pgo.sh
-        cloudbuild/scripts/wait-for-pgo.sh ${TAG_NAME} ${COMMIT_SHA}
-        # Move downloaded profile data to /workspace for next steps
-        mv merged.profdata /workspace/merged.profdata
-        mv en-US.log /workspace/en-US.log
-        echo "PGO profile data staged at /workspace/"
-
-  # ===================================================================
-  # 6. windows-x86_64-final - Final optimized x86_64 build with PGO
+  # 5. windows-x86_64-final - x86_64 build (no PGO)
   # ===================================================================
   - id: windows-x86_64-final
     name: 'gcr.io/$PROJECT_ID/nevoflux-builder:latest'
-    waitFor: ['wait-for-pgo']
+    waitFor: ['windows-setup']
     entrypoint: bash
     env:
       - 'SURFER_COMPAT=x86_64'
       - 'SURFER_PLATFORM=win32'
       - 'ZEN_CROSS_COMPILING=1'
+      - 'ZEN_GA_DISABLE_PGO=true'
       - 'CARGO_INCREMENTAL=0'
       - 'CARGO_TERM_COLOR=always'
       # --- sccache: Rust only (C/C++ via clang-cl+wine is incompatible) ---
@@ -345,13 +328,6 @@ steps:
       - '-c'
       - |
         set -ex
-
-        # ---- place PGO profile data where mozconfig expects it ----
-        mkdir -p $$HOME/artifact
-        cp /workspace/merged.profdata $$HOME/artifact/merged.profdata
-        cp /workspace/en-US.log $$HOME/artifact/en-US.log
-        chmod +x $$HOME/artifact/en-US.log
-        chmod +x $$HOME/artifact/merged.profdata
 
         # ---- dos2unix mozconfig ----
         dos2unix configs/windows/mozconfig
@@ -464,9 +440,8 @@ steps:
         export WINEPREFIX=$$HOME/.wine
         $$HOME/win-cross/wine/bin/wineboot --init 2>/dev/null || true
 
-        # ---- build (no ZEN_GA_GENERATE_PROFILE = PGO-optimized build) ----
+        # ---- build (no PGO) ----
         ulimit -n 4096
-        export LLVM_PROFDATA=$$HOME/.mozbuild/clang/bin/llvm-profdata
         export ZEN_RELEASE=1
         npm run build
 
@@ -506,11 +481,11 @@ steps:
         rm -rf $$HOME/.zen-keys
 
   # ===================================================================
-  # 7. windows-aarch64 - Windows aarch64 build (no PGO)
+  # 6. windows-aarch64 - Windows aarch64 build (no PGO)
   # ===================================================================
   - id: windows-aarch64
     name: 'gcr.io/$PROJECT_ID/nevoflux-builder:latest'
-    waitFor: ['windows-x86_64-final']
+    waitFor: ['windows-setup']
     entrypoint: bash
     env:
       - 'SURFER_COMPAT=aarch64'
@@ -684,7 +659,7 @@ steps:
         rm -rf $$HOME/.zen-keys
 
   # ===================================================================
-  # 8. upload-windows - Upload all Windows artifacts to GitHub release
+  # 7. upload-windows - Upload all Windows artifacts to GitHub release
   # ===================================================================
   - id: upload-windows
     name: 'gcr.io/$PROJECT_ID/nevoflux-builder:latest'

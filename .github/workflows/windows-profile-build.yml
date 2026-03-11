@@ -92,7 +92,7 @@ jobs:
       - name: Wait for and download PGO stage 1 from GCS
         if: ${{ matrix.arch == 'x86_64' }}
         env:
-          GCS_PATH: gs://nevoflux-builds/${{ inputs.build-version }}/${{ inputs.commit-sha || github.sha }}
+          GCS_PATH: gs://nevoflux-builds/v${{ inputs.build-version }}
         run: |
           $timeout = 7200
           $interval = 30
@@ -197,7 +197,7 @@ jobs:
       - name: Upload profile data to GCS
         if: ${{ matrix.arch == 'x86_64' }}
         env:
-          GCS_PATH: gs://nevoflux-builds/${{ inputs.build-version }}/${{ inputs.commit-sha || github.sha }}
+          GCS_PATH: gs://nevoflux-builds/v${{ inputs.build-version }}
         run: |
           gsutil cp merged.profdata $env:GCS_PATH/merged.profdata
           gsutil cp en-US.log $env:GCS_PATH/en-US.log
