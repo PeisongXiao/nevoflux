@@ -3,11 +3,6 @@ name: NevoFlux Release builds
 on:
   workflow_dispatch:
     inputs:
-      create_release:
-        description: 'Create a new release for this build'
-        required: false
-        default: false
-        type: 'boolean'
       update_version:
         description: 'Update the version number'
         required: false
@@ -20,16 +15,6 @@ on:
         type: 'choice'
         options:
           - 'release'
-      build_flatpak:
-        description: 'Build Flatpak package'
-        required: false
-        default: false
-        type: 'boolean'
-      sign_windows:
-        description: 'Use signed Windows binaries (requires manual signing step)'
-        required: false
-        default: false
-        type: 'boolean'
       sign_macos:
         description: 'Sign macOS builds (requires Apple certificates)'
         required: false
@@ -47,11 +32,6 @@ on:
         default: false
   workflow_call:
     inputs:
-      create_release:
-        description: 'Create a new release for this build'
-        required: false
-        default: false
-        type: 'boolean'
       update_version:
         description: 'Update the version number'
         required: false
@@ -62,16 +42,6 @@ on:
         required: true
         default: 'release'
         type: 'string'
-      build_flatpak:
-        description: 'Build Flatpak package'
-        required: false
-        default: false
-        type: 'boolean'
-      sign_windows:
-        description: 'Use signed Windows binaries (requires manual signing step)'
-        required: false
-        default: false
-        type: 'boolean'
       sign_macos:
         description: 'Sign macOS builds (requires Apple certificates)'
         required: false
@@ -109,28 +79,10 @@ jobs:
 
       - name: Debug
         run: |
-          echo "create_release: ${{ inputs.create_release }}"
           echo "update_version: ${{ inputs.update_version }}"
           echo "use sccache: ${{ inputs.use-sccache }}"
           echo "update_branch: ${{ inputs.update_branch }}"
           echo "GITHUB_REPOSITORY: ${{ github.repository }}"
-          echo "GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}"
-          echo "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}"
-
-      - name: Check if correct branch
-        if: ${{ inputs.create_release }}
-        run: |
-          echo "Checking if we are on the correct branch"
-          git branch
-          git status
-          git branch --show-current
-          branch="stable"
-          if [[ $(git branch --show-current) != $branch ]]; then
-            echo ">>> Branch mismatch"
-          # exit 1
-          else
-            echo ">>> Branch matches"
-          fi
 
   build-data:
     permissions:
@@ -337,6 +289,27 @@ jobs:
           name: nevoflux.source.tar.zst
           path: ./nevoflux.source.tar.zst
 
+      - name: Upload source tarball to draft release
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          set -ex
+          VERSION="${{ needs.build-data.outputs.version }}"
+          REPO="${{ github.repository }}"
+
+          # Create draft release if it doesn't exist
+          if ! gh release view "$VERSION" --repo "$REPO" &>/dev/null; then
+            gh release create "$VERSION" \
+              --repo "$REPO" \
+              --title "Release build - $VERSION" \
+              --draft \
+              --notes "Build in progress"
+          fi
+
+          gh release upload "$VERSION" ./nevoflux.source.tar.zst \
+            --repo "$REPO" --clobber
+          echo "Source tarball uploaded to draft release $VERSION"
+
   windows-step-2:
     name: Windows build step 2 (Generate profile data)
     uses: ./.github/workflows/windows-profile-build.yml
@@ -373,300 +346,3 @@ jobs:
       build-version: ${{ needs.build-data.outputs.version }}
       release-branch: ${{ inputs.update_branch }}
       sign_macos: ${{ inputs.sign_macos || false }}
-
-  wait-gcb:
-    name: Wait for Cloud Build artifacts
-    uses: ./.github/workflows/wait-for-gcb.yml
-    needs: [build-data]
-    secrets: inherit
-    with:
-      version: ${{ needs.build-data.outputs.version }}
-      timeout-minutes: 180
-
-  release:
-    if: ${{ inputs.create_release }}
-    permissions: write-all
-    name: Release
-    needs: [build-data, wait-gcb, windows-step-2, check-release, mac-uni, source, lint]
-    runs-on: ubuntu-latest
-    environment:
-      name: Deploy-Release
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          token: ${{ secrets.DEPLOY_KEY }}
-
-      - name: Download macOS universal DMG
-        uses: actions/download-artifact@v4
-        with:
-          name: nevoflux.macos-universal.dmg
-
-      - name: Download macOS MAR
-        uses: actions/download-artifact@v4
-        with:
-          name: macos.mar
-
-      - name: Download source tarball
-        uses: actions/download-artifact@v4
-        with:
-          name: nevoflux.source.tar.zst
-
-      - name: Download macOS update manifest
-        uses: actions/download-artifact@v4
-        with:
-          name: macos_update_manifest
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCS_SERVICE_ACCOUNT_KEY }}
-
-      - name: Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Download update manifests from GCS
-        run: |
-          VERSION="${{ needs.build-data.outputs.version }}"
-          mkdir -p linux_update_manifest_x86_64 linux_update_manifest_aarch64
-          gsutil -m cp -r "gs://nevoflux-builds/${VERSION}/linux_update_manifest_x86_64/*" linux_update_manifest_x86_64/
-          gsutil -m cp -r "gs://nevoflux-builds/${VERSION}/linux_update_manifest_aarch64/*" linux_update_manifest_aarch64/
-
-      - name: Checkout updates repository
-        uses: actions/checkout@v4
-        with:
-          repository: dorisgyl/nevoflux-updates
-          path: updates-server
-          token: ${{ secrets.DEPLOY_KEY }}
-
-      - name: Download signed Windows binaries
-        if: ${{ inputs.sign_windows }}
-        run: |
-          git clone https://github.com/dorisgyl/windows-binaries.git .github/workflows/object --depth 1
-
-      - name: Copy update manifests
-        run: |
-          cd updates-server
-          mkdir -p updates
-          cp -a ../linux_update_manifest_x86_64/.  updates/
-          cp -a ../linux_update_manifest_aarch64/.  updates/
-          if [ "${{ inputs.sign_windows }}" = "true" ]; then
-            cp -a ../.github/workflows/object/windows-x64-signed-x86_64/update_manifest/.  updates/
-            cp -a ../.github/workflows/object/windows-x64-signed-arm64/update_manifest/.  updates/
-          fi
-          cp -a ../macos_update_manifest/.  updates/
-
-      - name: Commit
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: 🚀 Update update manifests
-          commit_user_name: NevoFlux Bot
-          commit_user_email: nevoflux-bot@users.noreply.github.com
-          repository: ./updates-server
-
-      - name: Generate Release Notes
-        env:
-          RELEASE_BRANCH: ${{ inputs.update_branch }}
-        run: bash .github/workflows/src/generate_release_notes.sh
-
-      - name: Upload signed Windows binaries to release
-        if: ${{ inputs.sign_windows }}
-        env:
-          GH_TOKEN: ${{ secrets.DEPLOY_KEY }}
-        run: |
-          VERSION="${{ needs.build-data.outputs.version }}"
-          # Upload signed Windows binaries (overwrite unsigned ones from GCB)
-          for f in \
-            .github/workflows/object/windows-x64-signed-x86_64/nevoflux.win-x86_64.zip \
-            .github/workflows/object/windows-x64-signed-arm64/nevoflux.win-arm64.zip \
-            .github/workflows/object/windows-x64-signed-x86_64/windows.mar \
-            .github/workflows/object/windows-x64-signed-arm64/windows-arm64.mar \
-            .github/workflows/object/windows-x64-signed-x86_64/nevoflux.installer.exe \
-            .github/workflows/object/windows-x64-signed-arm64/nevoflux.installer-arm64.exe; do
-            [ -f "$f" ] && gh release upload "$VERSION" "$f" --clobber || true
-          done
-
-      - name: Upload macOS and source artifacts to release
-        env:
-          GH_TOKEN: ${{ secrets.DEPLOY_KEY }}
-        run: |
-          VERSION="${{ needs.build-data.outputs.version }}"
-          # Upload macOS and source artifacts (Linux/Windows already uploaded by GCB)
-          for dir in nevoflux.source.tar.zst nevoflux.macos-universal.dmg macos.mar; do
-            if [ -d "$dir" ]; then
-              for f in "$dir"/*; do
-                [ -f "$f" ] && gh release upload "$VERSION" "$f" --clobber || true
-              done
-            fi
-          done
-
-      - name: Finalize release
-        if: ${{ inputs.create_release }}
-        env:
-          GH_TOKEN: ${{ secrets.DEPLOY_KEY }}
-        run: |
-          VERSION="${{ needs.build-data.outputs.version }}"
-          gh release edit "$VERSION" \
-            --draft=false \
-            --title "Release build - $VERSION (${{ needs.build-data.outputs.build_date }})" \
-            --notes-file release_notes.md
-
-  prepare-flatpak:
-    if: ${{ inputs.create_release && inputs.build_flatpak }}
-    permissions: write-all
-    name: Prepare Flatpak
-    needs: [release, wait-gcb, build-data]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Flatpak repository
-        uses: actions/checkout@v4
-        with:
-          repository: dorisgyl/nevoflux-release-utils
-          token: ${{ secrets.DEPLOY_KEY }}
-
-      - name: Install dependencies
-        run: |
-          git pull
-          sudo apt-get update || true
-          npm ci
-
-      - name: Generate new Flatpak release
-        run: |
-          npm run build-flatpak -- \
-            --version ${{ needs.build-data.outputs.version }}
-
-      - name: Commit
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: 🚀 Update releases for Flatpak
-          commit_user_name: NevoFlux Bot
-          commit_user_email: nevoflux-bot@users.noreply.github.com
-
-      - name: Checkout Flatpak repository
-        uses: actions/checkout@v4
-        with:
-          repository: dorisgyl/nevoflux-flatpak
-          token: ${{ secrets.DEPLOY_KEY }}
-          path: flatpak
-
-      - name: Move releases.xml
-        run: |
-          pwd
-          ls .
-          ls ..
-          mv releases.xml ./flatpak/app.zen_browser.zen.metainfo.xml
-          # output the version to the file
-          echo -n ${{ needs.build-data.outputs.version }} > ./flatpak/version
-
-      - name: Commit
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: '[release]: Update Flatpak manifest'
-          commit_user_name: NevoFlux Bot
-          commit_user_email: nevoflux-bot@users.noreply.github.com
-          repository: ./flatpak
-
-      - name: Wait 2 minutes for the Flatpak repo to update
-        run: sleep 120
-
-  release-flatpak:
-    if: ${{ inputs.create_release && inputs.build_flatpak }}
-    permissions: write-all
-    name: Release Flatpak
-    needs: [prepare-flatpak, build-data]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Flatpak repository
-        uses: actions/checkout@v4
-        with:
-          repository: flathub/app.zen_browser.zen
-          token: ${{ secrets.DEPLOY_KEY }}
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCS_SERVICE_ACCOUNT_KEY }}
-
-      - name: Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Download Linux builds from GCS
-        run: |
-          VERSION="${{ needs.build-data.outputs.version }}"
-          gsutil cp "gs://nevoflux-builds/${VERSION}/nevoflux.linux-x86_64.tar.xz" .
-          gsutil cp "gs://nevoflux-builds/${VERSION}/nevoflux.linux-aarch64.tar.xz" .
-
-      - name: Update repository
-        uses: actions/checkout@v4
-        with:
-          path: zen-browser
-          token: ${{ secrets.DEPLOY_KEY }}
-
-      - name: Download Flatpak archive
-        run: |
-          for attempt in 1 2 3 4 5; do
-            wget https://github.com/dorisgyl/nevoflux-flatpak/releases/latest/download/archive.tar -O archive.tar && break
-            if [ $attempt -lt 5 ]; then
-              echo "::warning::Download attempt $attempt/5 failed. Retrying in $((attempt * 15))s..."
-              sleep $((attempt * 15))
-            else
-              echo "::error::Download failed after 5 attempts"
-              exit 1
-            fi
-          done
-
-      - name: Setup Git
-        run: |
-          git config --global user.name "NevoFlux Bot"
-          git config --global user.email "nevoflux-bot@users.noreply.github.com"
-
-      - name: Prepare Flatpak manifest
-        run: |
-          python3 ./zen-browser/scripts/prepare-flatpak-release.py \
-            --flatpak-archive archive.tar \
-            --version ${{ needs.build-data.outputs.version }} \
-            --linux-archive nevoflux.linux-x86_64.tar.xz \
-            --linux-aarch64-archive nevoflux.linux-aarch64.tar.xz \
-            --output app.zen_browser.zen.yml \
-            --template-root ./zen-browser/build/flatpak
-
-      - name: Commit changes
-        run: |
-          git add app.zen_browser.zen.yml
-          git commit -m "Update to version ${{ needs.build-data.outputs.version }}"
-
-      - name: Clean up
-        run: |
-          rm -rf zen-browser
-          rm -rf archive.tar
-          rm -rf nevoflux.linux-x86_64.tar.xz
-          rm -rf nevoflux.linux-aarch64.tar.xz
-
-      - name: Upload Flatpak manifest
-        uses: actions/upload-artifact@v4
-        with:
-          retention-days: 5
-          name: app.zen_browser.zen.yml
-          path: ./app.zen_browser.zen.yml
-
-      - name: Create pull request
-        uses: peter-evans/create-pull-request@v7
-        env:
-          GIT_TRACE: 1
-          GIT_CURL_VERBOSE: 1
-        with:
-          token: ${{ secrets.DEPLOY_KEY }}
-          commit-message: Update to version `${{ needs.build-data.outputs.version }}`
-          title: Update to version `${{ needs.build-data.outputs.version }}`
-          body: |
-            This PR updates the NevoFlux Flatpak package to version ${{ needs.build-data.outputs.version }}.
-
-            @${{ github.actor }} please review and merge this PR.
-          branch: update-to-${{ needs.build-data.outputs.version }}
-          base: master
-          git-token: ${{ secrets.DEPLOY_KEY }}
-          delete-branch: true

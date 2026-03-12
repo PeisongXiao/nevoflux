@@ -328,3 +328,27 @@ jobs:
           retention-days: 5
           name: macos_update_manifest
           path: ./dist/update
+
+      - name: Upload macOS artifacts to draft release
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          set -ex
+          VERSION="${{ inputs.build-version }}"
+          REPO="${{ github.repository }}"
+
+          # Create draft release if it doesn't exist
+          if ! gh release view "$VERSION" --repo "$REPO" &>/dev/null; then
+            gh release create "$VERSION" \
+              --repo "$REPO" \
+              --title "Release build - $VERSION" \
+              --draft \
+              --notes "Build in progress"
+          fi
+
+          # Upload DMG and MAR
+          gh release upload "$VERSION" ./nevoflux.macos-universal.dmg \
+            --repo "$REPO" --clobber
+          gh release upload "$VERSION" ./macos.mar \
+            --repo "$REPO" --clobber
+          echo "macOS DMG and MAR uploaded to draft release $VERSION"
