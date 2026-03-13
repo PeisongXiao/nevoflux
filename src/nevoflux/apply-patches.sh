@@ -193,12 +193,16 @@ fi
 #     The relativize function is a no-op when WINE is not defined.
 RULES_MK="${ENGINE_DIR}/config/rules.mk"
 if [ -f "${RULES_MK}" ]; then
+  # Fix C/C++ compilation rules
   if ! grep -q 'COMPILE_C.*relativize' "${RULES_MK}"; then
-    echo "Patching rules.mk: relativize source paths for clang-cl cross-compile..."
+    echo "Patching rules.mk: relativize C/C++ source paths for clang-cl cross-compile..."
     # Replace trailing $< with $(call relativize,$<) on lines containing COMPILE_C
     # (matches COMPILE_CFLAGS, COMPILE_CXXFLAGS, COMPILE_CMFLAGS, COMPILE_CMMFLAGS)
     sedi '/COMPILE_C/s/\$<$/$(call relativize,$<)/' "${RULES_MK}"
-    # Also fix resource compilation (.res) rule: create_res.py passes $< to clang-cl
+  fi
+  # Fix resource compilation (.res) rule
+  if ! grep -q 'create_res\.py.*relativize' "${RULES_MK}"; then
+    echo "Patching rules.mk: relativize .res source path for clang-cl cross-compile..."
     sedi '/create_res\.py/s/\$<$/$(call relativize,$<)/' "${RULES_MK}"
   fi
 fi
