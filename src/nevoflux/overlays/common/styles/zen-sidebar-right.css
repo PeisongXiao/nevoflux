@@ -25,10 +25,19 @@
 }
 
 /* Show sidebar splitter for drag-to-resize.
- * Overrides opacity:0 and negative margin set in zen-sidebar.css. */
+ * Overrides opacity:0 and negative margin set in zen-sidebar.css.
+ * Width override: on Windows overlay-scrollbars shrinks to 2px; use 6px everywhere. */
 #zen-tabbox-wrapper #sidebar-splitter {
   opacity: 1 !important;
   margin: 0 !important;
+  width: 6px !important;
+  min-width: 6px !important;
+  cursor: ew-resize !important;
+  background-color: transparent !important;
+}
+
+#zen-tabbox-wrapper #sidebar-splitter:hover {
+  background-color: var(--focus-outline-color) !important;
 }
 
 /* Hide sidebar header (system menu) */
