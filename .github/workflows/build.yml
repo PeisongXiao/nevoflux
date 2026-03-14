@@ -322,9 +322,22 @@ jobs:
       profile-data-path-archive: nevoflux.win64-pgo-stage-1.zip
       release-branch: ${{ inputs.update_branch }}
 
-  mac:
-    name: macOS build
-    uses: ./.github/workflows/macos-release-build.yml
+  mac-x86_64:
+    name: macOS build (x86_64)
+    uses: ./.github/workflows/macos-x86_64-release-build.yml
+    permissions:
+      contents: write
+    secrets: inherit
+    needs: [build-data, buildid]
+    with:
+      build-version: ${{ needs.build-data.outputs.version }}
+      release-branch: ${{ inputs.update_branch }}
+      MOZ_BUILD_DATE: ${{needs.buildid.outputs.buildids}}
+      use-sccache: ${{ inputs.use-sccache }}
+
+  mac-aarch64:
+    name: macOS build (aarch64)
+    uses: ./.github/workflows/macos-aarch64-release-build.yml
     permissions:
       contents: write
     secrets: inherit
@@ -341,7 +354,7 @@ jobs:
     permissions:
       contents: write
     secrets: inherit
-    needs: [build-data, mac]
+    needs: [build-data, mac-x86_64, mac-aarch64]
     with:
       build-version: ${{ needs.build-data.outputs.version }}
       release-branch: ${{ inputs.update_branch }}

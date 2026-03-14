@@ -1,0 +1,383 @@
+name: macOS aarch64 Release Build
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-version:
+        description: 'The version to build'
+        required: true
+        type: string
+        default: '0.0.1'
+      release-branch:
+        description: 'The branch to build'
+        required: true
+        type: string
+        default: 'release'
+      MOZ_BUILD_DATE:
+        description: 'Build date (leave empty to auto-generate)'
+        type: string
+        required: false
+        default: ''
+      use-sccache:
+        description: 'Use sccache'
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      build-version:
+        description: 'The version to build'
+        required: true
+        type: string
+      release-branch:
+        description: 'The branch to build'
+        required: true
+        type: string
+      MOZ_BUILD_DATE:
+        type: string
+        required: true
+        default: ''
+      use-sccache:
+        description: 'Use sccache'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  mac-aarch64-build:
+    name: Build macOS - aarch64
+    runs-on: [self-hosted, macos]
+    timeout-minutes: 720
+
+    env:
+      SCCACHE_GHA_ENABLED: ${{ inputs.use-sccache && 'true' || 'false' }}
+      CARGO_TERM_COLOR: always
+      RUSTC_WRAPPER: ${{ inputs.use-sccache && 'sccache' || '' }}
+      CARGO_INCREMENTAL: 0
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@main
+        if: ${{ inputs.use-sccache }}
+        with:
+          disable_annotations: true
+
+      - name: Expose actions cache variables
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env['ACTIONS_CACHE_URL'])
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env['ACTIONS_RUNTIME_TOKEN'])
+
+      - name: Setup Git
+        run: |
+          git config --global user.email "mauro-balades@users.noreply.github.com"
+          git config --global user.name "mauro-balades"
+
+      - name: Install system dependencies
+        run: |
+          BREW_PACKAGES="cairo gnu-tar mercurial watchman"
+          MISSING=""
+          for pkg in $BREW_PACKAGES; do
+            if ! brew list "$pkg" &>/dev/null; then
+              MISSING="$MISSING $pkg"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "Installing missing brew packages:$MISSING"
+            brew update || true
+            brew install $MISSING || true
+          else
+            echo "All brew dependencies already installed, skipping."
+          fi
+
+          sudo pip3 install setuptools || true
+
+          export PATH="$(python3 -m site --user-base)/bin":$PATH
+          python3 -m pip install --user mercurial || true
+
+          RUST_VER=$(cat .rust-toolchain)
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $RUST_VER && break
+            if [ $attempt -lt 5 ]; then
+              echo "::warning::Download attempt $attempt/5 failed. Retrying in $((attempt * 15))s..."
+              sleep $((attempt * 15))
+            else
+              echo "::error::Download failed after 5 attempts"
+              exit 1
+            fi
+          done
+          source $HOME/.cargo/env
+          rustup target add --toolchain $RUST_VER aarch64-apple-darwin
+
+      - name: Force usage of gnu-tar
+        run: |
+          echo 'export PATH="/usr/local/opt/gnu-tar/libexec/gnubin:$PATH"' >> ~/.bash_profile
+          echo 'export PATH="/usr/local/opt/gnu-tar/libexec/gnubin:$PATH"' >> ~/.zsh
+          source ~/.bash_profile
+
+      - name: Install dependencies
+        run: |
+          npm ci
+
+      - name: Load surfer CI setup
+        run: npm run surfer -- ci --brand ${{ inputs.release-branch }} --display-version ${{ inputs.build-version }}
+
+      - name: Check engine source version
+        id: engine-check
+        run: |
+          DESIRED_VERSION=$(node -p "require('./surfer.json').version.version")
+          echo "Target engine version: $DESIRED_VERSION"
+          if [ -f engine/config/milestone.txt ]; then
+            CURRENT_VERSION=$(grep -v '^#' engine/config/milestone.txt | grep -v '^$' | tail -1)
+            echo "Current engine version: $CURRENT_VERSION"
+            if [ "$CURRENT_VERSION" = "$DESIRED_VERSION" ]; then
+              echo "Engine source already at version $DESIRED_VERSION, skipping download."
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "Version mismatch ($CURRENT_VERSION != $DESIRED_VERSION), will download."
+          else
+            echo "No engine source found, will download."
+          fi
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      - name: Download Firefox source and dependencies
+        if: steps.engine-check.outputs.skip != 'true'
+        run: |
+          for attempt in 1 2 3 4 5; do
+            npm run download && break
+            if [ $attempt -lt 5 ]; then
+              echo "::warning::Download attempt $attempt/5 failed. Retrying in $((attempt * 15))s..."
+              sleep $((attempt * 15))
+            else
+              echo "::error::Download failed after 5 attempts"
+              exit 1
+            fi
+          done
+
+      - name: Import
+        env:
+          SURFER_COMPAT: aarch64
+        run: npm run import -- --verbose
+
+      - name: Download NevoFlux Agent binary
+        run: |
+          PLATFORM="macos"
+          ARCH="aarch64"
+          ARCHIVE_NAME="nevoflux-agent-${PLATFORM}-${ARCH}.tar.gz"
+          mkdir -p /tmp/agent/
+
+          # Find the latest release tag
+          LATEST_TAG=$(gh release view --repo dorisgyl/nevoflux-agent --json tagName --jq '.tagName' 2>/dev/null || true)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "::warning::No releases found in nevoflux-agent repo, skipping agent download."
+          else
+            echo "Latest release tag: $LATEST_TAG"
+            ASSET_EXISTS=$(gh release view "$LATEST_TAG" --repo dorisgyl/nevoflux-agent --json assets --jq ".assets[].name" 2>/dev/null | grep -c "^${ARCHIVE_NAME}$" || true)
+            if [ "$ASSET_EXISTS" = "0" ]; then
+              echo "::warning::Asset ${ARCHIVE_NAME} not found in release ${LATEST_TAG}, skipping agent download."
+            else
+              for attempt in 1 2 3; do
+                gh release download "$LATEST_TAG" \
+                  --repo dorisgyl/nevoflux-agent \
+                  --pattern "${ARCHIVE_NAME}" \
+                  --dir /tmp/agent/ --clobber && break
+                if [ $attempt -lt 3 ]; then
+                  echo "::warning::Download attempt $attempt/3 failed. Retrying in $((attempt * 10))s..."
+                  sleep $((attempt * 10))
+                else
+                  echo "::warning::Agent binary download failed after 3 attempts, continuing..."
+                fi
+              done
+            fi
+          fi
+
+          if [ -f "/tmp/agent/${ARCHIVE_NAME}" ]; then
+            mkdir -p build/AppDir/distribution/bin/
+            echo "Archive contents:"
+            tar -tzf "/tmp/agent/${ARCHIVE_NAME}" | head -20
+            tar -xzf "/tmp/agent/${ARCHIVE_NAME}" -C /tmp/agent/
+            echo "Extracted contents of /tmp/agent/:"
+            ls -la /tmp/agent/
+            mv /tmp/agent/nevoflux-agent build/AppDir/distribution/bin/nevoflux-agent
+            chmod +x build/AppDir/distribution/bin/nevoflux-agent
+            echo "Agent binary installed: build/AppDir/distribution/bin/nevoflux-agent"
+            # Copy models directory if present in release archive
+            if [ -d "/tmp/agent/models" ]; then
+              cp -r /tmp/agent/models build/AppDir/distribution/bin/models
+              echo "Models directory installed"
+            fi
+          else
+            echo "::notice::No agent binary available for ${PLATFORM}-${ARCH}, build continues without it."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy soul templates to distribution
+        run: |
+          mkdir -p build/AppDir/distribution/bin/defaults/soul
+          if [ -d "docs/reference/templates" ]; then
+            cp docs/reference/templates/*.md build/AppDir/distribution/bin/defaults/soul/
+            echo "Soul templates copied to distribution:"
+            ls -la build/AppDir/distribution/bin/defaults/soul/
+          else
+            echo "::warning::docs/reference/templates/ not found, skipping soul templates"
+          fi
+
+      - name: Copy built-in skills to distribution
+        run: |
+          if [ -d "docs/reference/skills" ]; then
+            mkdir -p build/AppDir/distribution/bin/defaults/skills
+            cp -r docs/reference/skills/* build/AppDir/distribution/bin/defaults/skills/
+            echo "Built-in skills copied to distribution:"
+            find build/AppDir/distribution/bin/defaults/skills -type f | head -20
+          else
+            echo "::warning::docs/reference/skills/ not found, skipping skills"
+          fi
+
+      - name: Verify distribution essentials
+        run: |
+          set -e
+          echo "Checking distribution directory contents:"
+          find build/AppDir/distribution -type f | head -30
+          if [ ! -d "build/AppDir/distribution/bin/models" ]; then
+            echo "::warning::models directory missing from distribution — agent release archive may not include it"
+          else
+            echo "✓ models directory present"
+          fi
+
+      - name: Bootstrap
+        run: |
+          cd engine
+          export SURFER_PLATFORM="darwin"
+          export PATH="$(python3 -m site --user-base)/bin":$PATH
+          # Always exist with 0, even if bootstrap fails
+          ./mach --no-interactive bootstrap --application-choice browser --no-system-changes --exclude macos-sdk || true
+          cd ..
+
+      - name: Pin Rust version after bootstrap
+        run: |
+          source $HOME/.cargo/env
+          RUST_VER=$(cat .rust-toolchain)
+          rustup default $RUST_VER
+          rustc --version
+          rustup target add --toolchain $RUST_VER aarch64-apple-darwin
+
+      - name: Build language packs
+        run: |
+          for attempt in 1 2 3 4 5; do
+            sh scripts/download-language-packs.sh && break
+            if [ $attempt -lt 5 ]; then
+              echo "::warning::Download attempt $attempt/5 failed. Retrying in $((attempt * 15))s..."
+              sleep $((attempt * 15))
+            else
+              echo "::error::Download failed after 5 attempts"
+              exit 1
+            fi
+          done
+
+      - name: Insert API Keys
+        run: |
+          mkdir -p ~/.zen-keys
+          echo "${{ secrets.ZEN_SAFEBROWSING_API_KEY }}" > ~/.zen-keys/safebrowsing.dat
+
+      - name: Clean stale build artifacts
+        run: |
+          rm -rf engine/obj-aarch64-apple-darwin/
+          echo "Cleaned stale build artifacts for aarch64"
+
+      - name: Build NevoFlux
+        env:
+          SURFER_COMPAT: aarch64
+          ZEN_RELEASE_BRANCH: ${{ inputs.release-branch }}
+          RUSTUP_TOOLCHAIN: '1.83'
+          # Disable LTO for macOS: ld64 linker bug check conflicts with MOZ_AUTOMATION
+          ZEN_DISABLE_LTO: '1'
+        run: |
+          export SURFER_PLATFORM="darwin"
+          # Use local Xcode SDK to avoid 403 errors downloading from Mozilla servers
+          export MACOS_SDK_DIR=$(xcrun --show-sdk-path 2>/dev/null || echo "")
+          if [[ -n "$MACOS_SDK_DIR" ]]; then
+            echo "Using local macOS SDK: $MACOS_SDK_DIR"
+            export SDKROOT="$MACOS_SDK_DIR"
+          fi
+          if [[ -n "${{ inputs.MOZ_BUILD_DATE }}" ]];then
+            export MOZ_BUILD_DATE="${{ inputs.MOZ_BUILD_DATE }}"
+          fi
+          bash .github/workflows/src/release-build.sh
+
+      - name: Package
+        env:
+          SURFER_COMPAT: aarch64
+          ZEN_GA_DISABLE_PGO: true
+        run: |
+          export SURFER_PLATFORM="darwin"
+          export ZEN_RELEASE=1
+          npm run package
+
+      - name: Remove API Keys
+        run: |
+          rm -rf ~/.zen-keys
+
+      - name: Inject distribution files into package
+        run: |
+          set -ex
+          ARCH="aarch64"
+          OBJ_DIR="engine/obj-${ARCH}-apple-darwin"
+
+          # Find the main browser .app bundle.
+          STAGING_APP=$(find "$OBJ_DIR/dist" -maxdepth 3 -name "*.app" -type d \
+            ! -path "*/dist/bin/*" \
+            2>/dev/null | head -1)
+
+          if [ -d "build/AppDir/distribution" ] && [ -n "$STAGING_APP" ]; then
+            echo "Found browser app bundle: $STAGING_APP"
+            mkdir -p "$STAGING_APP/Contents/Resources/distribution"
+            cp -r build/AppDir/distribution/* "$STAGING_APP/Contents/Resources/distribution/"
+            echo "Distribution contents:"
+            ls -la "$STAGING_APP/Contents/Resources/distribution/"
+
+            # Re-create DMG with distribution files included
+            rm -f dist/*.dmg
+            hdiutil create -volname "NevoFlux" \
+              -srcfolder "$(dirname "$STAGING_APP")" \
+              -ov -format UDZO "dist/nevoflux-aarch64.dmg"
+            echo "DMG re-created with distribution files"
+          else
+            echo "::warning::Distribution files or staging app not found, skipping injection"
+            echo "Available .app directories:"
+            find "$OBJ_DIR/dist" -maxdepth 3 -name "*.app" -type d 2>/dev/null || true
+          fi
+
+      - name: Rename artifacts
+        run: |
+          set -ex
+          mv ./dist/*.dmg ./nevoflux-aarch64-apple-darwin.dmg
+          mv ./engine/obj-aarch64-apple-darwin/dist/host/bin/mar ./nevoflux-macos-host-mar
+
+      - name: Upload dist dmg
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: nevoflux-aarch64-apple-darwin.dmg
+          path: ./nevoflux-aarch64-apple-darwin.dmg
+
+      - name: Upload host mar
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: nevoflux-macos-host-mar
+          path: ./nevoflux-macos-host-mar

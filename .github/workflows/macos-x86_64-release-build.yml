@@ -1,4 +1,4 @@
-name: macOS Release Build
+name: macOS x86_64 Release Build
 permissions:
   contents: read
 
@@ -46,15 +46,11 @@ on:
         default: false
 
 jobs:
-  mac-build:
-    name: Build macOS - ${{ matrix.arch }}
+  mac-x86_64-build:
+    name: Build macOS - x86_64
     runs-on: [self-hosted, macos]
     timeout-minutes: 720
 
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
     env:
       SCCACHE_GHA_ENABLED: ${{ inputs.use-sccache && 'true' || 'false' }}
       CARGO_TERM_COLOR: always
@@ -124,12 +120,7 @@ jobs:
             fi
           done
           source $HOME/.cargo/env
-
-          if test "${{ matrix.arch }}" = "aarch64"; then
-            rustup target add --toolchain $RUST_VER aarch64-apple-darwin
-          else
-            rustup target add --toolchain $RUST_VER x86_64-apple-darwin
-          fi
+          rustup target add --toolchain $RUST_VER x86_64-apple-darwin
 
       - name: Force usage of gnu-tar
         run: |
@@ -179,13 +170,13 @@ jobs:
 
       - name: Import
         env:
-          SURFER_COMPAT: ${{ matrix.arch }}
+          SURFER_COMPAT: x86_64
         run: npm run import -- --verbose
 
       - name: Download NevoFlux Agent binary
         run: |
           PLATFORM="macos"
-          ARCH="${{ matrix.arch }}"
+          ARCH="x86_64"
           ARCHIVE_NAME="nevoflux-agent-${PLATFORM}-${ARCH}.tar.gz"
           mkdir -p /tmp/agent/
 
@@ -283,11 +274,7 @@ jobs:
           RUST_VER=$(cat .rust-toolchain)
           rustup default $RUST_VER
           rustc --version
-          if test "${{ matrix.arch }}" = "aarch64"; then
-            rustup target add --toolchain $RUST_VER aarch64-apple-darwin
-          else
-            rustup target add --toolchain $RUST_VER x86_64-apple-darwin
-          fi
+          rustup target add --toolchain $RUST_VER x86_64-apple-darwin
 
       - name: Build language packs
         run: |
@@ -309,16 +296,16 @@ jobs:
 
       - name: Clean stale build artifacts
         run: |
-          rm -rf engine/obj-${{ matrix.arch }}-apple-darwin/
-          echo "Cleaned stale build artifacts for ${{ matrix.arch }}"
+          rm -rf engine/obj-x86_64-apple-darwin/
+          echo "Cleaned stale build artifacts for x86_64"
 
       - name: Build NevoFlux
         env:
-          SURFER_COMPAT: ${{ matrix.arch }}
+          SURFER_COMPAT: x86_64
           ZEN_RELEASE_BRANCH: ${{ inputs.release-branch }}
           RUSTUP_TOOLCHAIN: '1.83'
           # Disable PGO for x86_64 cross-compile: can't run x86_64 binary on ARM64 runner
-          ZEN_GA_DISABLE_PGO: ${{ matrix.arch == 'x86_64' && 'true' || '' }}
+          ZEN_GA_DISABLE_PGO: 'true'
           # Disable LTO for macOS: ld64 linker bug check conflicts with MOZ_AUTOMATION
           ZEN_DISABLE_LTO: '1'
         run: |
@@ -336,7 +323,7 @@ jobs:
 
       - name: Package
         env:
-          SURFER_COMPAT: ${{ matrix.arch }}
+          SURFER_COMPAT: x86_64
           ZEN_GA_DISABLE_PGO: true
         run: |
           export SURFER_PLATFORM="darwin"
@@ -350,12 +337,10 @@ jobs:
       - name: Inject distribution files into package
         run: |
           set -ex
-          ARCH="${{ matrix.arch }}"
+          ARCH="x86_64"
           OBJ_DIR="engine/obj-${ARCH}-apple-darwin"
 
           # Find the main browser .app bundle.
-          # dist/bin/ contains helper apps (plugin-container.app, updater.app) — skip it.
-          # The main browser .app is under dist/<binaryName>/ (e.g. dist/nevoflux/Nightly.app).
           STAGING_APP=$(find "$OBJ_DIR/dist" -maxdepth 3 -name "*.app" -type d \
             ! -path "*/dist/bin/*" \
             2>/dev/null | head -1)
@@ -371,7 +356,7 @@ jobs:
             rm -f dist/*.dmg
             hdiutil create -volname "NevoFlux" \
               -srcfolder "$(dirname "$STAGING_APP")" \
-              -ov -format UDZO "dist/nevoflux-${ARCH}.dmg"
+              -ov -format UDZO "dist/nevoflux-x86_64.dmg"
             echo "DMG re-created with distribution files"
           else
             echo "::warning::Distribution files or staging app not found, skipping injection"
@@ -382,28 +367,18 @@ jobs:
       - name: Rename artifacts
         run: |
           set -ex
-          mv ./dist/*.dmg ./nevoflux-${{ matrix.arch }}-apple-darwin.dmg
-          mv ./engine/obj-${{ matrix.arch }}-apple-darwin/dist/host/bin/mar ./nevoflux-macos-host-mar
-          mv ./engine/obj-${{ matrix.arch }}-apple-darwin/dist/bin/platform.ini ./platform.ini
+          mv ./dist/*.dmg ./nevoflux-x86_64-apple-darwin.dmg
+          mv ./engine/obj-x86_64-apple-darwin/dist/bin/platform.ini ./platform.ini
 
       - name: Upload dist dmg
         uses: actions/upload-artifact@v4
         with:
           retention-days: 1
-          name: nevoflux-${{ matrix.arch }}-apple-darwin.dmg
-          path: ./nevoflux-${{ matrix.arch }}-apple-darwin.dmg
-
-      - name: Upload host mar
-        uses: actions/upload-artifact@v4
-        if: matrix.arch == 'aarch64'
-        with:
-          retention-days: 1
-          name: nevoflux-macos-host-mar
-          path: ./nevoflux-macos-host-mar
+          name: nevoflux-x86_64-apple-darwin.dmg
+          path: ./nevoflux-x86_64-apple-darwin.dmg
 
       - name: Upload platform.ini
         uses: actions/upload-artifact@v4
-        if: matrix.arch == 'x86_64'
         with:
           retention-days: 1
           name: platform.ini
