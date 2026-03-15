@@ -74,7 +74,9 @@ jobs:
           python3 -m pip install --user mercurial || true
 
           if [ "${{ inputs.sign_macos }}" = "true" ]; then
-            cargo install apple-codesign
+            # --locked: use published Cargo.lock to avoid transitive deps
+            # pulling in crates requiring Rust 1.85+ (edition2024)
+            cargo install apple-codesign --locked
           fi
 
       - name: Force usage of gnu-tar
