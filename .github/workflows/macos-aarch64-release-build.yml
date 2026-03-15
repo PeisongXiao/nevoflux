@@ -306,6 +306,8 @@ jobs:
           RUSTUP_TOOLCHAIN: '1.83'
           # Disable LTO for macOS: ld64 linker bug check conflicts with MOZ_AUTOMATION
           ZEN_DISABLE_LTO: '1'
+          # Disable PGO: instrumented browser hangs on self-hosted runner
+          ZEN_GA_DISABLE_PGO: 'true'
         run: |
           export SURFER_PLATFORM="darwin"
           # Use local Xcode SDK to avoid 403 errors downloading from Mozilla servers
