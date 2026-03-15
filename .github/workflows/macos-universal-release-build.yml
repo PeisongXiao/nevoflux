@@ -211,8 +211,13 @@ jobs:
           # When builds come from separate workflow runs they differ in BuildID,
           # SourceStamp, CFBundleVersion. Find all differing text files in aarch64
           # and overwrite with x86_64 versions.
+          #
+          # Also sync omni.ja files: these are zip archives containing JS/CSS/locale
+          # resources (no arch-specific binaries). AppConstants.sys.mjs lives inside
+          # omni.ja and contains MOZ_BUILDID/SOURCE_REVISION_URL which differ between
+          # builds. Copying the entire jar normalizes all embedded metadata at once.
           echo "=== Scanning for differing files ==="
-          find "$ARM_APP" -type f \( -name "*.plist" -o -name "*.ini" -o -name "*.mjs" -o -name "*.js" -o -name "*.json" \) | while read -r arm_file; do
+          find "$ARM_APP" -type f \( -name "*.plist" -o -name "*.ini" -o -name "*.mjs" -o -name "*.js" -o -name "*.json" -o -name "*.ja" \) | while read -r arm_file; do
             rel="${arm_file#$ARM_APP/}"
             x86_file="$X86_APP/$rel"
             if [ -f "$x86_file" ] && ! diff -q "$x86_file" "$arm_file" > /dev/null 2>&1; then
