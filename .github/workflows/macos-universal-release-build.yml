@@ -202,11 +202,31 @@ jobs:
           echo "${{ secrets.macOS_PROVISIONING_PROFILE }}" | base64 --decode > ./engine/Zen_Browser.provisionprofile
           ls -la
 
+      - name: Sync build metadata before unify
+        run: |
+          set -ex
+          X86_APP="engine/obj-x86_64-apple-darwin/dist/${{ env.APP_NAME }}.app"
+          ARM_APP="engine/obj-aarch64-apple-darwin/dist/${{ env.APP_NAME }}.app"
+          # unify.py requires these files to be identical across architectures.
+          # When builds come from separate workflow runs they have different
+          # BuildID, SourceStamp, and CFBundleVersion. Copy x86_64 versions
+          # to aarch64 so unify succeeds (content is arch-independent).
+          for f in \
+            Contents/Info.plist \
+            Contents/Resources/application.ini \
+            Contents/Resources/platform.ini \
+            Contents/Resources/modules/AppConstants.sys.mjs; do
+            if [ -f "$X86_APP/$f" ] && [ -f "$ARM_APP/$f" ]; then
+              cp "$X86_APP/$f" "$ARM_APP/$f"
+              echo "Synced: $f"
+            fi
+          done
+
       - name: Unify architectures
         run: |
           cd engine
           ./mach python "./toolkit/mozapps/installer/unify.py" "./obj-x86_64-apple-darwin/dist/${{ env.APP_NAME }}.app" "./obj-aarch64-apple-darwin/dist/${{ env.APP_NAME }}.app"
-          echo "Merged aaarch64 into x86_64!"
+          echo "Merged aarch64 into x86_64!"
 
       - name: Regenerate precomplete after unify
         run: |
