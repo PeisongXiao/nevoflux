@@ -301,7 +301,7 @@ jobs:
             --apple-id "${{ secrets.macOS_AppleAccountId }}" \
             --team-id "${{ secrets.macOS_AppleDeveloperIdTeamId }}" \
             --password "${{ secrets.macOS_AppleDeveloperIdPassword }}" \
-            --no-s3-acceleration \
+            --timeout 30m \
             --wait
           xcrun stapler staple "nevoflux.macos-universal.dmg"
 
