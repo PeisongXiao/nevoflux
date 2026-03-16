@@ -254,12 +254,10 @@ jobs:
           python3 "$GITHUB_WORKSPACE/engine/config/createprecomplete.py"
           echo "precomplete file regenerated at: $(find "$GITHUB_WORKSPACE/$APP_PATH" -name precomplete 2>/dev/null)"
 
-      - name: Import APPLE DEVELOPER ID CERTIFICATE for .app
+      - name: Clean stale keychain (self-hosted runner)
         if: ${{ inputs.sign_macos }}
-        uses: Apple-Actions/import-codesign-certs@v3
-        with:
-          p12-file-base64: ${{ secrets.macOS_CERTIFICATES_P12_For_App_BASE64 }}
-          p12-password: ${{ secrets.macOS_CERTIFICATES_P12_PASSWORD }}
+        run: |
+          security delete-keychain signing_temp.keychain 2>/dev/null || true
 
       - name: Copy provisioning profile for .app (embedded in .app)
         if: ${{ inputs.sign_macos }}
