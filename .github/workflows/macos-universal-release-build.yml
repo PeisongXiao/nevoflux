@@ -308,7 +308,7 @@ jobs:
         run: |
           rm -f ./engine/Zen_Browser.provisionprofile
 
-      - name: Sign .dmg
+      - name: Sign and notarize .dmg
         if: ${{ inputs.sign_macos }}
         run: |
           set -ex
@@ -317,13 +317,44 @@ jobs:
             --p12-file engine/zenCert.p12 \
             --p12-password-file engine/zenpCertPassword.passwd \
             nevoflux.macos-universal.dmg
-          xcrun notarytool submit "nevoflux.macos-universal.dmg" \
+
+          # Submit for notarization (non-blocking)
+          SUBMIT_OUT=$(xcrun notarytool submit "nevoflux.macos-universal.dmg" \
             --apple-id "${{ secrets.macOS_AppleAccountId }}" \
             --team-id "${{ secrets.macOS_AppleDeveloperIdTeamId }}" \
             --password "${{ secrets.macOS_AppleDeveloperIdPassword }}" \
-            --timeout 30m \
-            --wait
-          xcrun stapler staple "nevoflux.macos-universal.dmg"
+            2>&1)
+          echo "$SUBMIT_OUT"
+          SUB_ID=$(echo "$SUBMIT_OUT" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+          echo "Submission ID: $SUB_ID"
+          if [ -z "$SUB_ID" ]; then
+            echo "::error::Failed to get submission ID"
+            exit 1
+          fi
+
+          # Poll for up to 60 minutes (120 * 30s)
+          for i in $(seq 1 120); do
+            sleep 30
+            STATUS=$(xcrun notarytool info "$SUB_ID" \
+              --apple-id "${{ secrets.macOS_AppleAccountId }}" \
+              --team-id "${{ secrets.macOS_AppleDeveloperIdTeamId }}" \
+              --password "${{ secrets.macOS_AppleDeveloperIdPassword }}" 2>&1) || true
+            echo "Poll $i/120: $(echo "$STATUS" | grep -i status || echo "$STATUS" | tail -3)"
+            if echo "$STATUS" | grep -qi "accepted"; then
+              echo "Notarization accepted!"
+              xcrun stapler staple "nevoflux.macos-universal.dmg"
+              exit 0
+            elif echo "$STATUS" | grep -qi "invalid"; then
+              echo "::error::Notarization rejected"
+              xcrun notarytool log "$SUB_ID" \
+                --apple-id "${{ secrets.macOS_AppleAccountId }}" \
+                --team-id "${{ secrets.macOS_AppleDeveloperIdTeamId }}" \
+                --password "${{ secrets.macOS_AppleDeveloperIdPassword }}" || true
+              exit 1
+            fi
+          done
+          echo "::error::Notarization timed out after 60 minutes"
+          exit 1
 
       - name: Create unsigned DMG
         if: ${{ !inputs.sign_macos }}
