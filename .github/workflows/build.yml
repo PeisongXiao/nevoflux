@@ -18,7 +18,7 @@ on:
       sign_macos:
         description: 'Sign macOS builds (requires Apple certificates)'
         required: false
-        default: false
+        default: true
         type: 'boolean'
       display_version:
         description: 'Display version (e.g. 0.1.0). If set, overrides surfer.json displayVersion'
@@ -45,7 +45,7 @@ on:
       sign_macos:
         description: 'Sign macOS builds (requires Apple certificates)'
         required: false
-        default: false
+        default: true
         type: 'boolean'
       display_version:
         description: 'Display version (e.g. 0.1.0). If set, overrides surfer.json displayVersion'

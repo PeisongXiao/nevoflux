@@ -17,7 +17,7 @@ on:
         description: 'Sign macOS builds'
         required: false
         type: boolean
-        default: false
+        default: true
       x86_64-run-id:
         description: 'Run ID of macOS x86_64 build (required for standalone dispatch)'
         required: false
@@ -42,7 +42,7 @@ on:
         description: 'Sign macOS builds'
         required: false
         type: boolean
-        default: false
+        default: true
 
 jobs:
   mac-build:
