@@ -214,13 +214,19 @@ const Settings = {
   _renderLLMSection() {
     const section = this._createSection('llm', 'AI Models');
 
+    // Guidance banner (hidden by default)
+    const banner = document.createElement('div');
+    banner.className = 'llm-guidance-banner';
+    banner.id = 'llm-guidance-banner';
+    banner.style.display = 'none';
+    section.appendChild(banner);
+
     const providerGroup = this._createGroup('LLM Providers');
 
     const grid = document.createElement('div');
     grid.className = 'llm-providers-grid';
     grid.id = 'llm-providers-grid';
 
-    // Loading state
     const loading = document.createElement('div');
     loading.className = 'llm-loading';
     loading.id = 'llm-loading';
@@ -234,6 +240,62 @@ const Settings = {
   },
 
   async _populateLlmProviders() {
+    const cache = await this._getStatusCache();
+    const isFirstLaunch = !cache;
+
+    if (isFirstLaunch) {
+      await this._populateLlmFirstLaunch();
+    } else {
+      await this._populateLlmSubsequentLaunch();
+    }
+  },
+
+  async _populateLlmFirstLaunch() {
+    this._showLlmConnecting('NevoFlux Agent is starting, please wait...');
+
+    try {
+      const status = await this._retryWithBackoff(() => this._queryAgentStatus());
+      if (status.first_run) {
+        this._showGuidanceBanner(
+          'Select an AI provider and configure your API Key to get started, or complete quick setup in the sidebar (Ctrl+Shift+A)'
+        );
+      }
+      await this._loadAndRenderProviders();
+    } catch (e) {
+      this._showLlmError(
+        'Agent failed to start. Please check your installation.',
+        () => this._populateLlmProviders()
+      );
+    }
+  },
+
+  async _populateLlmSubsequentLaunch() {
+    this._showLlmSkeleton();
+
+    const startTime = Date.now();
+    const pollInterval = 2000;
+    const timeout = 30000;
+
+    const poll = async () => {
+      try {
+        await this._queryAgentStatus();
+        await this._loadAndRenderProviders();
+      } catch (e) {
+        if (Date.now() - startTime < timeout) {
+          setTimeout(poll, pollInterval);
+        } else {
+          this._showLlmError(
+            'Connection timeout. Agent may not be running.',
+            () => this._populateLlmProviders()
+          );
+        }
+      }
+    };
+
+    poll();
+  },
+
+  async _loadAndRenderProviders() {
     try {
       const data = await this._sendAgentCommand('config.llm.list');
       this._llmProviders = data?.providers || [];
@@ -1202,6 +1264,117 @@ const Settings = {
 
   async _sendAgentCommand(command, params = {}) {
     return this._sendMcpCommand(command, params);
+  },
+
+  async _retryWithBackoff(fn, delays = [1000, 3000, 5000, 10000, 15000]) {
+    for (let i = 0; i < delays.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, delays[i]));
+      try {
+        return await fn();
+      } catch (e) {
+        if (i === delays.length - 1) throw e;
+      }
+    }
+  },
+
+  async _getStatusCache() {
+    try {
+      const result = await NevofluxPage.sendQuery('bridge:request', {
+        type: 'getCache',
+        payload: { key: 'nevoflux_last_status' },
+      });
+      return result.success ? result.data : null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async _queryAgentStatus() {
+    return this._sendAgentCommand('status');
+  },
+
+  _showLlmConnecting(message) {
+    const grid = document.getElementById('llm-providers-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const div = document.createElement('div');
+    div.className = 'llm-connecting';
+    div.id = 'llm-connecting';
+
+    const spinner = document.createElement('div');
+    spinner.className = 'llm-connecting-spinner';
+    div.appendChild(spinner);
+
+    const text = document.createElement('div');
+    text.className = 'llm-connecting-text';
+    text.textContent = message;
+    div.appendChild(text);
+
+    grid.appendChild(div);
+  },
+
+  _showLlmError(message, retryFn) {
+    const grid = document.getElementById('llm-providers-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const div = document.createElement('div');
+    div.className = 'llm-error';
+
+    const text = document.createElement('div');
+    text.className = 'llm-error-text';
+    text.textContent = message;
+    div.appendChild(text);
+
+    const btn = document.createElement('button');
+    btn.className = 'llm-retry-button';
+    btn.textContent = 'Retry';
+    btn.addEventListener('click', () => retryFn());
+    div.appendChild(btn);
+
+    grid.appendChild(div);
+  },
+
+  _showLlmSkeleton() {
+    const grid = document.getElementById('llm-providers-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    for (let i = 0; i < 6; i++) {
+      const card = document.createElement('div');
+      card.className = 'llm-provider-card skeleton';
+
+      const icon = document.createElement('div');
+      icon.className = 'skeleton-icon';
+      card.appendChild(icon);
+
+      const textWrap = document.createElement('div');
+      textWrap.className = 'skeleton-text';
+
+      const line1 = document.createElement('div');
+      line1.className = 'skeleton-line wide';
+      textWrap.appendChild(line1);
+
+      const line2 = document.createElement('div');
+      line2.className = 'skeleton-line narrow';
+      textWrap.appendChild(line2);
+
+      card.appendChild(textWrap);
+      grid.appendChild(card);
+    }
+  },
+
+  _showGuidanceBanner(text) {
+    const banner = document.getElementById('llm-guidance-banner');
+    if (!banner) return;
+    banner.textContent = text;
+    banner.style.display = 'block';
+  },
+
+  _hideGuidanceBanner() {
+    const banner = document.getElementById('llm-guidance-banner');
+    if (banner) banner.style.display = 'none';
   },
 
   async _sendMcpCommand(command, params = {}) {
