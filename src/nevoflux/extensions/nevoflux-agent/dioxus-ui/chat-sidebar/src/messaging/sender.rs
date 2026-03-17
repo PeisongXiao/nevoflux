@@ -808,6 +808,47 @@ pub async fn fetch_avatar() -> Result<Option<String>, String> {
 }
 
 // ============================================
+// System Command Queries (Sidebar → Background → Agent with async response)
+// ============================================
+
+/// Query agent status (first_run, has_configured_provider).
+///
+/// Sends a `bg:system_command` with command "status" to background.js,
+/// which forwards it to the native agent and returns the response.
+pub async fn query_agent_status() -> Result<serde_json::Value, String> {
+    let request = serde_json::json!({
+        "type": "bg:system_command",
+        "command": "status",
+        "params": {}
+    });
+
+    let js_value = to_js_value(&request)
+        .map_err(|e| format!("Serialize error: {:?}", e))?;
+
+    let response = JsFuture::from(runtime_send_message(js_value))
+        .await
+        .map_err(|e| format!("Send failed: {:?}", e))?;
+
+    if response.is_undefined() || response.is_null() {
+        return Err("bg:system_command returned undefined/null".to_string());
+    }
+
+    let response_obj: serde_json::Value = from_js_value(response)
+        .map_err(|e| format!("Parse status response error: {}", e))?;
+
+    if response_obj.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+        Ok(response_obj.get("data").cloned().unwrap_or_default())
+    } else {
+        Err(response_obj
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown error")
+            .to_string())
+    }
+}
+
+// ============================================
 // Browser Tool Messages (Legacy - Deprecated)
 // ============================================
 

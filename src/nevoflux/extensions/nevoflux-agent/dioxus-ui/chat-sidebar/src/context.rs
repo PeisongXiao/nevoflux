@@ -69,6 +69,10 @@ pub struct AppContext {
     pub avatar_url: Signal<Option<String>>,
     /// Whether the sidebar is in minimized rail mode
     pub minimized: Signal<bool>,
+    /// Whether this is the first run (no config file exists)
+    pub first_run: Signal<bool>,
+    /// Whether a provider is configured in agent settings
+    pub has_configured_provider: Signal<bool>,
     /// Whether mock mode is enabled
     pub mock_enabled: bool,
 }
@@ -103,6 +107,8 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
     let pending_tool_auth = use_signal(|| None::<ToolAuthRequest>);
     let avatar_url = use_signal(|| None::<String>);
     let minimized = use_signal(|| false);
+    let first_run = use_signal(|| false);
+    let has_configured_provider = use_signal(|| false);
 
     // Build context
     let mut ctx = AppContext {
@@ -129,6 +135,8 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
         pending_tool_auth,
         avatar_url,
         minimized,
+        first_run,
+        has_configured_provider,
         mock_enabled,
     };
 

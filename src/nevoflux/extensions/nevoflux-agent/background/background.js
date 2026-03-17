@@ -60,6 +60,9 @@ const BackgroundAPI = {
 
   // Settings (ContentStore)
   GET_SETTINGS: 'bg:get_settings',
+
+  // System commands (sidebar → agent with async response)
+  SYSTEM_COMMAND: 'bg:system_command',
 };
 
 // =============================================================================
@@ -132,6 +135,9 @@ const contentStoreDebounceTimers = new Map(); // key -> timeoutId
 
 // Pending agent:command bridge requests: requestId → bridgeId
 const pendingAgentCommands = new Map();
+
+// Pending system commands from sidebar: requestId → { sendResponse, timeout }
+const pendingSystemCommands = new Map();
 
 // Cleanup stale pending agent commands after 30s
 setInterval(() => {
@@ -807,6 +813,28 @@ class ChannelManager {
           });
         }
         // Don't fall through to sidebar broadcast for this response
+        return;
+      }
+
+      // Resolve pending sidebar system commands
+      const sysCmd = pendingSystemCommands.get(reqId);
+      if (sysCmd) {
+        pendingSystemCommands.delete(reqId);
+        clearTimeout(sysCmd.timeout);
+        sysCmd.sendResponse(message.payload);
+
+        // Also cache status responses from sidebar system commands
+        if (message.payload?.command === 'status' && message.payload?.success) {
+          const statusData = message.payload.data;
+          browser.storage.local.set({
+            nevoflux_last_status: {
+              first_run: statusData.first_run,
+              has_configured_provider: statusData.has_configured_provider,
+              timestamp: Date.now(),
+            },
+          }).catch(() => {});
+        }
+
         return;
       }
     }
@@ -4865,6 +4893,25 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
         }
       })();
       return true;
+    }
+
+    case BackgroundAPI.SYSTEM_COMMAND: {
+      const { command, params } = message;
+      const requestId = `syscmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      const timeout = setTimeout(() => {
+        pendingSystemCommands.delete(requestId);
+        sendResponse({ success: false, error: { message: 'timeout' } });
+      }, 15000);
+
+      pendingSystemCommands.set(requestId, { sendResponse, timeout });
+
+      channelManager.sendToAgent({
+        type: MessageTypes.SYSTEM_COMMAND,
+        payload: { command, request_id: requestId, params: params || {} },
+      });
+
+      return true; // Keep sendResponse channel open for async response
     }
 
     default:
