@@ -279,6 +279,16 @@ jobs:
         run: |
           security delete-keychain signing_temp.keychain 2>/dev/null || true
 
+      - name: Strip resource forks and xattrs before signing
+        run: |
+          set -ex
+          APP_PATH="engine/obj-x86_64-apple-darwin/dist/${{ env.APP_NAME }}.app"
+          echo "Stripping extended attributes and resource forks from $APP_PATH"
+          xattr -cr "$APP_PATH"
+          # Remove AppleDouble (._*) files that carry resource forks
+          find "$APP_PATH" -name '._*' -delete 2>/dev/null || true
+          echo "xattr cleanup complete"
+
       - name: Copy provisioning profile for .app (embedded in .app)
         if: ${{ inputs.sign_macos }}
         run: |
