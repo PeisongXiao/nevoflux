@@ -327,6 +327,12 @@ steps:
 
         echo "Linux upload complete."
 
+artifacts:
+  objects:
+    location: 'gs://nevoflux-builds/${TAG_NAME}/'
+    paths:
+      - '/workspace/artifacts/*'
+
 timeout: '14400s'
 options:
   pool:

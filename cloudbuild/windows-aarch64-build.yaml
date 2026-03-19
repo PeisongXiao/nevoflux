@@ -310,6 +310,12 @@ steps:
 
         echo "Windows aarch64 upload complete."
 
+artifacts:
+  objects:
+    location: 'gs://nevoflux-builds/${TAG_NAME}/'
+    paths:
+      - '/workspace/artifacts/*'
+
 timeout: '10800s'
 options:
   pool:
