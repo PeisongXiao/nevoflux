@@ -2150,8 +2150,16 @@ this.nevoflux = class extends ExtensionAPI {
           const sidebarBox = win.document.getElementById('sidebar-box');
           if (sidebarBox) {
             sidebarBox.style.setProperty('width', width + 'px', 'important');
-            sidebarBox.style.setProperty('min-width', width + 'px', 'important');
-            sidebarBox.style.setProperty('max-width', width + 'px', 'important');
+            if (width <= 48) {
+              // Collapsed rail mode: lock size with min/max
+              sidebarBox.style.setProperty('min-width', width + 'px', 'important');
+              sidebarBox.style.setProperty('max-width', width + 'px', 'important');
+            } else {
+              // Normal mode: clear inline min/max so CSS defaults (300-960px) apply
+              // and NevoFluxSidebarResize can freely drag-to-resize
+              sidebarBox.style.removeProperty('min-width');
+              sidebarBox.style.removeProperty('max-width');
+            }
           }
           return { success: true };
         },

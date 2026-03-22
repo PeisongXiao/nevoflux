@@ -41,10 +41,55 @@ export function copyTextFallback(text) {
     } catch (_) {}
     return false;
 }
+
+export function initCodeCopyDelegation() {
+    if (window.__codeCopyInit) return;
+    window.__codeCopyInit = true;
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.markdown-content .code-copy-btn');
+        if (!btn) return;
+        const codeBlock = btn.closest('.code-block');
+        if (!codeBlock) return;
+        const pre = codeBlock.querySelector('pre');
+        if (!pre) return;
+        const text = pre.textContent;
+        // execCommand fallback (works in extension sidebar)
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.cssText = 'position:fixed;left:-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            const ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (ok) {
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(function() {
+                    btn.textContent = 'Copy';
+                    btn.classList.remove('copied');
+                }, 2000);
+                return;
+            }
+        } catch (_) {}
+        // Async Clipboard API fallback
+        navigator.clipboard.writeText(text).then(function() {
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(function() {
+                btn.textContent = 'Copy';
+                btn.classList.remove('copied');
+            }, 2000);
+        });
+    });
+}
 "#)]
 extern "C" {
     #[wasm_bindgen(js_name = copyTextFallback)]
     pub fn copy_text_fallback(text: &str) -> bool;
+
+    #[wasm_bindgen(js_name = initCodeCopyDelegation)]
+    pub fn init_code_copy_delegation();
 }
 use crate::context::use_app_context;
 
@@ -55,6 +100,9 @@ pub fn MessageArea() -> Element {
     let messages = ctx.messages.read();
     let streaming = ctx.streaming.read();
     let is_empty = messages.is_empty() && streaming.is_none();
+
+    // Set up event delegation for code copy buttons in markdown content (once)
+    use_effect(|| { init_code_copy_delegation(); });
 
     rsx! {
         div { class: "message-area",

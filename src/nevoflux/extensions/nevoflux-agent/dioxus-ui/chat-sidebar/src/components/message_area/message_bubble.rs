@@ -511,12 +511,10 @@ pub fn render_simple_markdown(md: &str) -> String {
                 i += 1;
             }
 
-            let code_id = format!("code-{}", i);
             let code_content = code_lines.join("\n");
             html.push_str(&format!(
-                r#"<div class="code-block"><div class="code-header"><span class="code-language">{lang}</span><button class="code-copy-btn" onclick="(function(btn){{var code=document.getElementById('{id}').textContent;navigator.clipboard.writeText(code).then(function(){{btn.textContent='Copied!';btn.classList.add('copied');setTimeout(function(){{btn.textContent='Copy';btn.classList.remove('copied')}},2000)}})}})(this)">Copy</button></div><div class="code-content"><pre id="{id}">{code}</pre></div></div>"#,
+                r#"<div class="code-block"><div class="code-header"><span class="code-language">{lang}</span><button class="code-copy-btn">Copy</button></div><div class="code-content"><pre>{code}</pre></div></div>"#,
                 lang = lang_display,
-                id = code_id,
                 code = code_content
             ));
         }

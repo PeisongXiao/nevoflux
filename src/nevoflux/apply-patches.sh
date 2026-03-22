@@ -181,7 +181,21 @@ if [ -f "${MODULES_MOZBUILD}" ]; then
   fi
 fi
 
-# 9. Add NevoFlux menu item to hamburger menu (app menu)
+# 9a. Add NevoFlux menu item to native menu bar (Tools menu)
+#     Visible on macOS native menu bar, and Linux/Windows menu bar when shown.
+MENUBAR_INC="${ENGINE_DIR}/browser/base/content/browser-menubar.inc"
+if [ -f "${MENUBAR_INC}" ]; then
+  if ! grep -q 'menu_nevoflux' "${MENUBAR_INC}"; then
+    echo "Adding NevoFlux to native menu bar (Tools menu)..."
+    sedi 's|command="View:PageInfo" data-l10n-id="menu-tools-page-info"/>|command="View:PageInfo" data-l10n-id="menu-tools-page-info"/>\
+              <menuseparator id="nevofluxSep"/>\
+              <menuitem id="menu_nevoflux"\
+                        label="NevoFlux"\
+                        oncommand="switchToTabHavingURI(\&apos;nevoflux://settings\&apos;, true);"/>|' "${MENUBAR_INC}"
+  fi
+fi
+
+# 9b. Add NevoFlux menu item to hamburger menu (app menu)
 APPMENU_XHTML="${ENGINE_DIR}/browser/base/content/appmenu-viewcache.inc.xhtml"
 if [ -f "${APPMENU_XHTML}" ]; then
   if ! grep -q 'appMenu-nevoflux-button' "${APPMENU_XHTML}"; then
