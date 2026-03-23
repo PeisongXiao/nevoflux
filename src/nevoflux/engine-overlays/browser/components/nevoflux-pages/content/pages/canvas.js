@@ -624,6 +624,53 @@ ${slidesHtml}
     this._downloadFile(md, `${this._artifact.title || 'artifact'}.md`, 'text/markdown');
   },
 
+  async _exportPptx() {
+    await this._loadVendor('jszip.min.js');
+    await this._loadVendor('pptxgenjs.min.js');
+
+    if (!this._artifact?.content) { this._showToast('Nothing to export', 'error'); return; }
+
+    const slides = this._parseSlides(this._artifact.content);
+    if (!slides.length) { this._showToast('No slides found', 'error'); return; }
+
+    const pptx = new PptxGenJS();
+    pptx.title = this._artifact.title || 'Presentation';
+    pptx.layout = 'LAYOUT_WIDE';
+
+    for (const slideMd of slides) {
+      const slide = pptx.addSlide();
+      const lines = slideMd.split('\n');
+      let title = '';
+      const bodyLines = [];
+
+      for (const line of lines) {
+        const headingMatch = line.match(/^#{1,3}\s+(.+)/);
+        if (headingMatch && !title) {
+          title = headingMatch[1].trim();
+        } else if (line.trim()) {
+          bodyLines.push(line.replace(/^[-*]\s+/, '• ').replace(/^\d+\.\s+/, ''));
+        }
+      }
+
+      if (title) {
+        slide.addText(title, {
+          x: 0.5, y: 0.3, w: '90%', h: 1,
+          fontSize: 28, bold: true, color: '363636',
+        });
+      }
+
+      if (bodyLines.length) {
+        slide.addText(
+          bodyLines.map(t => ({ text: t, options: { bullet: t.startsWith('• '), breakLine: true } })),
+          { x: 0.5, y: title ? 1.5 : 0.5, w: '90%', h: 4, fontSize: 16, color: '555555', valign: 'top' }
+        );
+      }
+    }
+
+    const blob = await pptx.write({ outputType: 'blob' });
+    this._downloadBlob(blob, `${this._artifact.title || 'presentation'}.pptx`);
+  },
+
   async _exportXlsx() {
     await this._loadVendor('xlsx.min.js');
     const iframeDoc = this._getPreviewDocument();
