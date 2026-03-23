@@ -557,64 +557,60 @@ ${slidesHtml}
 
   async _exportImage() {
     await this._loadVendor('html2canvas.min.js');
-    const iframeDoc = this._getPreviewDocument();
-    if (!iframeDoc) { this._showToast('Nothing to export', 'error'); return; }
+    const html = this._lastRenderedHtml;
+    if (!html) { this._showToast('Nothing to export', 'error'); return; }
 
-    const temp = document.createElement('div');
-    temp.style.cssText = 'position:fixed;left:-9999px;top:0;';
+    // Parse stored HTML to extract styles + body content
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
 
-    // Copy styles from iframe
-    const styles = iframeDoc.querySelectorAll('style, link[rel="stylesheet"]');
-    styles.forEach(s => temp.appendChild(s.cloneNode(true)));
+    // Build a temporary container with styles and body in the parent document
+    const container = document.createElement('div');
+    container.style.cssText = 'position:absolute;left:-9999px;top:0;width:800px;';
 
-    // Copy body content
-    const bodyClone = iframeDoc.body.cloneNode(true);
-    temp.appendChild(bodyClone);
-    document.body.appendChild(temp);
+    // Adopt style elements into parent document
+    doc.querySelectorAll('style').forEach(s => {
+      container.appendChild(document.adoptNode(s));
+    });
+
+    // Copy body content as innerHTML (avoids cross-document node issues)
+    const bodyDiv = document.createElement('div');
+    bodyDiv.innerHTML = doc.body.innerHTML;
+    container.appendChild(bodyDiv);
+    document.body.appendChild(container);
 
     try {
-      const canvas = await html2canvas(bodyClone, { useCORS: true, scale: 2 });
+      const canvas = await html2canvas(container, { useCORS: true, scale: 2 });
       canvas.toBlob(blob => {
         if (blob) this._downloadBlob(blob, `${this._artifact.title || 'artifact'}.png`);
       }, 'image/png');
     } finally {
-      document.body.removeChild(temp);
+      document.body.removeChild(container);
     }
   },
 
   _exportPdf() {
-    // Print the rendered content, not the parent chrome page.
-    // Open a new window with the rendered HTML and trigger print there.
+    // Open rendered content as a blob URL in a new tab for printing
     const html = this._lastRenderedHtml;
     if (!html) { this._showToast('Nothing to export', 'error'); return; }
 
-    const printWin = window.open('', '_blank', 'width=800,height=600');
-    if (!printWin) { this._showToast('Popup blocked — please allow popups', 'error'); return; }
-
-    printWin.document.write(html);
-    printWin.document.close();
-    // Wait for content to render before printing
-    printWin.addEventListener('load', () => {
-      printWin.print();
-      printWin.close();
-    });
-    // Fallback in case load doesn't fire (srcdoc-like content)
-    setTimeout(() => {
-      if (!printWin.closed) {
-        printWin.print();
-        printWin.close();
-      }
-    }, 1000);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.click();
+    // Clean up after user has had time to print
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
   },
 
   async _exportDocx() {
     await this._loadVendor('html-docx.min.js');
-    const iframeDoc = this._getPreviewDocument();
-    if (!iframeDoc) { this._showToast('Nothing to export', 'error'); return; }
+    const html = this._lastRenderedHtml;
+    if (!html) { this._showToast('Nothing to export', 'error'); return; }
 
-    const html = iframeDoc.body.innerHTML;
-    const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
-    const blob = htmlDocx.asBlob(fullHtml);
+    // Use stored rendered HTML directly — no DOM access needed
+    const blob = htmlDocx.asBlob(html);
     this._downloadBlob(blob, `${this._artifact.title || 'artifact'}.docx`);
   },
 
