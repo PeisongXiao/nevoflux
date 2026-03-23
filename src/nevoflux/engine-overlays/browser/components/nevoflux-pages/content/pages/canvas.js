@@ -1167,6 +1167,7 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(artifa
       `[Canvas] _renderSrcdoc: inputLen=${htmlContent.length}, injectedLen=${injected.length}, sdkLen=${sdk.length}`
     );
     this._iframe.srcdoc = injected;
+    this._lastRenderedHtml = injected;
     viewport.appendChild(this._iframe);
   },
 
@@ -1320,7 +1321,16 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(markdo
   },
 
   _getPreviewDocument() {
-    return this._iframe?.contentDocument || null;
+    // Try iframe contentDocument first (may be null due to sandbox/origin restrictions)
+    if (this._iframe?.contentDocument) {
+      return this._iframe.contentDocument;
+    }
+    // Fallback: parse the saved rendered HTML into a temporary document
+    if (this._lastRenderedHtml) {
+      const parser = new DOMParser();
+      return parser.parseFromString(this._lastRenderedHtml, 'text/html');
+    }
+    return null;
   },
 
   // ── Edit Mode ───────────────────────────────────────────
