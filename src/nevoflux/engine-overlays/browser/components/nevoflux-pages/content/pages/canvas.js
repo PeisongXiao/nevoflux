@@ -214,9 +214,76 @@ const Canvas = {
     document.getElementById('btn-copy').addEventListener('click', () => {
       this._copyCode();
     });
-    document.getElementById('btn-export-source').addEventListener('click', () => {
+    // Split Button: left = default export
+    document.getElementById('btn-export-default').addEventListener('click', () => {
       this._exportSource();
     });
+
+    // Split Button: arrow = toggle dropdown
+    const arrow = document.getElementById('btn-export-arrow');
+    const dropdown = document.getElementById('export-dropdown');
+
+    arrow.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = dropdown.classList.toggle('open');
+      arrow.setAttribute('aria-expanded', isOpen);
+      if (isOpen) {
+        this._updateConditionalFormats();
+        const firstItem = dropdown.querySelector('.export-dropdown-item:not([style*="display:none"])');
+        if (firstItem) firstItem.focus();
+      }
+    });
+
+    // Close dropdown on outside click
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#export-container')) {
+        dropdown.classList.remove('open');
+        arrow.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    // Keyboard: Escape to close, Arrow keys to navigate items
+    document.addEventListener('keydown', (e) => {
+      if (!dropdown.classList.contains('open')) return;
+      if (e.key === 'Escape') {
+        dropdown.classList.remove('open');
+        arrow.setAttribute('aria-expanded', 'false');
+        arrow.focus();
+        return;
+      }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const items = [...dropdown.querySelectorAll('.export-dropdown-item:not([style*="display:none"])')];
+        const current = items.indexOf(document.activeElement);
+        const next = e.key === 'ArrowDown'
+          ? (current + 1) % items.length
+          : (current - 1 + items.length) % items.length;
+        items[next]?.focus();
+      }
+    });
+
+    // Dispatch format clicks
+    dropdown.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-format]');
+      if (!item) return;
+      dropdown.classList.remove('open');
+      arrow.setAttribute('aria-expanded', 'false');
+      const format = item.dataset.format;
+      const dispatch = {
+        source:   () => this._exportSource(),
+        html:     () => this._safeExport(this._exportHtml, 'HTML'),
+        image:    () => this._safeExport(this._exportImage, 'PNG'),
+        pdf:      () => this._exportPdf(),
+        docx:     () => this._safeExport(this._exportDocx, 'DOCX'),
+        svg:      () => this._safeExport(this._exportSvg, 'SVG'),
+        markdown: () => this._safeExport(this._exportMarkdown, 'Markdown'),
+        pptx:     () => this._safeExport(this._exportPptx, 'PPTX'),
+        xlsx:     () => this._safeExport(this._exportXlsx, 'XLSX'),
+        zip:      () => this._safeExport(this._exportZip, 'ZIP'),
+      };
+      if (dispatch[format]) dispatch[format]();
+    });
+
     document.getElementById('btn-share').addEventListener('click', () => {
       this._shareLink();
     });
@@ -496,6 +563,85 @@ const Canvas = {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  },
+
+  _downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
+  async _loadVendor(name) {
+    if (this._vendorLoaded?.[name]) return;
+    const script = document.createElement('script');
+    script.src = `chrome://nevoflux/content/vendor/${name}`;
+    await new Promise((resolve, reject) => {
+      script.onload = resolve;
+      script.onerror = () => reject(new Error(`Failed to load ${name}`));
+      document.head.appendChild(script);
+    });
+    if (!this._vendorLoaded) this._vendorLoaded = {};
+    this._vendorLoaded[name] = true;
+  },
+
+  async _safeExport(exportFn, formatName) {
+    const btn = document.getElementById('btn-export-default');
+    try {
+      btn?.classList.add('exporting');
+      await exportFn.call(this);
+    } catch (err) {
+      console.error(`Export ${formatName} failed:`, err);
+      this._showToast(`Export failed: ${err.message}`, 'error');
+    } finally {
+      btn?.classList.remove('exporting');
+    }
+  },
+
+  _showToast(message, type = 'info') {
+    const existing = document.querySelector('.export-toast');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.className = `export-toast export-toast-${type}`;
+    toast.textContent = message;
+    toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:6px;font-size:13px;z-index:9999;background:#333;color:#fff;';
+    if (type === 'error') toast.style.background = '#c0392b';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  },
+
+  _updateConditionalFormats() {
+    const type = this._artifact?.type || '';
+    const iframeDoc = this._getPreviewDocument();
+    const hasTables = iframeDoc ? iframeDoc.querySelectorAll('table').length > 0 : false;
+
+    const conditions = {
+      svg:      type === 'svg' || type === 'mermaid',
+      markdown: type === 'html',
+      pptx:     type === 'slides',
+      xlsx:     hasTables,
+      zip:      type === 'project',
+    };
+
+    let anyVisible = false;
+    for (const [format, visible] of Object.entries(conditions)) {
+      const el = document.querySelector(`[data-format="${format}"]`);
+      if (el) {
+        el.style.display = visible ? '' : 'none';
+        if (visible) anyVisible = true;
+      }
+    }
+    const sep = document.querySelector('.export-conditional-sep');
+    if (sep) sep.style.display = anyVisible ? '' : 'none';
+
+    // Update Source extension label dynamically
+    const extMap = { html: '.html', react: '.jsx', markdown: '.md', svg: '.svg', mermaid: '.mmd', slides: '.md', css: '.css', js: '.js' };
+    const extLabel = document.getElementById('export-ext-source');
+    if (extLabel) extLabel.textContent = `(${extMap[type] || '.txt'})`;
   },
 
   async _buildReactStandaloneHtml(artifact) {
@@ -887,6 +1033,10 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(markdo
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  },
+
+  _getPreviewDocument() {
+    return this._iframe?.contentDocument || null;
   },
 
   // ── Edit Mode ───────────────────────────────────────────
