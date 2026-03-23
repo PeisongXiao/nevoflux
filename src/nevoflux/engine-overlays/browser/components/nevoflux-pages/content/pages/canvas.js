@@ -511,6 +511,25 @@ const Canvas = {
       html = await this._buildReactStandaloneHtml(this._artifact);
     } else if (type === 'markdown') {
       html = await this._buildMarkdownStandaloneHtml(this._artifact);
+    } else if (type === 'slides') {
+      const slides = this._parseSlides(this._artifact.content);
+      const slidesHtml = slides.map((s, i) => {
+        const rendered = typeof markdownit !== 'undefined' ? markdownit({ html: true }).render(s) : this._escapeHtml(s);
+        return `<section class="slide" id="slide-${i}">${rendered}</section>`;
+      }).join('\n');
+      html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${this._escapeHtml(this._artifact.title || 'Presentation')}</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #1a1a2e; color: #e0e0e0; }
+  .slide { min-height: 100vh; padding: 60px; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; border-bottom: 1px solid #333; }
+  .slide h1, .slide h2, .slide h3 { margin-top: 0; }
+  .slide ul, .slide ol { line-height: 1.8; }
+  code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; }
+  pre { background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #444; padding: 8px 12px; }
+  img { max-width: 100%; }
+</style></head><body>
+${slidesHtml}
+</body></html>`;
     } else {
       html = `<!DOCTYPE html>\n<html>\n<head><meta charset="utf-8"><title>${this._escapeHtml(this._artifact.title || 'Artifact')}</title></head>\n<body><pre>${this._escapeHtml(this._artifact.content)}</pre></body>\n</html>`;
     }
@@ -524,6 +543,7 @@ const Canvas = {
       html: 'html',
       react: 'jsx',
       markdown: 'md',
+      slides: 'md',
       svg: 'svg',
       mermaid: 'mmd',
       css: 'css',
@@ -892,8 +912,15 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(artifa
 
   // ── Rendering ───────────────────────────────────────────
 
-  _render(artifact) {
+  async _render(artifact) {
     this._hideLoading();
+
+    // Clean up slides keyboard handler on artifact change
+    if (this._slidesKeyHandler) {
+      document.removeEventListener('keydown', this._slidesKeyHandler);
+      this._slidesKeyHandler = null;
+    }
+
     console.error(
       `[Canvas] _render: type=${artifact.type}, contentLen=${artifact.content?.length}, state=${artifact.state}, mode=${this._mode}`
     );
@@ -944,12 +971,122 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(artifa
       case 'mermaid':
         this._renderMermaid(viewport, artifact.content);
         break;
+      case 'slides':
+        await this._renderSlides(viewport);
+        break;
       case 'project':
         this._renderProject(viewport, artifact);
         break;
       default:
         this._showEmpty(`Unsupported type: ${artifact.type}`);
     }
+  },
+
+  _parseSlides(markdownContent) {
+    return markdownContent
+      .split(/\r?\n---+\s*\r?\n/)
+      .map(slide => slide.trim())
+      .filter(slide => slide.length > 0);
+  },
+
+  async _renderSlides(viewport) {
+    const slides = this._parseSlides(this._artifact.content || '');
+    if (!slides.length) return;
+
+    // Clean up previous slides keyboard handler
+    if (this._slidesKeyHandler) {
+      document.removeEventListener('keydown', this._slidesKeyHandler);
+      this._slidesKeyHandler = null;
+    }
+
+    this._currentSlideIndex = 0;
+    this._slidesData = slides;
+    viewport.innerHTML = '';
+
+    // Load markdown-it for rendering (registers global `markdownit`)
+    await this._loadVendor('markdown-it.min.js');
+    const md = markdownit({ html: true, linkify: true });
+
+    const container = document.createElement('div');
+    container.className = 'slides-container';
+
+    // Left panel: thumbnails
+    const thumbPanel = document.createElement('div');
+    thumbPanel.className = 'slides-thumb-panel';
+
+    // Right panel: main preview
+    const mainPanel = document.createElement('div');
+    mainPanel.className = 'slides-main-panel';
+
+    const pageIndicator = document.createElement('div');
+    pageIndicator.className = 'slides-page-indicator';
+    mainPanel.appendChild(pageIndicator);
+
+    // Render each slide thumbnail
+    slides.forEach((slideMd, i) => {
+      const thumb = document.createElement('div');
+      thumb.className = 'slides-thumb' + (i === 0 ? ' active' : '');
+      thumb.innerHTML = `<div class="slides-thumb-number">${i + 1}</div><div class="slides-thumb-preview">${md.render(slideMd)}</div>`;
+      thumb.addEventListener('click', () => this._selectSlide(i, thumbPanel, mainPanel, pageIndicator, md));
+      thumbPanel.appendChild(thumb);
+    });
+
+    container.appendChild(thumbPanel);
+    container.appendChild(mainPanel);
+    viewport.appendChild(container);
+
+    // Render first slide
+    this._selectSlide(0, thumbPanel, mainPanel, pageIndicator, md);
+
+    // Keyboard navigation for slides
+    this._slidesKeyHandler = (e) => {
+      if (document.querySelector('.export-dropdown.open')) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const next = Math.min(this._currentSlideIndex + 1, slides.length - 1);
+        this._selectSlide(next, thumbPanel, mainPanel, pageIndicator, md);
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const prev = Math.max(this._currentSlideIndex - 1, 0);
+        this._selectSlide(prev, thumbPanel, mainPanel, pageIndicator, md);
+      }
+    };
+    document.addEventListener('keydown', this._slidesKeyHandler);
+  },
+
+  _selectSlide(index, thumbPanel, mainPanel, pageIndicator, md) {
+    this._currentSlideIndex = index;
+    const slides = this._slidesData;
+
+    // Update thumbnails
+    thumbPanel.querySelectorAll('.slides-thumb').forEach((t, i) => {
+      t.classList.toggle('active', i === index);
+    });
+    const activeThumb = thumbPanel.querySelector('.slides-thumb.active');
+    if (activeThumb) activeThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    // Render selected slide in a DEDICATED iframe (not this._iframe)
+    const slideHtml = md.render(slides[index]);
+    const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body { font-family: system-ui, sans-serif; padding: 40px; margin: 0; color: #e0e0e0; background: #1a1a2e; display: flex; flex-direction: column; justify-content: center; min-height: calc(100vh - 80px); }
+    h1, h2, h3 { margin-top: 0; } ul, ol { padding-left: 24px; line-height: 1.8; }
+    code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; }
+    pre { background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #444; padding: 8px 12px; text-align: left; }
+    th { background: rgba(255,255,255,0.05); } img { max-width: 100%; border-radius: 8px; }
+  </style></head><body>${slideHtml}</body></html>`;
+
+    // Use a dedicated iframe, separate from this._iframe
+    let slideIframe = mainPanel.querySelector('iframe');
+    if (!slideIframe) {
+      slideIframe = document.createElement('iframe');
+      slideIframe.sandbox = 'allow-same-origin';
+      slideIframe.style.cssText = 'flex:1;border:none;width:100%;';
+      mainPanel.appendChild(slideIframe);
+    }
+    slideIframe.srcdoc = fullHtml;
+
+    pageIndicator.textContent = `${index + 1} / ${slides.length}`;
   },
 
   /**
