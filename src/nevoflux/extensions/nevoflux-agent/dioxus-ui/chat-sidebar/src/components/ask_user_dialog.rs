@@ -42,7 +42,6 @@ pub fn AskUserDialog() -> Element {
     let handle_submit = {
         let request_id = request_id.clone();
         let options = options.clone();
-        let question = request.question.clone();
         move |_| {
             let answer = if let Some(idx) = selected_index() {
                 let answer = options.get(idx).cloned().unwrap_or_default();
@@ -56,8 +55,8 @@ pub fn AskUserDialog() -> Element {
                 return;
             };
 
-            // Add user reply to chat as a Q&A message
-            ctx.messages.write().push(Message::qa(&question, &answer));
+            // Add user's answer to chat (question already shown as assistant message)
+            ctx.messages.write().push(Message::user(&answer));
 
             // Clear the request
             ctx.ask_user.set(None);
@@ -67,12 +66,11 @@ pub fn AskUserDialog() -> Element {
     // Handle cancel
     let handle_cancel = {
         let request_id = request.request_id.clone();
-        let question = request.question.clone();
         move |_| {
             send_ask_user_cancel(&request_id);
 
             // Add cancellation notice to chat
-            ctx.messages.write().push(Message::qa(&question, "Cancelled"));
+            ctx.messages.write().push(Message::user("Cancelled"));
 
             ctx.ask_user.set(None);
         }
@@ -88,7 +86,6 @@ pub fn AskUserDialog() -> Element {
     let handle_keydown = {
         let request_id = request.request_id.clone();
         let options = options.clone();
-        let question = request.question.clone();
         move |evt: KeyboardEvent| {
             if evt.key() == Key::Enter && !evt.modifiers().shift() {
                 evt.prevent_default();
@@ -107,12 +104,12 @@ pub fn AskUserDialog() -> Element {
                 };
 
                 if let Some(answer) = answer {
-                    ctx.messages.write().push(Message::qa(&question, &answer));
+                    ctx.messages.write().push(Message::user(&answer));
                     ctx.ask_user.set(None);
                 }
             } else if evt.key() == Key::Escape {
                 send_ask_user_cancel(&request_id);
-                ctx.messages.write().push(Message::qa(&question, "Cancelled"));
+                ctx.messages.write().push(Message::user("Cancelled"));
                 ctx.ask_user.set(None);
             }
         }

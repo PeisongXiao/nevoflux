@@ -1345,7 +1345,17 @@ fn handle_internal_message(mut ctx: AppContext, message: InternalMessage) {
 // ============================================
 
 fn handle_ask_user_request(mut ctx: AppContext, payload: crate::messaging::sender::AskUserRequestPayload) {
-    use crate::state::AskUserState;
+    use crate::state::{AskUserState, Message};
+
+    // Add assistant message showing the question in chat
+    let mut question_md = format!("**Q: {}**", payload.question);
+    if !payload.options.is_empty() {
+        question_md.push('\n');
+        for (i, opt) in payload.options.iter().enumerate() {
+            question_md.push_str(&format!("\n{}. {}", i + 1, opt));
+        }
+    }
+    ctx.messages.write().push(Message::assistant_markdown(&question_md));
 
     // Set the ask_user state to trigger the dialog
     ctx.ask_user.set(Some(AskUserState::new(
