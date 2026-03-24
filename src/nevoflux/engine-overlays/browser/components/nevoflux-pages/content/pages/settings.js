@@ -494,6 +494,92 @@ const Settings = {
     baseUrlGroup.appendChild(baseUrlHelp);
     form.appendChild(baseUrlGroup);
 
+    // === OpenClaw-specific fields (hidden for other providers) ===
+    const openclawFields = document.createElement('div');
+    openclawFields.id = 'llm-modal-openclaw-fields';
+    openclawFields.style.display = 'none';
+
+    // Provider Name
+    const provNameGroup = document.createElement('div');
+    provNameGroup.className = 'mcp-form-group';
+    const provNameLabel = document.createElement('label');
+    provNameLabel.className = 'mcp-form-label';
+    provNameLabel.textContent = 'Provider Name';
+    provNameGroup.appendChild(provNameLabel);
+    const provNameInput = document.createElement('input');
+    provNameInput.className = 'mcp-form-input';
+    provNameInput.type = 'text';
+    provNameInput.id = 'llm-modal-oc-provider-name';
+    provNameInput.placeholder = 'e.g. astroncodingplan';
+    provNameGroup.appendChild(provNameInput);
+    openclawFields.appendChild(provNameGroup);
+
+    // API Type
+    const apiTypeGroup = document.createElement('div');
+    apiTypeGroup.className = 'mcp-form-group';
+    const apiTypeLabel = document.createElement('label');
+    apiTypeLabel.className = 'mcp-form-label';
+    apiTypeLabel.textContent = 'API Type';
+    apiTypeGroup.appendChild(apiTypeLabel);
+    const apiTypeSelect = document.createElement('select');
+    apiTypeSelect.className = 'mcp-form-input';
+    apiTypeSelect.id = 'llm-modal-oc-api-type';
+    for (const opt of ['openai-completions', 'anthropic', 'openai-responses']) {
+      const o = document.createElement('option');
+      o.value = opt;
+      o.textContent = opt;
+      apiTypeSelect.appendChild(o);
+    }
+    apiTypeGroup.appendChild(apiTypeSelect);
+    openclawFields.appendChild(apiTypeGroup);
+
+    // Context Window
+    const ctxGroup = document.createElement('div');
+    ctxGroup.className = 'mcp-form-group';
+    const ctxLabel = document.createElement('label');
+    ctxLabel.className = 'mcp-form-label';
+    ctxLabel.textContent = 'Context Window';
+    ctxGroup.appendChild(ctxLabel);
+    const ctxInput = document.createElement('input');
+    ctxInput.className = 'mcp-form-input';
+    ctxInput.type = 'number';
+    ctxInput.id = 'llm-modal-oc-context-window';
+    ctxInput.placeholder = '92160';
+    ctxGroup.appendChild(ctxInput);
+    openclawFields.appendChild(ctxGroup);
+
+    // Max Tokens
+    const maxTokGroup = document.createElement('div');
+    maxTokGroup.className = 'mcp-form-group';
+    const maxTokLabel = document.createElement('label');
+    maxTokLabel.className = 'mcp-form-label';
+    maxTokLabel.textContent = 'Max Tokens';
+    maxTokGroup.appendChild(maxTokLabel);
+    const maxTokInput = document.createElement('input');
+    maxTokInput.className = 'mcp-form-input';
+    maxTokInput.type = 'number';
+    maxTokInput.id = 'llm-modal-oc-max-tokens';
+    maxTokInput.placeholder = '32768';
+    maxTokGroup.appendChild(maxTokInput);
+    openclawFields.appendChild(maxTokGroup);
+
+    // Reasoning checkbox
+    const reasonGroup = document.createElement('div');
+    reasonGroup.className = 'mcp-form-group llm-active-group';
+    const reasonLabel = document.createElement('label');
+    reasonLabel.className = 'llm-active-label';
+    const reasonCheckbox = document.createElement('input');
+    reasonCheckbox.type = 'checkbox';
+    reasonCheckbox.id = 'llm-modal-oc-reasoning';
+    const reasonText = document.createElement('span');
+    reasonText.textContent = 'Supports reasoning';
+    reasonLabel.appendChild(reasonCheckbox);
+    reasonLabel.appendChild(reasonText);
+    reasonGroup.appendChild(reasonLabel);
+    openclawFields.appendChild(reasonGroup);
+
+    form.appendChild(openclawFields);
+
     // Set as active checkbox
     const activeGroup = document.createElement('div');
     activeGroup.className = 'mcp-form-group llm-active-group';
@@ -548,7 +634,10 @@ const Settings = {
     title.textContent = `Configure ${provider.display_name || provider.id}`;
 
     const subtitle = document.getElementById('llm-modal-subtitle');
-    subtitle.textContent = `${provider.type === 'cli' ? 'CLI provider' : provider.type === 'local' ? 'Local provider' : 'Cloud API provider'}`;
+    const typeLabels = { cli: 'CLI provider', local: 'Local provider', agent: 'Agent provider', service: 'Cloud API provider' };
+    subtitle.textContent = typeLabels[provider.type] || 'Cloud API provider';
+
+    const isOpenClaw = provider.id === 'openclaw';
 
     // Reset fields
     document.getElementById('llm-modal-apikey').value = '';
@@ -562,6 +651,25 @@ const Settings = {
     // Hide base URL for CLI providers (they don't support it)
     const baseUrlGroup = document.getElementById('llm-modal-baseurl-group');
     baseUrlGroup.style.display = provider.type === 'cli' ? 'none' : '';
+
+    // Show/hide OpenClaw-specific fields
+    const ocFields = document.getElementById('llm-modal-openclaw-fields');
+    ocFields.style.display = isOpenClaw ? '' : 'none';
+    if (isOpenClaw) {
+      // Reset OpenClaw fields
+      document.getElementById('llm-modal-oc-provider-name').value = '';
+      document.getElementById('llm-modal-oc-api-type').value = 'openai-completions';
+      document.getElementById('llm-modal-oc-context-window').value = '';
+      document.getElementById('llm-modal-oc-max-tokens').value = '';
+      document.getElementById('llm-modal-oc-reasoning').checked = false;
+
+      // Change labels for OpenClaw context
+      document.getElementById('llm-modal-model').placeholder = 'e.g. astron-code-latest';
+      document.getElementById('llm-modal-baseurl').placeholder = 'e.g. https://maas-coding-api.cn-huabei-1.xf-yun.com/v2';
+    } else {
+      document.getElementById('llm-modal-model').placeholder = 'Leave empty for default';
+      document.getElementById('llm-modal-baseurl').placeholder = 'Leave empty for default endpoint';
+    }
 
     // Load current config from agent
     try {
@@ -588,8 +696,41 @@ const Settings = {
       console.warn('Failed to load provider config:', e);
     }
 
+    // Load OpenClaw model config if available
+    if (isOpenClaw) {
+      try {
+        const ocData = await this._sendAgentCommand('config.openclaw.model.list');
+        if (ocData?.success && ocData.providers) {
+          // Pick the first configured provider or use primary_model to find it
+          const primaryModel = ocData.primary_model || '';
+          const primaryProvider = primaryModel.split('/')[0] || '';
+          const providerNames = Object.keys(ocData.providers);
+          const provName = primaryProvider || providerNames[0] || '';
+
+          if (provName && ocData.providers[provName]) {
+            const prov = ocData.providers[provName];
+            document.getElementById('llm-modal-oc-provider-name').value = provName;
+            if (prov.baseUrl) document.getElementById('llm-modal-baseurl').value = prov.baseUrl;
+            if (prov.api) document.getElementById('llm-modal-oc-api-type').value = prov.api;
+            // Load first model's details
+            if (prov.models && prov.models.length > 0) {
+              const m = prov.models[0];
+              if (m.id) document.getElementById('llm-modal-model').value = m.id;
+              if (m.contextWindow) document.getElementById('llm-modal-oc-context-window').value = m.contextWindow;
+              if (m.maxTokens) document.getElementById('llm-modal-oc-max-tokens').value = m.maxTokens;
+              document.getElementById('llm-modal-oc-reasoning').checked = !!m.reasoning;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load OpenClaw config:', e);
+      }
+    }
+
     this._llmModal.classList.add('show');
-    setTimeout(() => document.getElementById('llm-modal-apikey').focus(), 50);
+    setTimeout(() => {
+      document.getElementById(isOpenClaw ? 'llm-modal-oc-provider-name' : 'llm-modal-apikey').focus();
+    }, 50);
   },
 
   _closeLlmModal() {
@@ -610,18 +751,58 @@ const Settings = {
     const baseUrl = document.getElementById('llm-modal-baseurl').value.trim();
     const setActive = document.getElementById('llm-modal-set-active').checked;
 
-    const params = { provider: providerId, set_active: setActive };
-    if (apiKey) params.api_key = apiKey;
-    if (model !== undefined) params.model = model;
-    // Always send base_url so it can be cleared (empty string = remove)
-    params.base_url = baseUrl;
-
     saveBtn.disabled = true;
     statusEl.textContent = 'Saving...';
     statusEl.className = 'llm-modal-status';
 
     try {
-      await this._sendAgentCommand('config.llm.set', params);
+      if (providerId === 'openclaw') {
+        // OpenClaw: dual save — config.toml + openclaw.json
+        const providerName = document.getElementById('llm-modal-oc-provider-name').value.trim();
+        const apiType = document.getElementById('llm-modal-oc-api-type').value;
+        const contextWindow = parseInt(document.getElementById('llm-modal-oc-context-window').value) || 92160;
+        const maxTokens = parseInt(document.getElementById('llm-modal-oc-max-tokens').value) || 32768;
+        const reasoning = document.getElementById('llm-modal-oc-reasoning').checked;
+
+        if (!providerName) {
+          statusEl.textContent = 'Provider Name is required';
+          statusEl.className = 'llm-modal-status error';
+          saveBtn.disabled = false;
+          return;
+        }
+
+        // 1) Save OpenClaw model config (openclaw.json)
+        await this._sendAgentCommand('config.openclaw.model.set', {
+          provider_name: providerName,
+          base_url: baseUrl,
+          api_key: apiKey,
+          api_type: apiType,
+          model_id: model || 'astron-code-latest',
+          model_name: model || 'astron-code-latest',
+          context_window: contextWindow,
+          max_tokens: maxTokens,
+          reasoning: reasoning,
+          set_as_primary: setActive,
+        });
+
+        // 2) Save NevoFlux config.toml (provider = openclaw)
+        const llmParams = {
+          provider: 'openclaw',
+          set_active: setActive,
+          model: providerName + '/' + (model || 'astron-code-latest'),
+        };
+        if (apiKey) llmParams.api_key = apiKey;
+        llmParams.base_url = baseUrl;
+        await this._sendAgentCommand('config.llm.set', llmParams);
+      } else {
+        // Standard provider: single save
+        const params = { provider: providerId, set_active: setActive };
+        if (apiKey) params.api_key = apiKey;
+        if (model !== undefined) params.model = model;
+        params.base_url = baseUrl;
+        await this._sendAgentCommand('config.llm.set', params);
+      }
+
       statusEl.textContent = 'Saved successfully!';
       statusEl.className = 'llm-modal-status success';
 
