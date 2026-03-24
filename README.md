@@ -19,8 +19,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/dorisgyl/nevoflux/actions/workflows/build.yml">
-    <img src="https://github.com/dorisgyl/nevoflux/actions/workflows/build.yml/badge.svg" alt="Build Status">
+  <a href="https://github.com/dorisgyl/nevoflux/actions/workflows/finalize-release.yml">
+    <img src="https://github.com/dorisgyl/nevoflux/actions/workflows/finalize-release.yml/badge.svg" alt="Release Status">
   </a>
   <a href="https://github.com/dorisgyl/nevoflux/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MPL--2.0-blue.svg" alt="License">
