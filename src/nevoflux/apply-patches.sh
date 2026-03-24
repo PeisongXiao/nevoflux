@@ -191,7 +191,7 @@ if [ -f "${MENUBAR_INC}" ]; then
               <menuseparator id="nevofluxSep"/>\
               <menuitem id="menu_nevoflux"\
                         label="NevoFlux"\
-                        oncommand="switchToTabHavingURI(\&apos;nevoflux://settings\&apos;, true);"/>|' "${MENUBAR_INC}"
+                        oncommand="openTrustedLinkIn(\&apos;nevoflux://settings\&apos;, \&apos;tab\&apos;);"/>|' "${MENUBAR_INC}"
   fi
 fi
 
