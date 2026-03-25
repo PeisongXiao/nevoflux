@@ -348,6 +348,28 @@ API keys are resolved in order: environment variables → system keychain → co
 
 ---
 
+## FAQ
+
+**How do I open the AI sidebar?**
+
+Press `Ctrl+Shift+A` (Windows/Linux) or `Cmd+Shift+A` (macOS) to toggle the AI sidebar open and closed.
+
+**How do I configure LLM providers and agents?**
+
+Type `nevoflux://settings` in the address bar and navigate to **AI Models**. You'll see two sections: **LLM Providers** (cloud APIs and local models) and **Agents** (coding agents and personal assistants). Click any card to configure its API key and settings.
+
+**How do I connect Claude Code as a coding agent?**
+
+First install the Claude Code ACP adapter globally:
+
+```bash
+npm install -g @anthropic-ai/claude-code-acp
+```
+
+Then go to `nevoflux://settings` → AI Models → click the **Claude Code** card and configure it.
+
+---
+
 ## Contributing
 
 Nevoflux is open source and welcomes contributions.
