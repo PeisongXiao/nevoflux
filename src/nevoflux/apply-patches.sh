@@ -191,7 +191,7 @@ if [ -f "${MENUBAR_INC}" ]; then
               <menuseparator id="nevofluxSep"/>\
               <menuitem id="menu_nevoflux"\
                         label="NevoFlux"\
-                        oncommand="openTrustedLinkIn(\&apos;nevoflux://settings\&apos;, \&apos;tab\&apos;);"/>|' "${MENUBAR_INC}"
+                        oncommand="var w=Services.wm.getMostRecentWindow(\&apos;navigator:browser\&apos;);if(w\&amp;\&amp;w.gBrowser){w.gBrowser.selectedTab=w.gBrowser.addTab(\&apos;nevoflux://settings\&apos;,{triggeringPrincipal:Services.scriptSecurityManager.getSystemPrincipal()});w.focus()}"/>|' "${MENUBAR_INC}"
   fi
 fi
 
