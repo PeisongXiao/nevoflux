@@ -84,10 +84,14 @@ this.nevoflux = class extends ExtensionAPI {
     try {
       zipReader.open(distXpi);
       const stream = zipReader.getInputStream('manifest.json');
-      const bytes = new Uint8Array(stream.available());
-      stream.read(bytes, bytes.length);
+      const sis = Cc['@mozilla.org/scriptableinputstream;1'].createInstance(
+        Ci.nsIScriptableInputStream
+      );
+      sis.init(stream);
+      const data = sis.read(sis.available());
+      sis.close();
       stream.close();
-      const manifest = JSON.parse(new TextDecoder().decode(bytes));
+      const manifest = JSON.parse(data);
       distVersion = manifest.version;
     } finally {
       zipReader.close();
