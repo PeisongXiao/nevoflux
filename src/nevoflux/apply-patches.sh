@@ -42,11 +42,12 @@ find "${NEVOFLUX_DIR}/patches" -type f -name "*.nfpatch" 2> /dev/null | while re
   }
 done
 
-# 1b. Inject zen-sidebar-right.css into jar.inc.mn (idempotent sed, replaces fragile nfpatch)
+# 1b. Inject zen-sidebar-right.css into jar.inc.mn (idempotent, portable across GNU/BSD sed)
 JAR_INC="${ZEN_DIR}/common/jar.inc.mn"
 if [ -f "${JAR_INC}" ] && ! grep -q 'zen-sidebar-right.css' "${JAR_INC}"; then
   echo "Injecting zen-sidebar-right.css into jar.inc.mn..."
-  sedi '/zen-sidebar\.css/a\        content/browser/zen-styles/zen-sidebar-right.css                        (../../zen/common/styles/zen-sidebar-right.css)' "${JAR_INC}"
+  sedi 's|zen-sidebar\.css.*|&\
+        content/browser/zen-styles/zen-sidebar-right.css                        (../../zen/common/styles/zen-sidebar-right.css)|' "${JAR_INC}"
 fi
 
 # 2. Copy overlay files (new or overwritten files) to src/zen/
