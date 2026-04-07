@@ -48,7 +48,7 @@ jobs:
     permissions:
       contents: write
     # aarch64 does not need full 16x
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux]
     strategy:
       fail-fast: false
       matrix:
