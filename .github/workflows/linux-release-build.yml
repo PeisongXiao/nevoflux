@@ -130,6 +130,92 @@ jobs:
           . "$HOME/.cargo/env"
           npm run import
 
+      - name: Download NevoFlux Agent binary
+        run: |
+          PLATFORM="linux"
+          ARCH="${{ matrix.arch }}"
+          ARCHIVE_NAME="nevoflux-agent-${PLATFORM}-${ARCH}.tar.gz"
+          mkdir -p /tmp/agent/
+
+          # Find the latest release tag
+          LATEST_TAG=$(gh release view --repo dorisgyl/nevoflux-agent --json tagName --jq '.tagName' 2>/dev/null || true)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "::warning::No releases found in nevoflux-agent repo, skipping agent download."
+          else
+            echo "Latest release tag: $LATEST_TAG"
+            ASSET_EXISTS=$(gh release view "$LATEST_TAG" --repo dorisgyl/nevoflux-agent --json assets --jq ".assets[].name" 2>/dev/null | grep -c "^${ARCHIVE_NAME}$" || true)
+            if [ "$ASSET_EXISTS" = "0" ]; then
+              echo "::warning::Asset ${ARCHIVE_NAME} not found in release ${LATEST_TAG}, skipping agent download."
+            else
+              for attempt in 1 2 3; do
+                gh release download "$LATEST_TAG" \
+                  --repo dorisgyl/nevoflux-agent \
+                  --pattern "${ARCHIVE_NAME}" \
+                  --dir /tmp/agent/ --clobber && break
+                if [ $attempt -lt 3 ]; then
+                  echo "::warning::Download attempt $attempt/3 failed. Retrying in $((attempt * 10))s..."
+                  sleep $((attempt * 10))
+                else
+                  echo "::warning::Agent binary download failed after 3 attempts, continuing..."
+                fi
+              done
+            fi
+          fi
+
+          if [ -f "/tmp/agent/${ARCHIVE_NAME}" ]; then
+            mkdir -p build/AppDir/distribution/bin/
+            echo "Archive contents:"
+            tar -tzf "/tmp/agent/${ARCHIVE_NAME}" | head -20
+            tar -xzf "/tmp/agent/${ARCHIVE_NAME}" -C /tmp/agent/
+            echo "Extracted contents of /tmp/agent/:"
+            ls -la /tmp/agent/
+            mv /tmp/agent/nevoflux-agent build/AppDir/distribution/bin/nevoflux-agent
+            chmod +x build/AppDir/distribution/bin/nevoflux-agent
+            echo "Agent binary installed: build/AppDir/distribution/bin/nevoflux-agent"
+            # Copy models directory if present in release archive
+            if [ -d "/tmp/agent/models" ]; then
+              cp -r /tmp/agent/models build/AppDir/distribution/bin/models
+              echo "Models directory installed"
+            fi
+          else
+            echo "::notice::No agent binary available for ${PLATFORM}-${ARCH}, build continues without it."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy soul templates to distribution
+        run: |
+          mkdir -p build/AppDir/distribution/bin/defaults/soul
+          if [ -d "docs/reference/templates" ]; then
+            cp docs/reference/templates/*.md build/AppDir/distribution/bin/defaults/soul/
+            echo "Soul templates copied to distribution:"
+            ls -la build/AppDir/distribution/bin/defaults/soul/
+          else
+            echo "::warning::docs/reference/templates/ not found, skipping soul templates"
+          fi
+
+      - name: Copy built-in skills to distribution
+        run: |
+          if [ -d "docs/reference/skills" ]; then
+            mkdir -p build/AppDir/distribution/bin/defaults/skills
+            cp -r docs/reference/skills/* build/AppDir/distribution/bin/defaults/skills/
+            echo "Built-in skills copied to distribution:"
+            find build/AppDir/distribution/bin/defaults/skills -type f | head -20
+          else
+            echo "::warning::docs/reference/skills/ not found, skipping skills"
+          fi
+
+      - name: Verify distribution essentials
+        run: |
+          set -e
+          echo "Checking distribution directory contents:"
+          find build/AppDir/distribution -type f | head -30
+          if [ ! -d "build/AppDir/distribution/bin/models" ]; then
+            echo "::warning::models directory missing from distribution — agent release archive may not include it"
+          else
+            echo "models directory present"
+          fi
+
       - name: Build language packs
         run: sh scripts/download-language-packs.sh
 
