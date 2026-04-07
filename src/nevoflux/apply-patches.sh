@@ -136,23 +136,27 @@ if [ -d "${NEVOFLUX_DIR}/root-overlays" ]; then
   fi
 fi
 
-# 3b. Ensure inc.xhtml files in engine/browser/base/content/ are real files.
+# 3b. Replace ALL symlinks in engine/ with real file copies.
 #     Firefox's preprocessor does not follow symlinks when expanding #include
-#     directives. surfer import creates symlinks (engine/ → src/) but on some
-#     CI environments these may be copies with stale content. Force-copy from
-#     src/browser/base/content/ to ensure the preprocessor can read them.
-if [ -d "${ENGINE_DIR}/browser/base/content" ]; then
-  SRC_BROWSER_CONTENT="${ROOT_DIR}/src/browser/base/content"
-  for f in "${SRC_BROWSER_CONTENT}"/*.inc.xhtml; do
-    if [ -f "$f" ]; then
-      basename_f="$(basename "$f")"
-      engine_f="${ENGINE_DIR}/browser/base/content/${basename_f}"
-      rm -f "${engine_f}"
-      cp "$f" "${engine_f}"
-      echo "  Copied inc.xhtml: ${basename_f}"
-    fi
-  done
-fi
+#     directives. surfer import creates symlinks (engine/zen/ → src/zen/,
+#     engine/browser/base/content/ → src/browser/base/content/) which cause
+#     FILE_NOT_FOUND errors and deadlocks during config.status generation.
+#     Replace every symlink under engine/zen/ and engine/browser/base/content/
+#     with a copy of its target.
+echo "Replacing symlinks with real files for preprocessor compatibility..."
+SYMLINK_COUNT=0
+for dir in "${ENGINE_DIR}/zen" "${ENGINE_DIR}/browser/base/content"; do
+  if [ -d "$dir" ]; then
+    find "$dir" -type l | while read -r link; do
+      target=$(readlink "$link")
+      if [ -f "$target" ]; then
+        cp "$target" "$link.tmp" && rm "$link" && mv "$link.tmp" "$link"
+        SYMLINK_COUNT=$((SYMLINK_COUNT + 1))
+      fi
+    done
+  fi
+done
+echo "  Replaced symlinks with real files in engine/zen/ and engine/browser/base/content/"
 
 # 4. Copy engine-overlays to engine/ directory
 if [ -d "${NEVOFLUX_DIR}/engine-overlays" ]; then
