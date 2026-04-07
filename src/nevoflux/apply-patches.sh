@@ -75,6 +75,25 @@ if [ -d "${NEVOFLUX_DIR}/overlays" ] && [ "$(ls -A "${NEVOFLUX_DIR}/overlays" 2>
   fi
 fi
 
+# 2b. Ensure ALL src/zen/ files have corresponding engine/zen/ symlinks.
+#     surfer import only creates symlinks for files it knows about at import time.
+#     New directories added by the merge (e.g., spaces/, live-folders/, share/)
+#     won't have symlinks. Scan src/zen/ and create any missing ones.
+ENGINE_ZEN_DIR="${ENGINE_DIR}/zen"
+if [ -d "${ENGINE_ZEN_DIR}" ] && [ -d "${ZEN_DIR}" ]; then
+  echo "Syncing all src/zen/ files to engine/zen/..."
+  (cd "${ZEN_DIR}" && find . -type f) | while read -r rel_file; do
+    rel_file="${rel_file#./}"
+    src_file="$(cd "${ZEN_DIR}" && pwd)/${rel_file}"
+    engine_file="${ENGINE_ZEN_DIR}/${rel_file}"
+    if [ ! -e "${engine_file}" ]; then
+      mkdir -p "$(dirname "${engine_file}")"
+      ln -s "${src_file}" "${engine_file}"
+      echo "  Synced: ${rel_file}"
+    fi
+  done
+fi
+
 # 3. Copy root-overlays files (e.g., surfer.json, policies.json) to project root
 #    Preserve displayVersion values set by `surfer ci --display-version` before
 #    the overlay overwrites surfer.json with the default placeholder (e.g. 0.0.1).
