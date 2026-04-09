@@ -2959,6 +2959,9 @@ body {
 .ask-user-dialog {
   width: 100%;
   max-width: 380px;
+  max-height: calc(100vh - 2 * var(--nevo-space-lg));
+  display: flex;
+  flex-direction: column;
   background: var(--nevo-background);
   border: 1px solid var(--nevo-border);
   border-radius: var(--nevo-radius-xl);
@@ -2973,6 +2976,10 @@ body {
   color: var(--nevo-text);
   margin-bottom: var(--nevo-space-lg);
   line-height: 1.5;
+  overflow-y: auto;
+  min-height: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .ask-user-options {
@@ -2980,6 +2987,7 @@ body {
   flex-direction: column;
   gap: var(--nevo-space-sm);
   margin-bottom: var(--nevo-space-lg);
+  flex-shrink: 0;
 }
 
 .ask-user-option {
@@ -3038,6 +3046,7 @@ body {
   display: flex;
   gap: var(--nevo-space-sm);
   justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .ask-user-cancel {
