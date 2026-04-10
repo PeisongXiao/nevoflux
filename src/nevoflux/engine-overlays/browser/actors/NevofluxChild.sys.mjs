@@ -3794,6 +3794,40 @@ export class NevofluxChild extends JSWindowActorChild {
       .replace(/'/g, '&#39;');
   }
 
+  _generatePathSelector(el) {
+    const doc = this.doc;
+    if (!doc) return '';
+    const parts = [];
+    let cur = el;
+    let reachedAnchor = false;
+
+    while (cur) {
+      if (cur === doc.body || cur === doc.documentElement) {
+        reachedAnchor = true;
+        break;
+      }
+      if (cur.id && doc.getElementById(cur.id) === cur) {
+        parts.unshift(`#${this.contentWindow.CSS.escape(cur.id)}`);
+        reachedAnchor = true;
+        break;
+      }
+      let part = (cur.tagName || '').toLowerCase();
+      const parent = cur.parentElement;
+      const siblings = Array.from(parent?.children || []).filter(
+        c => c.tagName === cur.tagName
+      );
+      if (siblings.length > 1) {
+        const idx = siblings.indexOf(cur) + 1;
+        part += `:nth-of-type(${idx})`;
+      }
+      parts.unshift(part);
+      cur = parent;
+    }
+
+    if (!reachedAnchor) return '';
+    return parts.join(' > ');
+  }
+
   inferRole(el) {
     const roleMap = {
       A: 'link',

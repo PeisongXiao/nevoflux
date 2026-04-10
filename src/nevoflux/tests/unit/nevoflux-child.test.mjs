@@ -925,6 +925,47 @@ class MockNevofluxChild {
       .replace(/'/g, '&#39;');
   }
 
+  _generatePathSelector(el) {
+    const doc = this.doc;
+    if (!doc) return '';
+    const parts = [];
+    let cur = el;
+    let reachedAnchor = false;
+
+    while (cur) {
+      if (cur === doc.body || cur === doc.documentElement) {
+        reachedAnchor = true;
+        break;
+      }
+      if (cur.id && doc.getElementById && doc.getElementById(cur.id) === cur) {
+        parts.unshift(`#${this._cssEscape(cur.id)}`);
+        reachedAnchor = true;
+        break;
+      }
+      let part = (cur.tagName || '').toLowerCase();
+      const parent = cur.parentElement;
+      const siblings = (parent?.children || []).filter(
+        c => c.tagName === cur.tagName
+      );
+      if (siblings.length > 1) {
+        const idx = siblings.indexOf(cur) + 1;
+        part += `:nth-of-type(${idx})`;
+      }
+      parts.unshift(part);
+      cur = parent;
+    }
+
+    // Element was detached from the document tree — return empty path
+    if (!reachedAnchor) return '';
+    return parts.join(' > ');
+  }
+
+  _cssEscape(s) {
+    // Minimal CSS.escape polyfill for test context
+    if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/[^\w-]/g, ch => `\\${ch}`);
+  }
+
   snapshot() {
     return { tree: '', refs: {} };
   }
@@ -1957,6 +1998,67 @@ describe('NevofluxChild — _escapeHtml helper', () => {
 
   it('returns unchanged string when no entities present', () => {
     expect(child._escapeHtml('hello world')).toBe('hello world');
+  });
+});
+
+describe('NevofluxChild — _generatePathSelector helper', () => {
+  let child;
+  beforeEach(() => {
+    child = new MockNevofluxChild();
+  });
+
+  it('returns id selector when element has unique id', () => {
+    const doc = child.doc;
+    // Build: <body><div id="target"></div></body>
+    const div = doc.createElement('div');
+    div.id = 'target';
+    doc.body.appendChild(div);
+    doc._registerElementById?.('target', div); // mock-specific registration
+
+    expect(child._generatePathSelector(div)).toBe('#target');
+  });
+
+  it('uses nth-of-type for siblings of same tag', () => {
+    const doc = child.doc;
+    const ul = doc.createElement('ul');
+    const li1 = doc.createElement('li');
+    const li2 = doc.createElement('li');
+    const li3 = doc.createElement('li');
+    ul.appendChild(li1);
+    ul.appendChild(li2);
+    ul.appendChild(li3);
+    doc.body.appendChild(ul);
+
+    expect(child._generatePathSelector(li2)).toBe('ul > li:nth-of-type(2)');
+  });
+
+  it('omits nth-of-type when only one sibling of tag', () => {
+    const doc = child.doc;
+    const div = doc.createElement('div');
+    const p = doc.createElement('p');
+    div.appendChild(p);
+    doc.body.appendChild(div);
+
+    expect(child._generatePathSelector(p)).toBe('div > p');
+  });
+
+  it('builds a multi-level path', () => {
+    const doc = child.doc;
+    const outer = doc.createElement('div');
+    const mid = doc.createElement('section');
+    const inner = doc.createElement('span');
+    outer.appendChild(mid);
+    mid.appendChild(inner);
+    doc.body.appendChild(outer);
+
+    expect(child._generatePathSelector(inner)).toBe('div > section > span');
+  });
+
+  it('returns empty string for element detached from document', () => {
+    const doc = child.doc;
+    const orphan = doc.createElement('div');
+    // NOT appended to doc.body — element is detached
+    expect(child._generatePathSelector(orphan)).toBe('');
   });
 });
 
