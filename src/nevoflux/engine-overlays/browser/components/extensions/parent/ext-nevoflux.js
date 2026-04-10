@@ -257,6 +257,76 @@ this.nevoflux = class extends ExtensionAPI {
           return self.executeInTabWithRestore(resolvedTabId, extension, 'fill', { selector, text });
         },
 
+        async probe(tabId, selector, options = {}) {
+          if (!selector || typeof selector !== 'string') {
+            return {
+              success: false,
+              error: { code: 9002, message: 'Missing or invalid required parameter: selector', recoverable: false },
+            };
+          }
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTabWithRestore(resolvedTabId, extension, 'probe', {
+            selector,
+            ...options,
+          });
+        },
+
+        async paste(tabId, selector, text, options = {}) {
+          if (!selector || typeof selector !== 'string') {
+            return {
+              success: false,
+              error: { code: 9002, message: 'Missing or invalid required parameter: selector', recoverable: false },
+            };
+          }
+          if (text === undefined || text === null) {
+            return {
+              success: false,
+              error: { code: 9002, message: 'Missing or invalid required parameter: text', recoverable: false },
+            };
+          }
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTabWithRestore(resolvedTabId, extension, 'paste', {
+            selector,
+            text: String(text),
+            ...options,
+          });
+        },
+
+        async fillRichText(tabId, selector, text, options = {}) {
+          if (!selector || typeof selector !== 'string') {
+            return {
+              success: false,
+              error: { code: 9002, message: 'Missing or invalid required parameter: selector', recoverable: false },
+            };
+          }
+          if (text === undefined || text === null) {
+            return {
+              success: false,
+              error: { code: 9002, message: 'Missing or invalid required parameter: text', recoverable: false },
+            };
+          }
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTabWithRestore(resolvedTabId, extension, 'fillRichText', {
+            selector,
+            text: String(text),
+            ...options,
+          });
+        },
+
+        async queryAll(tabId, selector, options = {}) {
+          if (!selector || typeof selector !== 'string') {
+            return {
+              success: false,
+              error: { code: 9002, message: 'Missing or invalid required parameter: selector', recoverable: false },
+            };
+          }
+          const resolvedTabId = tabId ?? (await self.getActiveTabId(extension));
+          return self.executeInTabWithRestore(resolvedTabId, extension, 'queryAll', {
+            selector,
+            ...options,
+          });
+        },
+
         // ========== Navigation (browser_use mode) ==========
 
         async open(tabId, url, _options = {}) {
