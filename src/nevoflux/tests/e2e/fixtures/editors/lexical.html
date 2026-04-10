@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NevoFlux Fixture: Lexical (stub)</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+  [data-lexical-editor] { border: 1px solid #ccc; padding: 10px; min-height: 80px; width: 500px; }
+</style>
+</head>
+<body>
+<h1>Lexical Fixture (Stub)</h1>
+<p>Full Lexical build requires module bundling. For framework detection testing, the data-lexical-editor attribute alone is sufficient.</p>
+
+<div data-lexical-editor="true" contenteditable="true" id="lex"></div>
+
+<h2>Verification</h2>
+<pre>
+await browser.nevoflux.probe(null, '#lex')
+// Expected: is_content_editable=true, editor_framework="lexical"
+
+await browser.nevoflux.fillRichText(null, '#lex', 'Lexical text')
+// Expected: text appears in the div
+</pre>
+</body>
+</html>

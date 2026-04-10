@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NevoFlux Fixture: Standard Input</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+  .tgt { display: block; margin: 10px 0; padding: 8px; width: 400px; }
+  .label { color: #666; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>Standard Input Fixture</h1>
+<p>Used to verify <code>fill</code> and <code>type</code> still work on ordinary inputs after the contentEditable refactor.</p>
+
+<label class="label">Input (text)</label>
+<input id="tgt-input" class="tgt" type="text" value="">
+
+<label class="label">Textarea</label>
+<textarea id="tgt-textarea" class="tgt" rows="4"></textarea>
+
+<label class="label">Input (password)</label>
+<input id="tgt-password" class="tgt" type="password" value="">
+</body>
+</html>

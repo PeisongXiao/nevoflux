@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NevoFlux Fixture: Slate (stub)</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+  [data-slate-editor] { border: 1px solid #ccc; padding: 10px; min-height: 80px; width: 500px; }
+</style>
+</head>
+<body>
+<h1>Slate Fixture (Stub)</h1>
+<p>The data-slate-editor attribute is sufficient for framework detection.</p>
+
+<div data-slate-editor="true" contenteditable="true" id="slate"></div>
+
+<h2>Verification</h2>
+<pre>
+await browser.nevoflux.probe(null, '#slate')
+// Expected: editor_framework="slate"
+
+await browser.nevoflux.fillRichText(null, '#slate', 'Slate text')
+</pre>
+</body>
+</html>

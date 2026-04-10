@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NevoFlux Fixture: Simple ContentEditable</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+  #tgt { border: 1px solid #ccc; padding: 10px; min-height: 60px; width: 400px; }
+</style>
+</head>
+<body>
+<h1>Simple ContentEditable Fixture</h1>
+<p>Plain <code>contenteditable="true"</code> div. No framework. Verifies the baseline rich-text path.</p>
+
+<div id="tgt" contenteditable="true"></div>
+
+<h2>Verification commands (paste into browser console)</h2>
+<pre id="cmds">
+// 1. probe
+await browser.nevoflux.probe(null, '#tgt')
+
+// 2. fillRichText
+await browser.nevoflux.fillRichText(null, '#tgt', 'Hello world')
+
+// 3. fill (should delegate to fillRichText)
+await browser.nevoflux.fill(null, '#tgt', 'Second try')
+
+// 4. type (should per-char paste)
+await browser.nevoflux.type(null, '#tgt', '!!!')
+
+// 5. paste
+await browser.nevoflux.paste(null, '#tgt', ' added')
+
+// After each: inspect the div's textContent and confirm expected result.
+</pre>
+</body>
+</html>

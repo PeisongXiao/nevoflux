@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NevoFlux Fixture: ProseMirror (stub)</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+  .ProseMirror { border: 1px solid #ccc; padding: 10px; min-height: 80px; width: 500px; }
+</style>
+</head>
+<body>
+<h1>ProseMirror Fixture (Stub)</h1>
+<p>The .ProseMirror class is sufficient for framework detection.</p>
+
+<div class="ProseMirror" contenteditable="true" id="pm"></div>
+
+<h2>Verification</h2>
+<pre>
+await browser.nevoflux.probe(null, '#pm')
+// Expected: editor_framework="prosemirror"
+
+await browser.nevoflux.fillRichText(null, '#pm', 'ProseMirror text')
+</pre>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NevoFlux Fixture: Draft.js</title>
+<link rel="stylesheet" href="../vendor/draft.min.css">
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+  .editor-container { border: 1px solid #ccc; padding: 10px; min-height: 120px; width: 500px; }
+</style>
+</head>
+<body>
+<h1>Draft.js Fixture</h1>
+<p>Uses pinned Draft.js from vendor. The editor mounts into #root.</p>
+
+<div id="root" class="editor-container"></div>
+
+<script src="../vendor/react.production.min.js"></script>
+<script src="../vendor/react-dom.production.min.js"></script>
+<script src="../vendor/draft.min.js"></script>
+<script src="draft-js-init.js"></script>
+
+<h2>Verification</h2>
+<pre>
+// After the editor mounts, in browser console:
+await browser.nevoflux.probe(null, '.public-DraftEditor-content')
+// Expected fingerprint: is_content_editable=true, editor_framework="draft.js", react_fiber_present=true
+
+await browser.nevoflux.fillRichText(null, '.public-DraftEditor-content', 'Hello from NevoFlux')
+// The editor should now display "Hello from NevoFlux"
+</pre>
+</body>
+</html>
