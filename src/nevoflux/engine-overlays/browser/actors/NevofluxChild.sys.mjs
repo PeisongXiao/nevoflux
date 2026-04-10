@@ -425,6 +425,7 @@ export class NevofluxChild extends JSWindowActorChild {
       getMarkdown: () => this.getMarkdown(safeParams),
       queryAll: () => this.queryAll(safeParams),
       probe: () => this.probe(safeParams),
+      paste: () => this.paste(safeParams),
     };
 
     const handler = handlers[action];
@@ -2417,6 +2418,83 @@ export class NevofluxChild extends JSWindowActorChild {
       el.dispatchEvent(new Event('change', { bubbles: true }));
     } catch (e) {
       return { success: false, error: { code: 5001, message: e.message, recoverable: false } };
+    }
+
+    return { success: true };
+  }
+
+  // ========== Rich Text Paste ==========
+
+  paste({ selector, text }) {
+    if (!selector || text === undefined || text === null) {
+      return {
+        success: false,
+        error: { code: 9002, message: 'selector and text required', recoverable: false },
+      };
+    }
+
+    const doc = this.currentDoc || this.doc;
+    const win = this.currentWin || this.contentWindow;
+    if (!doc || !win) {
+      return {
+        success: false,
+        error: { code: 5001, message: 'No document or window available', recoverable: false },
+      };
+    }
+
+    const el = doc.querySelector(selector);
+    if (!el) {
+      return {
+        success: false,
+        error: { code: 1001, message: `Element not found: ${selector}`, recoverable: true },
+      };
+    }
+
+    // Walk into innermost editable if nested
+    const target = this._findInnermostEditable(el) || el;
+
+    // Focus
+    try {
+      target.focus();
+    } catch (e) {
+      return {
+        success: false,
+        error: { code: 1002, message: `Focus threw: ${e.message}`, recoverable: true },
+      };
+    }
+    if (doc.activeElement !== target) {
+      return {
+        success: false,
+        error: { code: 1002, message: 'Could not focus target', recoverable: true },
+      };
+    }
+
+    // Construct DataTransfer in content realm
+    let dt;
+    try {
+      dt = new win.DataTransfer();
+      dt.setData('text/plain', String(text));
+      dt.setData('text/html', this._escapeHtml(String(text)).replace(/\n/g, '<br>'));
+    } catch (e) {
+      return {
+        success: false,
+        error: { code: 5001, message: `DataTransfer construction failed: ${e.message}`, recoverable: false },
+      };
+    }
+
+    // Dispatch synthetic paste event (constructor lives in content realm)
+    try {
+      const evt = new win.ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dt,
+      });
+      target.dispatchEvent(evt);
+    } catch (e) {
+      return {
+        success: false,
+        error: { code: 5001, message: `ClipboardEvent dispatch failed: ${e.message}`, recoverable: false },
+      };
     }
 
     return { success: true };

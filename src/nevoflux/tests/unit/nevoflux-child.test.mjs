@@ -1241,6 +1241,19 @@ class MockNevofluxChild {
       },
     };
   }
+
+  paste({ selector, text }) {
+    if (!selector || text === undefined) {
+      return { success: false, error: { code: 9002, message: 'selector and text required', recoverable: false } };
+    }
+    const el = this.doc.querySelector(selector);
+    if (!el) {
+      return { success: false, error: { code: 1001, message: `Element not found: ${selector}`, recoverable: true } };
+    }
+    // Mock: record that paste was called with given text on given target
+    el._lastPastedText = String(text);
+    return { success: true };
+  }
 }
 
 // ========== TEST SUITES ==========
@@ -2257,6 +2270,25 @@ describe('NevofluxChild — probe method', () => {
 
   it('returns element-not-found for unknown selector', () => {
     const r = child.probe({ selector: '#definitely-not-there' });
+    expect(r.success).toBe(false);
+    expect(r.error.code).toBe(1001);
+  });
+});
+
+describe('NevofluxChild — paste method', () => {
+  let child;
+  beforeEach(() => {
+    child = new MockNevofluxChild();
+  });
+
+  it('rejects missing text', () => {
+    const r = child.paste({ selector: '#x' });
+    expect(r.success).toBe(false);
+    expect(r.error.code).toBe(9002);
+  });
+
+  it('returns element-not-found for unknown selector', () => {
+    const r = child.paste({ selector: '#missing', text: 'hi' });
     expect(r.success).toBe(false);
     expect(r.error.code).toBe(1001);
   });
