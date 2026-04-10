@@ -426,6 +426,7 @@ export class NevofluxChild extends JSWindowActorChild {
       queryAll: () => this.queryAll(safeParams),
       probe: () => this.probe(safeParams),
       paste: () => this.paste(safeParams),
+      fillRichText: () => this.fillRichText(safeParams),
     };
 
     const handler = handlers[action];
@@ -2498,6 +2499,66 @@ export class NevofluxChild extends JSWindowActorChild {
     }
 
     return { success: true };
+  }
+
+  fillRichText({ selector, text }) {
+    if (!selector || text === undefined || text === null) {
+      return {
+        success: false,
+        error: { code: 9002, message: 'selector and text required', recoverable: false },
+      };
+    }
+
+    const doc = this.currentDoc || this.doc;
+    const win = this.currentWin || this.contentWindow;
+    if (!doc || !win) {
+      return {
+        success: false,
+        error: { code: 5001, message: 'No document or window available', recoverable: false },
+      };
+    }
+
+    const el = doc.querySelector(selector);
+    if (!el) {
+      return {
+        success: false,
+        error: { code: 1001, message: `Element not found: ${selector}`, recoverable: true },
+      };
+    }
+
+    const target = this._findInnermostEditable(el) || el;
+
+    try {
+      target.focus();
+    } catch (e) {
+      return { success: false, error: { code: 1002, message: `Focus threw: ${e.message}`, recoverable: true } };
+    }
+
+    // Select all existing content
+    try {
+      const selection = win.getSelection();
+      const range = doc.createRange();
+      range.selectNodeContents(target);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch (e) {
+      // If Selection API fails, keep going — paste will overwrite at cursor
+    }
+
+    // Dispatch beforeinput(deleteContentBackward) so editors clear their state
+    try {
+      const deleteEvt = new win.InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'deleteContentBackward',
+      });
+      target.dispatchEvent(deleteEvt);
+    } catch (e) {
+      // Some browsers don't allow InputEvent dispatch; fall through
+    }
+
+    // Now paste new content
+    return this.paste({ selector, text });
   }
 
   // ========== Wait ==========

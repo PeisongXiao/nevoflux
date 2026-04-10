@@ -1254,6 +1254,19 @@ class MockNevofluxChild {
     el._lastPastedText = String(text);
     return { success: true };
   }
+
+  fillRichText({ selector, text }) {
+    if (!selector || text === undefined) {
+      return { success: false, error: { code: 9002, message: 'selector and text required', recoverable: false } };
+    }
+    const el = this.doc.querySelector(selector);
+    if (!el) {
+      return { success: false, error: { code: 1001, message: `Element not found: ${selector}`, recoverable: true } };
+    }
+    // Mock: clear + paste
+    el.textContent = '';
+    return this.paste({ selector, text });
+  }
 }
 
 // ========== TEST SUITES ==========
@@ -2289,6 +2302,25 @@ describe('NevofluxChild — paste method', () => {
 
   it('returns element-not-found for unknown selector', () => {
     const r = child.paste({ selector: '#missing', text: 'hi' });
+    expect(r.success).toBe(false);
+    expect(r.error.code).toBe(1001);
+  });
+});
+
+describe('NevofluxChild — fillRichText method', () => {
+  let child;
+  beforeEach(() => {
+    child = new MockNevofluxChild();
+  });
+
+  it('rejects missing text', () => {
+    const r = child.fillRichText({ selector: '#x' });
+    expect(r.success).toBe(false);
+    expect(r.error.code).toBe(9002);
+  });
+
+  it('returns element-not-found for unknown selector', () => {
+    const r = child.fillRichText({ selector: '#missing', text: 'hi' });
     expect(r.success).toBe(false);
     expect(r.error.code).toBe(1001);
   });
