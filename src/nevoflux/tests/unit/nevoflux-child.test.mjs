@@ -1123,32 +1123,18 @@ class MockNevofluxChild {
   }
 
   fill({ selector, text }) {
-    const doc = this.doc;
-    if (!doc) {
-      return {
-        success: false,
-        error: { code: 5001, message: 'No document available', recoverable: false },
-      };
-    }
-
-    const el = doc.querySelector(selector);
+    const el = this.doc.querySelector(selector);
     if (!el) {
-      return {
-        success: false,
-        error: { code: 1001, message: 'Element not found', recoverable: true },
-      };
+      return { success: false, error: { code: 1001, message: 'Element not found', recoverable: true } };
     }
-
-    try {
-      el.focus();
+    const tag = (el.tagName || '').toLowerCase();
+    const isStandardInput = (tag === 'input' || tag === 'textarea') && typeof el.value === 'string';
+    if (isStandardInput) {
       el.value = '';
       el.value = text;
-      el.dispatchEvent(new this.contentWindow.Event('input', { bubbles: true }));
-      el.dispatchEvent(new this.contentWindow.Event('change', { bubbles: true }));
       return { success: true };
-    } catch (e) {
-      return { success: false, error: { code: 5001, message: e.message, recoverable: false } };
     }
+    return this.fillRichText({ selector, text });
   }
 
   async waitForSelector({ selector, timeout = 30000, state = 'visible' }) {

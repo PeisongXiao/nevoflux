@@ -2395,7 +2395,7 @@ export class NevofluxChild extends JSWindowActorChild {
   }
 
   fill({ selector, text }) {
-    const doc = this.currentDoc;
+    const doc = this.currentDoc || this.doc;
     if (!doc) {
       return {
         success: false,
@@ -2411,17 +2411,25 @@ export class NevofluxChild extends JSWindowActorChild {
       };
     }
 
-    try {
-      el.focus();
-      el.value = '';
-      el.value = text;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    } catch (e) {
-      return { success: false, error: { code: 5001, message: e.message, recoverable: false } };
+    const tag = (el.tagName || '').toLowerCase();
+    const isStandardInput = (tag === 'input' || tag === 'textarea') && typeof el.value === 'string';
+    const win = this.currentWin || this.contentWindow;
+
+    if (isStandardInput) {
+      try {
+        el.focus();
+        el.value = '';
+        el.value = text;
+        el.dispatchEvent(new win.Event('input', { bubbles: true }));
+        el.dispatchEvent(new win.Event('change', { bubbles: true }));
+      } catch (e) {
+        return { success: false, error: { code: 5001, message: e.message, recoverable: false } };
+      }
+      return { success: true };
     }
 
-    return { success: true };
+    // contentEditable or unknown element type — delegate to fillRichText
+    return this.fillRichText({ selector, text });
   }
 
   // ========== Rich Text Paste ==========
