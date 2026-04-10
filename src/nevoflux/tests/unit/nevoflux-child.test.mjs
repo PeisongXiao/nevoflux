@@ -995,6 +995,12 @@ class MockNevofluxChild {
     return deepest;
   }
 
+  _detectEditorFramework(_el) {
+    // Not unit-tested; relies on matches()/classList which the mock doesn't support richly.
+    // Verified manually via fixture HTML pages (see src/nevoflux/tests/e2e/fixtures/editors/).
+    return null;
+  }
+
   snapshot() {
     return { tree: '', refs: {} };
   }

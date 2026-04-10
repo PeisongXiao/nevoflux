@@ -3855,6 +3855,51 @@ export class NevofluxChild extends JSWindowActorChild {
     return deepest;
   }
 
+  /**
+   * Detect editor framework by walking ancestors.
+   * Returns a framework name string or null.
+   * Hybrid: built-in detection table + Rust-downloadable overrides.
+   */
+  _detectEditorFramework(el) {
+    if (!el || typeof el.matches !== 'function') return null;
+
+    const tests = [
+      { name: 'draft.js',    match: a => a.matches('.DraftEditor-root, [data-contents]') },
+      { name: 'lexical',     match: a => a.matches('[data-lexical-editor]') },
+      { name: 'prosemirror', match: a => a.classList?.contains('ProseMirror') || a.matches('.ProseMirror') },
+      { name: 'slate',       match: a => a.matches('[data-slate-editor]') },
+      { name: 'codemirror',  match: a => a.matches('.cm-editor, .CodeMirror') },
+      { name: 'monaco',      match: a => a.matches('.monaco-editor') },
+      { name: 'quill',       match: a => a.matches('.ql-editor') },
+      { name: 'tinymce',     match: a => a.matches('.mce-content-body') },
+    ];
+
+    // 1. Built-in table
+    for (let cur = el; cur && cur !== this.doc; cur = cur.parentElement) {
+      for (const t of tests) {
+        try {
+          if (t.match(cur)) return t.name;
+        } catch (e) {
+          // matches() may throw on invalid selectors; ignore and continue
+        }
+      }
+    }
+
+    // 2. Rust-downloaded overrides (future extensibility)
+    const overrides = this._frameworkOverrides || [];
+    for (const rule of overrides) {
+      for (let cur = el; cur && cur !== this.doc; cur = cur.parentElement) {
+        try {
+          if (cur.matches && cur.matches(rule.selector_pattern)) return rule.name;
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+
+    return null;
+  }
+
   inferRole(el) {
     const roleMap = {
       A: 'link',
