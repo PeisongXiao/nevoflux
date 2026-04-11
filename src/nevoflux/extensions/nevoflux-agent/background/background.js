@@ -946,10 +946,23 @@ class ChannelManager {
 
     // Intercept browser_tool_request for actions that background.js can handle directly
     // This bypasses the Sidebar WASM round-trip for better reliability and performance
+    //
+    // PR #1 + PR #2 tools (probe, paste, fillRichText) are also in this set —
+    // they are Actor-level calls that don't need any sidebar state, and the
+    // sidebar WASM IncomingMessage enum doesn't know about them (would cause
+    // a Deserialize error on broadcast), so we must NOT forward to sidebar.
     if (msgType === MessageTypes.BROWSER_TOOL_REQUEST) {
       const payload = message.payload;
       const action = payload?.action;
-      const DIRECT_ACTIONS = new Set(['read_artifact', 'edit_artifact', 'ask_user']);
+      const DIRECT_ACTIONS = new Set([
+        'read_artifact',
+        'edit_artifact',
+        'ask_user',
+        // PR #1 Actor methods dispatched by PR #2 daemon-side orchestration
+        'probe',
+        'paste',
+        'fillRichText',
+      ]);
       if (DIRECT_ACTIONS.has(action)) {
         console.log(`[NevoFlux] Handling ${action} directly (bypassing sidebar)`);
         executeBrowserTool(payload, 'direct')
