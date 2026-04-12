@@ -2630,19 +2630,31 @@ export class NevofluxChild extends JSWindowActorChild {
       };
     }
 
-    // Build File in content realm so the page's JS recognizes it.
+    // Build File in chrome realm and assign via mozSetFileArray (Firefox
+    // internal API for chrome-privileged file input assignment).
+    //
+    // Previous approach used this.contentWindow.* constructors to build
+    // objects in the content realm, but Xray wrappers blocked the
+    // cross-realm DataTransfer assignment ("Permission denied to access
+    // object"). Chrome-realm File + mozSetFileArray avoids this entirely.
     try {
       const arrayBuffer = await blob.arrayBuffer();
-      const uint8 = new this.contentWindow.Uint8Array(arrayBuffer);
-      const contentBlob = new this.contentWindow.Blob([uint8], { type: mimeType });
-      const file = new this.contentWindow.File([contentBlob], fileName, {
+      const file = new File([new Uint8Array(arrayBuffer)], fileName, {
         type: mimeType,
         lastModified: Date.now(),
       });
 
-      const dt = new this.contentWindow.DataTransfer();
-      dt.items.add(file);
-      el.files = dt.files;
+      // Primary: mozSetFileArray — Firefox's internal API used by
+      // Marionette and DevTools for automation. Available on
+      // chrome-privileged HTMLInputElement references.
+      if (typeof el.mozSetFileArray === 'function') {
+        el.mozSetFileArray([file]);
+      } else {
+        // Fallback: chrome-realm DataTransfer + direct assignment.
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        el.files = dt.files;
+      }
     } catch (e) {
       return {
         success: false,
@@ -2651,8 +2663,9 @@ export class NevofluxChild extends JSWindowActorChild {
     }
 
     // Dispatch change + input events to notify the page.
-    el.dispatchEvent(new this.contentWindow.Event('change', { bubbles: true }));
-    el.dispatchEvent(new this.contentWindow.Event('input', { bubbles: true }));
+    const win = this.contentWindow;
+    el.dispatchEvent(new win.Event('change', { bubbles: true }));
+    el.dispatchEvent(new win.Event('input', { bubbles: true }));
 
     return { success: true, result: { size: blob.size } };
   }
