@@ -1994,19 +1994,31 @@ async function executeBrowserTool(request, caller = 'unknown') {
   if (!targetTabId && !TAB_INDEPENDENT_ACTIONS.has(action)) {
     targetTabId = await getActiveTabId();
     if (!targetTabId) {
-      // For navigate, create a new tab if no web tab exists
+      // For navigate without explicit new_tab, try to find any web tab
+      // to navigate in-place. Only create a new tab as a last resort.
       if (action === 'navigate' && params?.url) {
-        const newTab = await browser.tabs.create({ url: params.url });
-        return { success: true, result: { url: params.url, tab_id: newTab.id } };
+        // Try to find any existing web tab (not about:blank, not sidebar)
+        const tabs = await browser.tabs.query({ currentWindow: true });
+        const webTab = tabs.find(
+          (t) => t.url && !t.url.startsWith('about:') && !t.url.startsWith('moz-extension:')
+        );
+        if (webTab) {
+          targetTabId = webTab.id;
+        } else {
+          // Genuinely no web tab — create one
+          const newTab = await browser.tabs.create({ url: params.url });
+          return { success: true, result: { url: params.url, tab_id: newTab.id, new_tab: true } };
+        }
+      } else {
+        return {
+          success: false,
+          error: {
+            code: -1,
+            message: 'No active web tab found. Open a web page first.',
+            recoverable: true,
+          },
+        };
       }
-      return {
-        success: false,
-        error: {
-          code: -1,
-          message: 'No active web tab found. Open a web page first.',
-          recoverable: true,
-        },
-      };
     }
   }
 
