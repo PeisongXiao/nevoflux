@@ -202,13 +202,17 @@ function actionType(params) {
       })
     );
 
-    // Update value
-    const newValue = element.value + char;
+    // Update value — guard against undefined on contentEditable targets
+    // where .value doesn't exist (spec §5.6 fix: never produces "undefinedA")
+    const current = element.value ?? '';
+    const newValue = current + char;
     if (nativeSetter) {
       nativeSetter.call(element, newValue);
-    } else {
+    } else if (typeof element.value === 'string') {
       element.value = newValue;
     }
+    // If element has no .value (contentEditable), skip value mutation —
+    // the primary path is the Actor's type() method, not this fallback.
 
     // Dispatch input event
     element.dispatchEvent(
@@ -263,8 +267,28 @@ function actionFill(params) {
   element.focus();
   element.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
 
-  // Clear existing value
-  element.value = '';
+  // Clear existing value — guard against contentEditable where .value
+  // doesn't exist (spec §5.6 fix: explicit error instead of silent failure)
+  const tag = element.tagName.toLowerCase();
+  const isStandardInput =
+    (tag === 'input' || tag === 'textarea') && typeof element.value === 'string';
+
+  if (isStandardInput) {
+    element.value = '';
+  } else {
+    // contentEditable: this fallback path cannot reliably fill rich text.
+    // Return an explicit error instead of silently writing to a non-existent .value.
+    return {
+      success: false,
+      error: {
+        code: 1009,
+        message: `Element <${tag}> is contentEditable or has no .value property. ` +
+          'Use browser_input instead, which handles rich text editors.',
+        recoverable: false,
+      },
+    };
+  }
+
   element.dispatchEvent(
     new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })
   );
@@ -279,7 +303,7 @@ function actionFill(params) {
     'value'
   )?.set;
 
-  if (element.tagName === 'TEXTAREA' && nativeTextAreaValueSetter) {
+  if (tag === 'textarea' && nativeTextAreaValueSetter) {
     nativeTextAreaValueSetter.call(element, value);
   } else if (nativeInputValueSetter) {
     nativeInputValueSetter.call(element, value);
@@ -1271,10 +1295,12 @@ async function actionTypeById(params) {
   for (const char of text) {
     element.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
 
-    const newValue = element.value + char;
+    // Fix: guard against undefined on contentEditable targets (spec §5.6)
+    const current = element.value ?? '';
+    const newValue = current + char;
     if (nativeSetter) {
       nativeSetter.call(element, newValue);
-    } else {
+    } else if (typeof element.value === 'string') {
       element.value = newValue;
     }
 
