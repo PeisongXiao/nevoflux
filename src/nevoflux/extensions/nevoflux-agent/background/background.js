@@ -963,6 +963,7 @@ class ChannelManager {
         'paste',
         'fillRichText',
         'uploadFile',
+        'activateTab',
       ]);
       if (DIRECT_ACTIONS.has(action)) {
         console.log(`[NevoFlux] Handling ${action} directly (bypassing sidebar)`);
@@ -2021,6 +2022,9 @@ async function executeBrowserTool(request, caller = 'unknown') {
       case 'navigate':
         return await executeNavigateViaApi(targetTabId, params);
 
+      case 'activateTab':
+        return await executeActivateTabViaApi(targetTabId, params);
+
       case 'go_back':
         return await executeGoBackViaApi(targetTabId);
 
@@ -2469,23 +2473,31 @@ function isNevofluxApiAvailable() {
  * Navigate to a URL via browser.nevoflux.open()
  */
 async function executeNavigateViaApi(tabId, params) {
-  const { url } = params;
+  const { url, new_tab: newTab } = params;
   if (!url) {
     return { success: false, error: { code: -1, message: 'URL required', recoverable: false } };
   }
 
   try {
-    const result = await browser.nevoflux.open(tabId, url);
-    if (result.success === false) {
-      return result;
+    let targetTabId = tabId;
+
+    if (newTab) {
+      // Open in a new tab instead of navigating the current one.
+      const tab = await browser.tabs.create({ url, active: true });
+      targetTabId = tab.id;
+    } else {
+      const result = await browser.nevoflux.open(tabId, url);
+      if (result.success === false) {
+        return result;
+      }
     }
 
     // Wait for page load
     return new Promise((resolve) => {
       const listener = (updatedTabId, changeInfo) => {
-        if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        if (updatedTabId === targetTabId && changeInfo.status === 'complete') {
           browser.tabs.onUpdated.removeListener(listener);
-          resolve({ success: true, result: { url } });
+          resolve({ success: true, result: { url, tab_id: targetTabId, new_tab: !!newTab } });
         }
       };
       browser.tabs.onUpdated.addListener(listener);
@@ -2495,10 +2507,27 @@ async function executeNavigateViaApi(tabId, params) {
         browser.tabs.onUpdated.removeListener(listener);
         resolve({
           success: true,
-          result: { url, note: 'Navigation started but completion not confirmed' },
+          result: { url, tab_id: targetTabId, new_tab: !!newTab, note: 'Navigation started but completion not confirmed' },
         });
       }, 30000);
     });
+  } catch (error) {
+    return { success: false, error: { code: -1, message: error.message, recoverable: true } };
+  }
+}
+
+/**
+ * Activate (switch to) a specific tab by ID.
+ */
+async function executeActivateTabViaApi(tabId, params) {
+  const targetTabId = params?.tab_id ?? tabId;
+  if (!targetTabId) {
+    return { success: false, error: { code: -1, message: 'tab_id required', recoverable: false } };
+  }
+  try {
+    await browser.tabs.update(targetTabId, { active: true });
+    const tab = await browser.tabs.get(targetTabId);
+    return { success: true, result: { tab_id: tab.id, url: tab.url, title: tab.title } };
   } catch (error) {
     return { success: false, error: { code: -1, message: error.message, recoverable: true } };
   }
