@@ -52,6 +52,20 @@ const Canvas = {
   window.addEventListener("message", function(e) {
     if (!e.data || !e.data._nevoflux) return;
 
+    // Handle EventBus delivery push messages
+    if (e.data.type === 'events:delivery') {
+      var handlers = window._nevofluxEventHandlers || {};
+      var subId = e.data.payload && e.data.payload.subscription_id;
+      if (subId && handlers[subId]) {
+        try {
+          handlers[subId](e.data.payload.event);
+        } catch(handlerErr) {
+          console.error('[NevofluxSDK] Event handler error:', handlerErr);
+        }
+      }
+      return;
+    }
+
     // Standard request-response
     if (e.data._reqId != null) {
       var cb = _pending[e.data._reqId];
@@ -174,6 +188,78 @@ const Canvas = {
     },
     system: {
       getInfo: function() { return request("system.getInfo", {}); }
+    },
+    events: {
+      subscribe: function(patterns, handler, options) {
+        options = options || {};
+        var _subHandlers = window._nevofluxEventHandlers || {};
+        window._nevofluxEventHandlers = _subHandlers;
+
+        return request("events.subscribe", {
+          patterns: Array.isArray(patterns) ? patterns : [patterns],
+          replay_sticky: options.replaySticky !== false,
+          buffer_size: options.bufferSize || 256,
+        }).then(function(res) {
+          var subId = res.subscriptionId;
+          _subHandlers[subId] = handler;
+          return {
+            subscriptionId: subId,
+            unsubscribe: function() {
+              delete _subHandlers[subId];
+              return request("events.unsubscribe", { subscriptionId: subId });
+            }
+          };
+        });
+      },
+
+      publish: function(topic, data, options) {
+        options = options || {};
+        return request("events.publish", {
+          topic: topic,
+          data: data,
+          delivery: options.delivery || "ephemeral",
+        });
+      },
+
+      history: function(topic, options) {
+        options = options || {};
+        return request("events.history", {
+          topic: topic,
+          limit: options.limit || 100,
+          since_ms: options.sinceMs || null,
+        });
+      },
+
+      waitFor: function(pattern, options) {
+        options = options || {};
+        var timeoutMs = options.timeoutMs || 30000;
+
+        return new Promise(function(resolve, reject) {
+          var timer = setTimeout(function() {
+            sub.then(function(s) { s.unsubscribe(); });
+            reject(new Error("waitFor timeout after " + timeoutMs + "ms"));
+          }, timeoutMs);
+
+          var sub = NevofluxSDK.events.subscribe([pattern], function(event) {
+            clearTimeout(timer);
+            sub.then(function(s) { s.unsubscribe(); });
+            resolve(event);
+          }, { replaySticky: true, bufferSize: 1 });
+        });
+      },
+
+      recover: function() {
+        return request("events.recover", {}).then(function(res) {
+          if (!res.specs || res.specs.length === 0) return [];
+          var recovered = [];
+          var promises = res.specs.map(function(spec) {
+            return NevofluxSDK.events.subscribe(spec.patterns, null).then(function(sub) {
+              recovered.push(sub);
+            });
+          });
+          return Promise.all(promises).then(function() { return recovered; });
+        });
+      }
     }
   };
 })();
