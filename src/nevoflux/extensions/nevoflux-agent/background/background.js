@@ -66,6 +66,11 @@ const BackgroundAPI = {
 
   // System commands (sidebar → agent with async response)
   SYSTEM_COMMAND: 'bg:system_command',
+
+  // EventBus (sidebar → background → agent)
+  EVENTS_SUBSCRIBE: 'bg:events_subscribe',
+  EVENTS_UNSUBSCRIBE: 'bg:events_unsubscribe',
+  EVENTS_PUBLISH: 'bg:events_publish',
 };
 
 // =============================================================================
@@ -111,6 +116,11 @@ const MessageTypes = {
   ARTIFACT_DELTA: 'artifact_delta',
   ARTIFACT_COMPLETE: 'artifact_complete',
 
+  // EventBus (bidirectional)
+  EVENTS_REQUEST: 'events_request',
+  EVENTS_DELIVERY: 'events_delivery',
+  EVENTS_RESPONSE: 'events_response',
+
   // Legacy types (backwards compatibility)
   TAB_CONTEXT_UPDATE: 'tab_context_update',
   REQUEST_TAB_CONTEXT: 'request_tab_context',
@@ -142,6 +152,11 @@ const pendingAgentCommands = new Map();
 // Pending system commands from sidebar: requestId → { sendResponse, timeout }
 const pendingSystemCommands = new Map();
 
+// EventBus Subscription Tracking
+const eventBusSubscriptions = new Map(); // subscription_id → { source, tabId, bridgeId, patterns }
+const tabSubscriptions = new Map(); // tabId → Set<subscription_id>
+const pendingEventHistoryRequests = new Map(); // requestId → bridgeRequestId
+
 // Cleanup stale pending agent commands after 30s
 setInterval(() => {
   const now = Date.now();
@@ -153,6 +168,19 @@ setInterval(() => {
         .bridgeRespond(bridgeId, {
           success: false,
           error: { code: 'TIMEOUT', message: 'Agent command timed out' },
+        })
+        .catch(() => {});
+    }
+  }
+  // Cleanup stale pending event history requests after 30s
+  for (const [reqId, bridgeId] of pendingEventHistoryRequests) {
+    const ts = parseInt(reqId.split('_')[1], 10);
+    if (now - ts > 30000) {
+      pendingEventHistoryRequests.delete(reqId);
+      browser.nevoflux
+        .bridgeRespond(bridgeId, {
+          success: false,
+          error: { code: 'TIMEOUT', message: 'Event history request timed out' },
         })
         .catch(() => {});
     }
@@ -894,6 +922,69 @@ class ChannelManager {
       }
     }
 
+    // Handle EventBus delivery — route events to matching subscribers
+    if (msgType === MessageTypes.EVENTS_DELIVERY) {
+      const eventPayload = message.payload;
+      const topic = eventPayload?.topic;
+      console.log(`[NevoFlux] EventBus delivery: topic=${topic}`);
+
+      for (const [subId, sub] of eventBusSubscriptions) {
+        // Check if subscription patterns match the topic
+        const matches = sub.patterns.some((pattern) => {
+          if (pattern === '*' || pattern === topic) return true;
+          // Simple wildcard: "foo.*" matches "foo.bar", "foo.baz"
+          if (pattern.endsWith('.*')) {
+            const prefix = pattern.slice(0, -2);
+            return topic === prefix || topic.startsWith(prefix + '.');
+          }
+          // Double wildcard: "foo.**" matches "foo.bar.baz"
+          if (pattern.endsWith('.**')) {
+            const prefix = pattern.slice(0, -3);
+            return topic === prefix || topic.startsWith(prefix + '.');
+          }
+          return false;
+        });
+
+        if (matches) {
+          if (sub.source === 'bridge') {
+            // Push to canvas iframe via bridgePush — use the subscription_id as channel
+            browser.nevoflux
+              .bridgePush(subId, {
+                type: 'events:delivery',
+                payload: eventPayload,
+              })
+              .catch((err) => {
+                console.warn(`[NevoFlux] EventBus bridgePush failed for sub ${subId}:`, err);
+              });
+          } else if (sub.source === 'sidebar') {
+            // Forward to sidebar
+            broadcastToSidebar({
+              type: MessageTypes.EVENTS_DELIVERY,
+              payload: eventPayload,
+            });
+          }
+        }
+      }
+      // Don't fall through to sidebar broadcast — we handled routing above
+      return;
+    }
+
+    // Handle EventBus history response — route back to pending requester
+    if (msgType === MessageTypes.EVENTS_RESPONSE) {
+      const reqId = message.payload?.request_id;
+      const bridgeId = pendingEventHistoryRequests.get(reqId);
+      if (bridgeId) {
+        pendingEventHistoryRequests.delete(reqId);
+        browser.nevoflux.bridgeRespond(bridgeId, message.payload).catch((err) => {
+          console.error('[NevoFlux] EventBus history bridgeRespond failed:', err);
+        });
+        return;
+      }
+      // If no pending request, forward to sidebar in case it requested history
+      broadcastToSidebar(message);
+      return;
+    }
+
     // Forward to canvas sessions.
     // Try matching by session_id in payload first; fall back to
     // _activeCanvasSessionId for messages that don't carry session_id
@@ -1371,6 +1462,121 @@ if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onBridgeRequest)
           // Don't call bridgeRespond here — wait for system_response
           return;
         }
+
+        // ----- EventBus bridge requests -----
+
+        case 'events.subscribe': {
+          const subscriptionId =
+            payload.subscription_id ||
+            `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const patterns = payload.patterns || [];
+          const tabId = payload.tab_id || null;
+
+          // Track subscription locally
+          eventBusSubscriptions.set(subscriptionId, {
+            source: 'bridge',
+            tabId,
+            bridgeId: id, // bridge request id for future push
+            patterns,
+          });
+
+          // Track per-tab for cleanup on tab close
+          if (tabId != null) {
+            if (!tabSubscriptions.has(tabId)) {
+              tabSubscriptions.set(tabId, new Set());
+            }
+            tabSubscriptions.get(tabId).add(subscriptionId);
+          }
+
+          // Forward to agent
+          channelManager.sendToAgent({
+            type: MessageTypes.EVENTS_REQUEST,
+            payload: {
+              action: 'subscribe',
+              subscription_id: subscriptionId,
+              patterns,
+            },
+          });
+
+          result = { success: true, subscription_id: subscriptionId };
+          break;
+        }
+
+        case 'events.unsubscribe': {
+          const subId = payload.subscription_id;
+          if (!subId) {
+            result = { success: false, error: { code: -1, message: 'subscription_id required' } };
+            break;
+          }
+
+          // Clean up local tracking
+          const sub = eventBusSubscriptions.get(subId);
+          if (sub) {
+            eventBusSubscriptions.delete(subId);
+            if (sub.tabId != null && tabSubscriptions.has(sub.tabId)) {
+              tabSubscriptions.get(sub.tabId).delete(subId);
+              if (tabSubscriptions.get(sub.tabId).size === 0) {
+                tabSubscriptions.delete(sub.tabId);
+              }
+            }
+          }
+
+          // Forward to agent
+          channelManager.sendToAgent({
+            type: MessageTypes.EVENTS_REQUEST,
+            payload: {
+              action: 'unsubscribe',
+              subscription_id: subId,
+            },
+          });
+
+          result = { success: true };
+          break;
+        }
+
+        case 'events.publish': {
+          const topic = payload.topic;
+          if (!topic) {
+            result = { success: false, error: { code: -1, message: 'topic required' } };
+            break;
+          }
+
+          channelManager.sendToAgent({
+            type: MessageTypes.EVENTS_REQUEST,
+            payload: {
+              action: 'publish',
+              topic,
+              data: payload.data || {},
+              source: payload.source || 'bridge',
+              metadata: payload.metadata || {},
+            },
+          });
+
+          result = { success: true };
+          break;
+        }
+
+        case 'events.history': {
+          const requestId = `evhist_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+          // Track pending request so we can route the response back
+          pendingEventHistoryRequests.set(requestId, id);
+
+          channelManager.sendToAgent({
+            type: MessageTypes.EVENTS_REQUEST,
+            payload: {
+              action: 'history',
+              request_id: requestId,
+              topic: payload.topic || null,
+              limit: payload.limit || 50,
+            },
+          });
+
+          // Don't respond now — wait for events_response from agent
+          return;
+        }
+
+        // ----- End EventBus bridge requests -----
 
         case 'getCache': {
           const key = payload?.key || 'nevoflux_last_status';
@@ -5142,6 +5348,88 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
       return true;
     }
 
+    case BackgroundAPI.EVENTS_SUBSCRIBE: {
+      const patterns = message.patterns || [];
+      const subscriptionId =
+        message.subscription_id ||
+        `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      // Track subscription locally (sidebar source)
+      eventBusSubscriptions.set(subscriptionId, {
+        source: 'sidebar',
+        tabId: null,
+        bridgeId: null,
+        patterns,
+      });
+
+      // Forward to agent
+      channelManager.sendToAgent({
+        type: MessageTypes.EVENTS_REQUEST,
+        payload: {
+          action: 'subscribe',
+          subscription_id: subscriptionId,
+          patterns,
+        },
+      });
+
+      sendResponse({ success: true, subscription_id: subscriptionId });
+      break;
+    }
+
+    case BackgroundAPI.EVENTS_UNSUBSCRIBE: {
+      const subId = message.subscription_id;
+      if (!subId) {
+        sendResponse({ success: false, error: 'subscription_id required' });
+        break;
+      }
+
+      // Clean up local tracking
+      const sub = eventBusSubscriptions.get(subId);
+      if (sub) {
+        eventBusSubscriptions.delete(subId);
+        if (sub.tabId != null && tabSubscriptions.has(sub.tabId)) {
+          tabSubscriptions.get(sub.tabId).delete(subId);
+          if (tabSubscriptions.get(sub.tabId).size === 0) {
+            tabSubscriptions.delete(sub.tabId);
+          }
+        }
+      }
+
+      // Forward to agent
+      channelManager.sendToAgent({
+        type: MessageTypes.EVENTS_REQUEST,
+        payload: {
+          action: 'unsubscribe',
+          subscription_id: subId,
+        },
+      });
+
+      sendResponse({ success: true });
+      break;
+    }
+
+    case BackgroundAPI.EVENTS_PUBLISH: {
+      const topic = message.topic;
+      if (!topic) {
+        sendResponse({ success: false, error: 'topic required' });
+        break;
+      }
+
+      channelManager.sendToAgent({
+        type: MessageTypes.EVENTS_REQUEST,
+        payload: {
+          action: 'publish',
+          topic,
+          data: message.data || {},
+          source: message.source || 'sidebar',
+          metadata: message.metadata || {},
+        },
+      });
+
+      sendResponse({ success: true });
+      break;
+    }
+
     case BackgroundAPI.SYSTEM_COMMAND: {
       const { command, params } = message;
       const requestId = `syscmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -5206,6 +5494,24 @@ browser.tabs.onUpdated.addListener(tabEventListeners.onUpdated);
 browser.tabs.onRemoved.addListener((tabId) => {
   if (tabId === _canvasTabId) {
     _canvasTabId = null;
+  }
+
+  // Clean up EventBus subscriptions for this tab
+  const subIds = tabSubscriptions.get(tabId);
+  if (subIds) {
+    for (const subId of subIds) {
+      eventBusSubscriptions.delete(subId);
+      // Notify agent to unsubscribe
+      channelManager.sendToAgent({
+        type: MessageTypes.EVENTS_REQUEST,
+        payload: {
+          action: 'unsubscribe',
+          subscription_id: subId,
+        },
+      });
+    }
+    tabSubscriptions.delete(tabId);
+    console.log(`[NevoFlux] Cleaned up ${subIds.size} EventBus subscription(s) for tab ${tabId}`);
   }
 });
 
