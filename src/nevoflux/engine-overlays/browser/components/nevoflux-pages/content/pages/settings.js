@@ -110,6 +110,7 @@ const Settings = {
     container.appendChild(this._renderGeneralSection());
     container.appendChild(this._renderLLMSection());
     container.appendChild(this._renderMcpSection());
+    container.appendChild(this._renderCanvasToolsSection());
     container.appendChild(
       this._renderPlaceholderSection(
         'plugins',
@@ -1916,6 +1917,247 @@ const Settings = {
     }
   },
 
+  // ── Canvas Tools Section ────────────────────────────────
+
+  _canvasTools: [],
+
+  _renderCanvasToolsSection() {
+    const section = this._createSection('canvas-tools', 'Canvas Tools');
+
+    const group = this._createGroup('Available Tools');
+
+    const desc = document.createElement('p');
+    desc.className = 'section-desc';
+    desc.textContent =
+      'Canvas tools extend your agent with custom capabilities. Enable or disable tools to control which ones the agent can use.';
+    group.appendChild(desc);
+
+    const countEl = document.createElement('div');
+    countEl.className = 'canvas-tools-count';
+    countEl.id = 'canvas-tools-count';
+    group.appendChild(countEl);
+
+    const list = document.createElement('div');
+    list.className = 'canvas-tools-list';
+    list.id = 'canvas-tools-list';
+
+    const loading = document.createElement('div');
+    loading.className = 'canvas-tools-loading';
+    loading.id = 'canvas-tools-loading';
+    loading.textContent = 'Loading tools...';
+    list.appendChild(loading);
+
+    const emptyState = document.createElement('div');
+    emptyState.className = 'canvas-tools-empty';
+    emptyState.id = 'canvas-tools-empty';
+    emptyState.style.display = 'none';
+    const emptyTitle = document.createElement('p');
+    emptyTitle.className = 'canvas-tools-empty-title';
+    emptyTitle.textContent = 'No canvas tools available';
+    const emptyHint = document.createElement('p');
+    emptyHint.className = 'canvas-tools-empty-hint';
+    emptyHint.textContent =
+      'Canvas tools can be registered by WASM modules, MCP servers, or the canvas SDK.';
+    emptyState.appendChild(emptyTitle);
+    emptyState.appendChild(emptyHint);
+    list.appendChild(emptyState);
+
+    group.appendChild(list);
+    section.appendChild(group);
+
+    return section;
+  },
+
+  _createCanvasToolItem(tool, index) {
+    const item = document.createElement('div');
+    item.className = 'canvas-tool-item';
+    item.dataset.toolIndex = index;
+
+    // Left: info
+    const info = document.createElement('div');
+    info.className = 'canvas-tool-info';
+
+    const nameRow = document.createElement('div');
+    nameRow.className = 'canvas-tool-name-row';
+
+    const name = document.createElement('span');
+    name.className = 'canvas-tool-name';
+    name.textContent = tool.name || 'Unnamed tool';
+    nameRow.appendChild(name);
+
+    const sourceBadge = document.createElement('span');
+    const sourceKey = (tool.source || 'unknown').toLowerCase();
+    sourceBadge.className = `canvas-tool-source ${sourceKey}`;
+    sourceBadge.textContent = tool.source || 'unknown';
+    nameRow.appendChild(sourceBadge);
+
+    info.appendChild(nameRow);
+
+    if (tool.description) {
+      const desc = document.createElement('div');
+      desc.className = 'canvas-tool-desc';
+      desc.textContent = tool.description;
+      info.appendChild(desc);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'canvas-tool-meta';
+    const parts = [];
+    if (tool.kind) parts.push(tool.kind);
+    if (tool.args_mode) parts.push(`args: ${tool.args_mode}`);
+    if (parts.length) meta.textContent = parts.join(' \u2022 ');
+    if (parts.length) info.appendChild(meta);
+
+    item.appendChild(info);
+
+    // Right: toggle
+    const actions = document.createElement('div');
+    actions.className = 'canvas-tool-actions';
+
+    const toggle = document.createElement('label');
+    toggle.className = 'mcp-toggle';
+    const toggleInput = document.createElement('input');
+    toggleInput.type = 'checkbox';
+    toggleInput.checked = tool.enabled !== false;
+    toggleInput.addEventListener('change', async () => {
+      const enabled = toggleInput.checked;
+      try {
+        await this._sendCanvasToolToggle(tool.name, enabled);
+        this._canvasTools[index].enabled = enabled;
+      } catch (e) {
+        console.error('Failed to toggle canvas tool:', e);
+        // Revert toggle on error
+        toggleInput.checked = !enabled;
+      }
+    });
+    const slider = document.createElement('span');
+    slider.className = 'mcp-toggle-slider';
+    toggle.appendChild(toggleInput);
+    toggle.appendChild(slider);
+    actions.appendChild(toggle);
+
+    item.appendChild(actions);
+    return item;
+  },
+
+  async _populateCanvasTools() {
+    const list = document.getElementById('canvas-tools-list');
+    const loading = document.getElementById('canvas-tools-loading');
+    const emptyState = document.getElementById('canvas-tools-empty');
+    const countEl = document.getElementById('canvas-tools-count');
+    if (!list) return;
+
+    // Show loading
+    if (loading) loading.style.display = '';
+    if (emptyState) emptyState.style.display = 'none';
+    if (countEl) countEl.textContent = '';
+
+    try {
+      const result = await NevofluxPage.sendQuery('bridge:request', {
+        type: 'canvas.tool.list',
+        payload: { include_disabled: true },
+      });
+
+      if (loading) loading.style.display = 'none';
+
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Failed to fetch tools');
+      }
+
+      const tools = result.tools || [];
+      this._canvasTools = tools;
+      this._refreshCanvasToolsList();
+    } catch (e) {
+      console.warn('Failed to load canvas tools:', e);
+      if (loading) loading.style.display = 'none';
+      this._canvasTools = [];
+
+      // Show error with retry
+      const errorEl = document.createElement('div');
+      errorEl.className = 'canvas-tools-error';
+      errorEl.textContent = 'Could not load tools. The agent may not be running.';
+      const retryBtn = document.createElement('button');
+      retryBtn.type = 'button';
+      retryBtn.textContent = 'Retry';
+      retryBtn.addEventListener('click', () => {
+        errorEl.remove();
+        this._populateCanvasTools();
+      });
+      errorEl.appendChild(document.createElement('br'));
+      errorEl.appendChild(retryBtn);
+
+      // Remove any existing items first
+      for (const child of [...list.children]) {
+        if (
+          child.id !== 'canvas-tools-loading' &&
+          child.id !== 'canvas-tools-empty'
+        ) {
+          child.remove();
+        }
+      }
+      list.appendChild(errorEl);
+    }
+  },
+
+  _refreshCanvasToolsList() {
+    const list = document.getElementById('canvas-tools-list');
+    const emptyState = document.getElementById('canvas-tools-empty');
+    const countEl = document.getElementById('canvas-tools-count');
+    if (!list) return;
+
+    // Remove existing tool items and error elements
+    for (const child of [...list.children]) {
+      if (
+        child.id !== 'canvas-tools-loading' &&
+        child.id !== 'canvas-tools-empty'
+      ) {
+        child.remove();
+      }
+    }
+
+    const tools = this._canvasTools || [];
+
+    if (!tools.length) {
+      if (emptyState) emptyState.style.display = '';
+      if (countEl) countEl.textContent = '';
+      return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+
+    const enabledCount = tools.filter((t) => t.enabled !== false).length;
+    if (countEl) {
+      countEl.textContent = `${enabledCount} of ${tools.length} tool${tools.length !== 1 ? 's' : ''} enabled`;
+    }
+
+    for (let i = 0; i < tools.length; i++) {
+      list.appendChild(this._createCanvasToolItem(tools[i], i));
+    }
+  },
+
+  async _sendCanvasToolToggle(toolName, enabled) {
+    const result = await NevofluxPage.sendQuery('bridge:request', {
+      type: 'agent:command',
+      payload: {
+        command: 'canvas.tool.toggle',
+        params: { tool_name: toolName, enabled },
+      },
+    });
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Toggle failed');
+    }
+    const agentResponse = result.data;
+    if (agentResponse && !agentResponse.success) {
+      throw new Error(agentResponse.error?.message || 'Agent toggle failed');
+    }
+    // Update the count display
+    const countEl = document.getElementById('canvas-tools-count');
+    if (countEl && this._canvasTools.length) {
+      const enabledCount = this._canvasTools.filter((t) => t.enabled !== false).length;
+      countEl.textContent = `${enabledCount} of ${this._canvasTools.length} tool${this._canvasTools.length !== 1 ? 's' : ''} enabled`;
+    }
+  },
+
   _renderPlaceholderSection(id, title, message) {
     const section = this._createSection(id, title);
     const group = this._createGroup(title);
@@ -2002,9 +2244,10 @@ const Settings = {
       }
     }
 
-    // Populate MCP server cards and LLM providers
+    // Populate MCP server cards, LLM providers, and canvas tools
     this._populateMcpServers();
     this._populateLlmProviders();
+    this._populateCanvasTools();
     this._loadMdFiles();
   },
 

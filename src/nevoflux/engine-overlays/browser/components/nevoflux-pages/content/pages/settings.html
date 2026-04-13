@@ -1055,6 +1055,156 @@
       font-size: var(--nevoflux-font-size-sm);
       color: var(--nevoflux-text-secondary);
     }
+
+    /* ── Canvas Tools ─────────────────────────────── */
+    .canvas-tools-list {
+      background: var(--nevoflux-bg);
+      border-radius: var(--nevoflux-radius-md);
+      border: 1px solid var(--nevoflux-border);
+      margin-bottom: var(--nevoflux-space-lg);
+    }
+
+    .canvas-tool-item {
+      padding: var(--nevoflux-space-md) var(--nevoflux-space-lg);
+      border-bottom: 1px solid light-dark(#f0f0f0, #2a2a2e);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--nevoflux-space-md);
+      transition: background 0.15s ease;
+    }
+
+    .canvas-tool-item:last-child {
+      border-bottom: none;
+    }
+
+    .canvas-tool-item:hover {
+      background: var(--nevoflux-bg-tertiary);
+    }
+
+    .canvas-tool-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .canvas-tool-name-row {
+      display: flex;
+      align-items: center;
+      gap: var(--nevoflux-space-sm);
+      margin-bottom: 2px;
+    }
+
+    .canvas-tool-name {
+      font-size: var(--nevoflux-font-size-base);
+      font-weight: 500;
+      color: var(--nevoflux-text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .canvas-tool-source {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .canvas-tool-source.builtin {
+      background: light-dark(#e8f0fe, #1a2a3a);
+      color: light-dark(#1a73e8, #8ab4f8);
+    }
+
+    .canvas-tool-source.wasm {
+      background: light-dark(#fef7e0, #3a3020);
+      color: light-dark(#e37400, #fdd663);
+    }
+
+    .canvas-tool-source.mcp {
+      background: light-dark(#e6f4ea, #1a3a2a);
+      color: light-dark(#1e8e3e, #6fcf97);
+    }
+
+    .canvas-tool-source.canvas {
+      background: light-dark(#f3e8fd, #2a1a3a);
+      color: light-dark(#9334e6, #c58af9);
+    }
+
+    .canvas-tool-desc {
+      font-size: var(--nevoflux-font-size-sm);
+      color: var(--nevoflux-text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .canvas-tool-meta {
+      font-size: 11px;
+      color: var(--nevoflux-text-secondary);
+      margin-top: 2px;
+      opacity: 0.7;
+    }
+
+    .canvas-tool-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--nevoflux-space-sm);
+      flex-shrink: 0;
+    }
+
+    .canvas-tools-empty {
+      text-align: center;
+      padding: var(--nevoflux-space-2xl) var(--nevoflux-space-lg);
+      color: var(--nevoflux-text-secondary);
+    }
+
+    .canvas-tools-empty .canvas-tools-empty-title {
+      font-size: var(--nevoflux-font-size-base);
+      font-weight: 500;
+      color: var(--nevoflux-text);
+      margin-bottom: var(--nevoflux-space-xs);
+    }
+
+    .canvas-tools-empty .canvas-tools-empty-hint {
+      font-size: var(--nevoflux-font-size-sm);
+    }
+
+    .canvas-tools-loading {
+      text-align: center;
+      padding: var(--nevoflux-space-2xl);
+      color: var(--nevoflux-text-secondary);
+      font-size: var(--nevoflux-font-size-base);
+    }
+
+    .canvas-tools-error {
+      text-align: center;
+      padding: var(--nevoflux-space-xl);
+      color: light-dark(#d93025, #f88);
+      font-size: var(--nevoflux-font-size-sm);
+    }
+
+    .canvas-tools-error button {
+      margin-top: var(--nevoflux-space-sm);
+      padding: var(--nevoflux-space-xs) var(--nevoflux-space-md);
+      border: 1px solid var(--nevoflux-border);
+      border-radius: var(--nevoflux-radius-sm);
+      background: var(--nevoflux-bg);
+      color: var(--nevoflux-text);
+      cursor: pointer;
+      font-size: var(--nevoflux-font-size-sm);
+    }
+
+    .canvas-tools-error button:hover {
+      background: var(--nevoflux-bg-tertiary);
+    }
+
+    .canvas-tools-count {
+      font-size: var(--nevoflux-font-size-sm);
+      color: var(--nevoflux-text-secondary);
+      margin-bottom: var(--nevoflux-space-md);
+    }
   </style>
 </head>
 <body>
@@ -1063,6 +1213,7 @@
     <a href="#" data-section="general">General</a>
     <a href="#" data-section="llm">AI Models</a>
     <a href="#" data-section="mcp">MCP Servers</a>
+    <a href="#" data-section="canvas-tools">Canvas Tools</a>
     <a href="#" data-section="plugins">Plugins</a>
     <a href="#" data-section="shortcuts">Shortcuts</a>
   </nav>
