@@ -66,6 +66,24 @@ const Canvas = {
       return;
     }
 
+    // Handle Canvas Tool streaming events
+    if (e.data.type === 'canvas:tool:event') {
+      var handlers = window._nevofluxToolEventHandlers || {};
+      var callId = e.data.payload && e.data.payload.call_id;
+      if (callId && handlers[callId]) {
+        try {
+          handlers[callId](e.data.payload);
+        } catch(err) {
+          console.error('[NevofluxSDK] Tool event handler error:', err);
+        }
+        // Clean up on finished/error events
+        if (e.data.payload.event_type === 'finished' || e.data.payload.event_type === 'error') {
+          delete handlers[callId];
+        }
+      }
+      return;
+    }
+
     // Standard request-response
     if (e.data._reqId != null) {
       var cb = _pending[e.data._reqId];
@@ -258,6 +276,46 @@ const Canvas = {
             });
           });
           return Promise.all(promises).then(function() { return recovered; });
+        });
+      }
+    },
+    tool: {
+      /**
+       * List available whitelisted tools.
+       * @param {object} [options] - { category: string }
+       * @returns {Promise<{ tools: Array }>}
+       */
+      list: function(options) {
+        options = options || {};
+        return request("canvas.tool.list", {
+          category: options.category || null,
+        });
+      },
+
+      /**
+       * Invoke a whitelisted tool.
+       * @param {string} toolName - Tool name (e.g. "ffmpeg.trim")
+       * @param {object} params - Parameter key-value pairs
+       * @param {object} [options] - { timeoutMs, onEvent }
+       * @returns {Promise<object>} - Invocation result
+       */
+      invoke: function(toolName, params, options) {
+        options = options || {};
+        var _toolEventHandlers = window._nevofluxToolEventHandlers || {};
+        window._nevofluxToolEventHandlers = _toolEventHandlers;
+
+        return request("canvas.tool.invoke", {
+          tool_name: toolName,
+          params: params || {},
+          timeout_ms: options.timeoutMs || null,
+        }).then(function(res) {
+          var callId = res.callId;
+          if (options.onEvent && callId) {
+            _toolEventHandlers[callId] = options.onEvent;
+          }
+          // The actual result comes async via canvas:tool:response
+          // For now return the callId for tracking
+          return { callId: callId, pending: true };
         });
       }
     }
