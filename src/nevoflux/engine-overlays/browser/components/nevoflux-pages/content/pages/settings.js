@@ -2064,7 +2064,11 @@ const Settings = {
         throw new Error(result.error?.message || 'Failed to fetch tools');
       }
 
-      const tools = result.tools || [];
+      // sendQuery('bridge:request', ...) returns { success, data }, where
+      // `data` is the response from background.js bridgeRespond:
+      // { success: true, tools: [...] }. Unwrap both layers.
+      const inner = result.data || result;
+      const tools = inner.tools || [];
       this._canvasTools = tools;
       this._refreshCanvasToolsList();
     } catch (e) {
