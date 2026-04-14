@@ -1,7 +1,7 @@
 ---
 name: app
 description: Build interactive Canvas apps and visual outputs using NevofluxSDK. Supports HTML single-page apps, React components, multi-file projects (bundled with esbuild), SVG graphics, Mermaid diagrams, and Markdown documents — all with persistent storage, browser control, AI agent interaction, event bus pub/sub, whitelisted CLI tool invocation (ffmpeg/git/fs/etc.), and end-to-end encrypted sharing. Use this skill whenever the user wants to create any visual app, dashboard, widget, tool, game, calculator, chart, diagram, data visualization, interactive UI, or any output that should be rendered visually — even if they don't say "canvas" or "artifact" explicitly.
-version: 1.2.2
+version: 1.3.0
 tags:
   - canvas
   - artifact
@@ -505,6 +505,103 @@ cwd = "$SESSION_DIR"
 | Read/write files in session dir | `fs.read` tool if registered, else delegate to agent |
 | Store app state | `NevofluxSDK.storage.set(key, value)` |
 
+#### Runtime behavior quirks (read this before writing canvas tool code)
+
+##### ⚠️ Same tool + same args = same output, always
+
+Whitelisted tools in `template` mode have **fixed, hard-coded args** in their TOML. Calling `invoke('ffmpeg.probe', {input: x})` twice with the same `x` produces **identical output** both times. There is NO "try different options" fallback within a single tool — the server cannot change args you didn't pass.
+
+**Wrong** — pointless retry:
+```javascript
+let r = await runTool('ffmpeg.probe', { input: path });
+if (duration <= 0) {
+  r = await runTool('ffmpeg.probe', { input: path });  // ← same call, same result
+}
+```
+
+**Right** — register a second tool with different args if you need a different probe strategy:
+```toml
+# ~/.config/nevoflux/canvas-tools/ffmpeg-probe-duration.toml
+name = "ffmpeg.probe_duration"
+description = "Read only the duration field (fallback for files with quiet errors)"
+kind = "command"
+binary = "ffprobe"
+args_mode = "template"
+args = ["-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", "{input}"]
+[params.input]
+type = "path"
+must_exist = true
+```
+Then: `if (duration <= 0) { const r = await runTool('ffmpeg.probe_duration', {input}); duration = parseFloat(r.stdout); }`
+
+##### ⚠️ `agent.chat()` returns the LLM's text, NOT a command execution result
+
+```javascript
+// WRONG — always reports success:
+const reply = await NevofluxSDK.agent.chat('run: ffmpeg ...');
+showSuccess();  // ← but the agent may have refused, errored, or been interrupted
+
+// Safer — parse the reply, or use a real tool:
+const reply = await NevofluxSDK.agent.chat('run: ffmpeg ... and reply with exactly DONE or FAIL + reason');
+if (reply.text.includes('DONE')) showSuccess();
+else showError(reply.text);
+```
+
+Even better: **don't route shell commands through the LLM**. Register a whitelisted tool with `template` args and call it directly. The LLM is a language model, not a process runner — it might be helpful, confused, or adversarial on any given turn.
+
+Security note: building a shell command string and embedding it in `agent.chat('run "' + userInput + '"')` is a **prompt-injection + command-injection** vector. User-controlled content can redirect the LLM or break out of the quoting. Avoid.
+
+##### ⚠️ ffmpeg/long-running tools do NOT emit `progress` events automatically
+
+The `CanvasToolEvent::Progress { progress, message }` variant exists in the protocol but the executor does not auto-fill it for CLI tools. It is only populated if the daemon-side executor explicitly parses the tool's output and emits progress events — which the built-in `Command` backend does not do for ffmpeg.
+
+For progress bars, parse **stderr** yourself inside `onEvent`. ffmpeg writes progress like `frame=  150 fps=30 time=00:00:05.20 bitrate=...`:
+
+```javascript
+await NevofluxSDK.tool.invoke('ffmpeg.trim', params, {
+  onEvent: (e) => {
+    if (e.event_type === 'stderr') {
+      const m = e.data.match(/time=(\d+):(\d+):([\d.]+)/);
+      if (m) {
+        const cur = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
+        const pct = Math.min(99, (cur / totalClipSeconds) * 100);
+        setProgress(pct);
+      }
+    }
+  },
+});
+```
+
+**Do not use `setInterval` fake progress** — it misleads the user (looks like 90% done when ffmpeg has barely started) and keeps animating after the tool finished or failed. If you truly can't extract real progress, show a spinning indicator instead of a percentage bar.
+
+##### ⚠️ Always check `ok` / success before parsing output
+
+```javascript
+const r = await runTool('ffmpeg.probe', {input: path});
+
+// WRONG — checks wrong thing first:
+const json = JSON.parse(r.stdout);
+if (!json.format) alert('解析失败');  // might fire even when tool wasn't found
+
+// RIGHT — check tool outcome first:
+if (!r.ok) {
+  alert('工具失败: ' + (r.error || r.stderr || '未知'));  // clear error path
+  return;
+}
+if (!r.stdout.trim()) {
+  alert('工具无输出');
+  return;
+}
+const json = JSON.parse(r.stdout);  // only now parse
+```
+
+The `ok=false` path typically means: tool not registered, tool disabled, binary missing on `$PATH`, timeout, permission denied, or process crash — all distinct from "tool ran but file was malformed". Report them separately so the user knows what to fix.
+
+##### ⚠️ `ffprobe -v quiet -print_format json` output is pure JSON
+
+No regex needed. `JSON.parse(r.stdout)` works directly. The greedy regex `/\{[\s\S]*\}/` can break on nested output edge cases and adds no value.
+
 ### Canvas Share (encrypted link sharing)
 
 Share artifacts as encrypted links. Content is encrypted client-side with Argon2id-derived AES-256-GCM key; the server only stores the ciphertext. Recipients need the URL AND password.
@@ -808,7 +905,7 @@ Use when multiple canvases or the sidebar need to coordinate (live dashboards, n
 
 ## Tool-Invoking App Template
 
-Use for apps that wrap CLI tools (video trim, git browser, file explorer).
+Use for apps that wrap CLI tools (video trim, git browser, file explorer). This template demonstrates the **required** pattern: `ensureTool()` check + real progress parsing from stderr + proper error handling.
 
 ```html
 <!DOCTYPE html>
@@ -817,64 +914,205 @@ Use for apps that wrap CLI tools (video trim, git browser, file explorer).
     <meta charset="utf-8" />
     <title>Video Trimmer</title>
     <style>
-      body { font-family: system-ui; padding: 20px; max-width: 520px; }
-      input[type=text] { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; margin: 4px 0 12px; }
-      button { padding: 10px 20px; border: none; border-radius: 6px; background: #0066ff; color: #fff; cursor: pointer; }
+      body { font-family: system-ui; padding: 20px; max-width: 560px; color: #e0e0e0; background: #111; }
+      input[type=text] { width: 100%; padding: 8px; border: 1px solid #333; border-radius: 6px; margin: 4px 0 12px; background: #0a0a0a; color: #e0e0e0; }
+      button { padding: 10px 20px; border: none; border-radius: 6px; background: #6366f1; color: #fff; cursor: pointer; }
       button:disabled { opacity: 0.5; cursor: not-allowed; }
-      #progress { width: 100%; height: 6px; background: #eee; border-radius: 3px; margin: 12px 0; }
-      #bar { height: 100%; background: #0066ff; border-radius: 3px; width: 0%; transition: width 0.2s; }
-      pre { background: #f5f5f5; padding: 12px; border-radius: 6px; font-size: 12px; max-height: 240px; overflow: auto; }
+      #progress { width: 100%; height: 8px; background: #222; border-radius: 4px; margin: 12px 0; overflow: hidden; }
+      #bar { height: 100%; background: #6366f1; width: 0%; transition: width 0.3s; }
+      #status { font-size: 13px; color: #888; margin: 4px 0; }
+      pre { background: #0a0a0a; padding: 12px; border-radius: 6px; font-size: 11px; max-height: 240px; overflow: auto; color: #888; border: 1px solid #222; }
+      .gate { background: #1a1a24; border: 1px solid #2a2a3a; border-radius: 8px; padding: 16px; }
+      .gate pre { background: #0a0a0a; }
+      .gate button { margin-right: 8px; }
     </style>
   </head>
   <body>
-    <h2>Video Trimmer (ffmpeg.trim)</h2>
-    <label>Input path</label>
-    <input id="in" value="$SESSION_DIR/video.mp4" />
-    <label>Start</label>
-    <input id="start" value="00:00:10" />
-    <label>End</label>
-    <input id="end" value="00:00:20" />
-    <label>Output path</label>
-    <input id="out" value="$SESSION_DIR/trimmed.mp4" />
-    <button id="run">Trim</button>
-    <div id="progress"><div id="bar"></div></div>
-    <pre id="log"></pre>
+    <h2>Video Trimmer</h2>
+
+    <!-- Missing-tool gate (hidden until needed) -->
+    <div id="gate" class="gate" hidden>
+      <h3 style="color:#fbbf24">⚠️ Required tool not registered</h3>
+      <p>This canvas needs <code id="gate-name"></code> to work. Save the following TOML to <code>~/.config/nevoflux/canvas-tools/</code>:</p>
+      <pre id="gate-toml"></pre>
+      <button id="gate-open">Open Settings</button>
+      <button id="gate-retry">I've added it — Retry</button>
+    </div>
+
+    <!-- Main UI -->
+    <div id="main" hidden>
+      <label>Input path</label>
+      <input id="in" value="$SESSION_DIR/video.mp4" />
+      <label>Start (HH:MM:SS)</label>
+      <input id="start" value="00:00:10" />
+      <label>End (HH:MM:SS)</label>
+      <input id="end" value="00:00:20" />
+      <label>Output path</label>
+      <input id="out" value="$SESSION_DIR/trimmed.mp4" />
+      <button id="run">Trim</button>
+      <div id="status">Ready</div>
+      <div id="progress"><div id="bar"></div></div>
+      <pre id="log"></pre>
+    </div>
+
     <script>
+      const FFMPEG_TRIM_TOML = `name = "ffmpeg.trim"
+description = "Trim a video/audio file to a time range (stream copy)"
+kind = "command"
+binary = "ffmpeg"
+args_mode = "template"
+args = ["-y", "-ss", "{start}", "-to", "{end}", "-i", "{input}", "-c", "copy", "{output}"]
+
+[params.input]
+type = "path"
+must_exist = true
+
+[params.start]
+type = "duration"
+min = 0
+
+[params.end]
+type = "duration"
+min = 0
+
+[params.output]
+type = "path"
+
+[constraints]
+timeout_seconds = 600`;
+
+      function hmsToSec(s) {
+        const p = s.split(':').map(Number);
+        return p.length === 3 ? p[0]*3600 + p[1]*60 + p[2] : (p[1]||0) + (p[0]||0)*60;
+      }
+
+      // Helper — invoke a tool, collect stdout/stderr, resolve on finished
+      function runTool(name, params, opts) {
+        opts = opts || {};
+        return new Promise((resolve, reject) => {
+          let stdout = '', stderr = '', settled = false;
+          NevofluxSDK.tool.invoke(name, params, {
+            timeoutMs: opts.timeoutMs || 60000,
+            onEvent: (e) => {
+              if (opts.onEvent) opts.onEvent(e);
+              if (e.event_type === 'stdout') stdout += e.data;
+              else if (e.event_type === 'stderr') stderr += e.data;
+              else if (e.event_type === 'finished' && !settled) {
+                settled = true;
+                resolve({ ok: e.success, exit_code: e.exit_code, stdout, stderr });
+              } else if (e.event_type === 'error' && !settled) {
+                settled = true;
+                resolve({ ok: false, error: e.error, stdout, stderr });
+              }
+            },
+          }).catch(err => { if (!settled) { settled = true; reject(err); } });
+        });
+      }
+
+      async function ensureTool(name) {
+        try {
+          const r = await NevofluxSDK.tool.list();
+          return (r?.tools || []).find(t => t.name === name && t.enabled);
+        } catch { return null; }
+      }
+
+      function showGate(name, toml) {
+        document.getElementById('main').hidden = true;
+        document.getElementById('gate').hidden = false;
+        document.getElementById('gate-name').textContent = name;
+        document.getElementById('gate-toml').textContent = toml;
+      }
+
+      // On load: check tool availability
+      (async () => {
+        const tool = await ensureTool('ffmpeg.trim');
+        if (tool) {
+          document.getElementById('main').hidden = false;
+        } else {
+          showGate('ffmpeg.trim', FFMPEG_TRIM_TOML);
+        }
+      })();
+
+      document.getElementById('gate-open').onclick = () => {
+        NevofluxSDK.callTool('navigate', { url: 'nevoflux://settings', new_tab: true });
+      };
+      document.getElementById('gate-retry').onclick = async () => {
+        const tool = await ensureTool('ffmpeg.trim');
+        if (tool) {
+          document.getElementById('gate').hidden = true;
+          document.getElementById('main').hidden = false;
+        } else {
+          alert('Still not found. Check the settings page and ensure the tool is enabled.');
+        }
+      };
+
       document.getElementById('run').addEventListener('click', async () => {
         const btn = document.getElementById('run');
         const log = document.getElementById('log');
         const bar = document.getElementById('bar');
+        const status = document.getElementById('status');
         btn.disabled = true;
         log.textContent = '';
         bar.style.width = '0%';
+        status.textContent = 'Starting...';
+
+        const start = document.getElementById('start').value.trim();
+        const end = document.getElementById('end').value.trim();
+        const totalClipSec = hmsToSec(end) - hmsToSec(start);
 
         try {
-          await NevofluxSDK.tool.invoke('ffmpeg.trim', {
+          const r = await runTool('ffmpeg.trim', {
             input: document.getElementById('in').value,
-            start: document.getElementById('start').value,
-            end: document.getElementById('end').value,
+            start, end,
             output: document.getElementById('out').value,
           }, {
-            timeoutMs: 120000,
+            timeoutMs: 600000,
             onEvent: (e) => {
-              if (e.event_type === 'stderr' || e.event_type === 'stdout') {
+              if (e.event_type === 'stderr') {
                 log.textContent += e.data;
                 log.scrollTop = log.scrollHeight;
+                // Parse ffmpeg's "time=HH:MM:SS.ms" for real progress
+                const m = e.data.match(/time=(\d+):(\d+):([\d.]+)/);
+                if (m && totalClipSec > 0) {
+                  const cur = (+m[1])*3600 + (+m[2])*60 + parseFloat(m[3]);
+                  const pct = Math.min(99, (cur / totalClipSec) * 100);
+                  bar.style.width = pct.toFixed(1) + '%';
+                  status.textContent = `Trimming... ${cur.toFixed(1)}s / ${totalClipSec}s (${Math.round(pct)}%)`;
+                }
               }
-              if (e.event_type === 'progress') bar.style.width = (e.progress * 100) + '%';
-              if (e.event_type === 'finished') { bar.style.width = '100%'; log.textContent += '\n[done]'; }
-              if (e.event_type === 'error') log.textContent += '\n[error] ' + e.error;
             },
           });
+
+          // Check ok BEFORE claiming success
+          if (!r.ok) {
+            status.textContent = 'Failed: ' + (r.error || `exit ${r.exit_code}`);
+            bar.style.background = '#f87171';
+            log.textContent += '\n[FAIL] ' + (r.stderr.slice(-500) || r.error || '');
+            return;
+          }
+
+          bar.style.width = '100%';
+          status.textContent = 'Done';
+          log.textContent += '\n[DONE]';
         } catch (err) {
-          log.textContent += '\n[error] ' + (err.message || err);
+          status.textContent = 'Error: ' + (err.message || err);
+          bar.style.background = '#f87171';
+          log.textContent += '\n[ERROR] ' + (err.message || err);
+        } finally {
+          btn.disabled = false;
         }
-        btn.disabled = false;
       });
     </script>
   </body>
 </html>
 ```
+
+**Key patterns this template demonstrates** (replicate in your own tool-wrapping canvases):
+- `ensureTool()` runs on page load; if missing, show a gate with TOML and retry button — main UI stays hidden until the tool is available
+- Real progress from parsing `stderr` (`time=HH:MM:SS.ms` regex), NOT fake `setInterval`
+- `runTool()` helper that resolves to `{ok, exit_code, stdout, stderr, error}` — caller checks `r.ok` before treating the run as successful
+- Error styling (red bar) distinct from success styling
+- Raw stderr logged for debugging but progress extracted in real-time
 
 ## Multi-File Project Template
 
@@ -918,11 +1156,15 @@ Use for complex apps with multiple components and module imports. The canvas bun
 20. **Canvas tools** use snake_case in params but dotted names in tool name (e.g. `ffmpeg.trim` not `ffmpeg_trim`). Always call `tool.list()` first and verify the tool exists + is enabled before invoking — don't assume
 21. **Canvas tool `onEvent` callbacks** fire multiple times per invocation; the returned Promise resolves with `{ callId, pending: true }` early — the actual result arrives through events, not the Promise value
 22. **Free-mode tool args** go in the third argument (options), not the params object: `tool.invoke('git', {}, { args: ['status', '--short'], onEvent })`. Template-mode tools put values in the params (second arg)
-23. **Unregistered tools must be handled gracefully.** When `tool.list()` shows the needed tool is missing or disabled, **do not silently fail or throw**. Show the user (a) which tool is needed, (b) why, (c) a copy-pasteable TOML block for `~/.config/nevoflux/canvas-tools/`, (d) a button to open `nevoflux://settings`, (e) a Retry button that re-checks. See the "Missing-tool UX pattern" in the Canvas Tools section for a reusable template
-24. **Share password is shown once only** — do not re-request it. Display immediately, offer copy-with-auto-clear, warn the user to save it
-25. **Share URL domain** is `share.nevoflux.app` (not `.com`). Recipients open `nevoflux://import/{share_id}` which triggers the import flow in this canvas page
-26. **Share import requires both URL and password** — no "password recovery". Wrong password fails with decryption error
-27. **Rich text editors** (Google Docs, Notion, ProseMirror, Lexical): `type`/`fill` often fail because target is `contenteditable`. Use `paste` to insert at caret or `fillRichText` to replace all content
-28. **`navigate` without `new_tab`** reuses the current tab or falls back to any existing web tab. If you always want a fresh tab, pass `{ url, new_tab: true }`
-29. **`uploadFile` `fileUrl`** is typically obtained from `cache_file` (returns a `file_path` usable as URL). Pass the file URL, not the raw bytes
-30. **`activateTab` vs `navigate`**: use `activateTab({ tab_id })` to switch focus to an already-open tab, `navigate` to change the URL. Combine with `query_tabs` to find the target tab id first
+23. **Unregistered tools must be handled gracefully.** When `tool.list()` shows the needed tool is missing or disabled, **do not silently fail or throw**. Show the user (a) which tool is needed, (b) why, (c) a copy-pasteable TOML block for `~/.config/nevoflux/canvas-tools/`, (d) a button to open `nevoflux://settings`, (e) a Retry button that re-checks. See the "Missing-tool UX pattern" in the Canvas Tools section for a reusable template. **This check is mandatory, not optional** — skipping `ensureTool()` and calling `invoke()` directly on an unregistered tool produces a 30-second timeout with no actionable message
+24. **Template-mode tools have fixed args — retrying with the same params produces identical output.** If your first probe call didn't return what you needed, a second call with the same args will give the same result. Register a second tool with different args (e.g. `ffmpeg.probe_duration` using `-show_entries format=duration`) instead of retrying
+25. **`agent.chat()` returns the LLM's text, not a process exit code.** Never set `ok: true` / show "success" just because `agent.chat()` resolved — the agent may have refused, hallucinated, errored, or hit a rate limit. For actual command execution, use a whitelisted tool. If you must use `agent.chat()`, tell the agent to reply with an exact token like `DONE` / `FAIL <reason>` and parse it
+26. **Long-running CLI tools do NOT emit `progress` events automatically.** The daemon's `Command` backend captures stdout/stderr but does not parse tool-specific progress markers. For ffmpeg/similar, parse `stderr` yourself (e.g. ffmpeg writes `time=HH:MM:SS.ms`). Never use `setInterval` to animate a fake progress bar — it lies to the user and keeps running after the tool finished or failed. Show a spinner if real progress is unavailable
+27. **Check `ok` before parsing output.** `{ok: false}` means tool not registered, binary missing on PATH, timeout, or crash — distinct from "tool ran but returned malformed data". Report these separately: `if (!r.ok) { /* tool/environment problem */ } else if (!parsed) { /* data problem */ }`
+28. **Share password is shown once only** — do not re-request it. Display immediately, offer copy-with-auto-clear, warn the user to save it
+29. **Share URL domain** is `share.nevoflux.app` (not `.com`). Recipients open `nevoflux://import/{share_id}` which triggers the import flow in this canvas page
+30. **Share import requires both URL and password** — no "password recovery". Wrong password fails with decryption error
+31. **Rich text editors** (Google Docs, Notion, ProseMirror, Lexical): `type`/`fill` often fail because target is `contenteditable`. Use `paste` to insert at caret or `fillRichText` to replace all content
+32. **`navigate` without `new_tab`** reuses the current tab or falls back to any existing web tab. If you always want a fresh tab, pass `{ url, new_tab: true }`
+33. **`uploadFile` `fileUrl`** is typically obtained from `cache_file` (returns a `file_path` usable as URL). Pass the file URL, not the raw bytes
+34. **`activateTab` vs `navigate`**: use `activateTab({ tab_id })` to switch focus to an already-open tab, `navigate` to change the URL. Combine with `query_tabs` to find the target tab id first
