@@ -717,6 +717,35 @@ const Canvas = {
       }
       case 'system.getInfo':
         return bridge.system.getInfo();
+
+      // ── Canvas Share / Import ────────────────────────────
+      case 'canvas.share':
+      case 'canvas.import':
+      case 'canvas.share.extend':
+      case 'canvas.share.delete':
+      case 'canvas.share.list':
+      // ── Canvas Tool Whitelist ────────────────────────────
+      case 'canvas.tool.invoke':
+      case 'canvas.tool.list':
+      // ── EventBus ─────────────────────────────────────────
+      case 'events.subscribe':
+      case 'events.unsubscribe':
+      case 'events.publish':
+      case 'events.history':
+      case 'events.recover': {
+        // Forward to background.js which has the bridge handler.
+        // The actor returns { success, data } — unwrap so the SDK
+        // caller sees the raw response payload directly.
+        const res = await NevofluxPage.sendQuery('bridge:request', {
+          type: method,
+          payload: args || {},
+        });
+        if (res && res.success === false) {
+          throw new Error(res.error?.message || ('Bridge request failed: ' + method));
+        }
+        return res?.data !== undefined ? res.data : res;
+      }
+
       default:
         throw new Error('Unknown method: ' + method);
     }
