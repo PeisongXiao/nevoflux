@@ -582,15 +582,15 @@ const r = await runTool('ffmpeg.probe', {input: path});
 
 // WRONG — checks wrong thing first:
 const json = JSON.parse(r.stdout);
-if (!json.format) alert('解析失败');  // might fire even when tool wasn't found
+if (!json.format) alert('Parse failed');  // might fire even when tool wasn't found
 
 // RIGHT — check tool outcome first:
 if (!r.ok) {
-  alert('工具失败: ' + (r.error || r.stderr || '未知'));  // clear error path
+  alert('Tool failed: ' + (r.error || r.stderr || 'unknown'));  // clear error path
   return;
 }
 if (!r.stdout.trim()) {
-  alert('工具无输出');
+  alert('Tool produced no output');
   return;
 }
 const json = JSON.parse(r.stdout);  // only now parse
