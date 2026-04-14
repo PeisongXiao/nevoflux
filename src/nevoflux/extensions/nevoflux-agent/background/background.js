@@ -161,6 +161,8 @@ const pendingEventHistoryRequests = new Map(); // requestId → bridgeRequestId
 const activeToolCalls = new Map();
 // Canvas Tool pending list requests: requestId → bridgeId
 const pendingToolListRequests = new Map();
+// Canvas Share pending requests: requestId → bridgeId
+const pendingShareRequests = new Map();
 
 // EventBus Tab Discard Recovery (IndexedDB)
 const EVENTBUS_DB_NAME = 'nevoflux_eventbus';
@@ -1108,6 +1110,28 @@ class ChannelManager {
       }
     }
 
+    // Handle canvas share responses (share/import/extend/delete/list)
+    const SHARE_RESPONSE_TYPES = [
+      'canvas_share_response',
+      'canvas_import_response',
+      'canvas_share_extend_response',
+      'canvas_share_delete_response',
+      'canvas_share_list_response',
+    ];
+    if (SHARE_RESPONSE_TYPES.includes(msgType)) {
+      // Route back to first pending bridge request
+      for (const [requestId, bridgeId] of pendingShareRequests) {
+        browser.nevoflux
+          .bridgeRespond(bridgeId, {
+            success: true,
+            ...message.payload,
+          })
+          .catch(() => {});
+        pendingShareRequests.delete(requestId);
+        break;
+      }
+    }
+
     // Forward to canvas sessions.
     // Try matching by session_id in payload first; fall back to
     // _activeCanvasSessionId for messages that don't carry session_id
@@ -1768,6 +1792,96 @@ if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onBridgeRequest)
         }
 
         // ----- End Canvas Tool bridge requests -----
+
+        // ----- Canvas Share bridge requests -----
+
+        case 'canvas.share': {
+          try {
+            const requestId = `share_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            pendingShareRequests.set(requestId, id);
+            channelManager.sendToAgent({
+              type: 'canvas_share',
+              payload: {
+                session_id: _activeCanvasSessionId || '',
+                artifact_id: payload.artifact_id,
+                ttl_secs: payload.ttl_secs || null,
+              },
+            });
+            return; // async response
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+          }
+          break;
+        }
+
+        case 'canvas.import': {
+          try {
+            const requestId = `import_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            pendingShareRequests.set(requestId, id);
+            channelManager.sendToAgent({
+              type: 'canvas_import',
+              payload: {
+                session_id: _activeCanvasSessionId || '',
+                share_id: payload.share_id,
+                password: payload.password,
+              },
+            });
+            return;
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+          }
+          break;
+        }
+
+        case 'canvas.share.extend': {
+          try {
+            const requestId = `extend_${Date.now()}`;
+            pendingShareRequests.set(requestId, id);
+            channelManager.sendToAgent({
+              type: 'canvas_share_extend',
+              payload: {
+                share_id: payload.share_id,
+                extend_secs: payload.extend_secs || 2592000,
+              },
+            });
+            return;
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+          }
+          break;
+        }
+
+        case 'canvas.share.delete': {
+          try {
+            const requestId = `del_${Date.now()}`;
+            pendingShareRequests.set(requestId, id);
+            channelManager.sendToAgent({
+              type: 'canvas_share_delete',
+              payload: { share_id: payload.share_id },
+            });
+            return;
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+          }
+          break;
+        }
+
+        case 'canvas.share.list': {
+          try {
+            const requestId = `list_${Date.now()}`;
+            pendingShareRequests.set(requestId, id);
+            channelManager.sendToAgent({
+              type: 'canvas_share_list',
+              payload: { session_id: _activeCanvasSessionId || '' },
+            });
+            return;
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+          }
+          break;
+        }
+
+        // ----- End Canvas Share bridge requests -----
 
         case 'getCache': {
           const key = payload?.key || 'nevoflux_last_status';
