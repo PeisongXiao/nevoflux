@@ -318,6 +318,76 @@ const Canvas = {
           return { callId: callId, pending: true };
         });
       }
+    },
+    // NOTE: share events are published by the daemon side via EventBus topics:
+    //   share:created, share:imported, share:extended, share:deleted, share:expiring_soon
+    // UI code can subscribe via NevofluxSDK.events.subscribe(['share:*'], ...)
+    share: {
+      /**
+       * Share an artifact. Returns { share_id, share_url, password, expires_at }.
+       * SECURITY: password is returned ONCE. Caller must show to user immediately.
+       */
+      share: function(artifactId, options) {
+        options = options || {};
+        return request("canvas.share", {
+          artifact_id: artifactId,
+          ttl_secs: options.ttlSecs || null,
+        });
+      },
+
+      /**
+       * Import a shared canvas with password.
+       */
+      import: function(shareId, password) {
+        return request("canvas.import", {
+          share_id: shareId,
+          password: password,
+        });
+      },
+
+      /**
+       * Extend a share's TTL.
+       */
+      extend: function(shareId, extendSecs) {
+        return request("canvas.share.extend", {
+          share_id: shareId,
+          extend_secs: extendSecs || 2592000,
+        });
+      },
+
+      /**
+       * Delete a share.
+       */
+      delete: function(shareId) {
+        return request("canvas.share.delete", {
+          share_id: shareId,
+        });
+      },
+
+      /**
+       * List all active shares.
+       */
+      list: function() {
+        return request("canvas.share.list", {});
+      },
+
+      /**
+       * Copy a password to clipboard with auto-clear (default 60 seconds).
+       * Returns a promise that resolves when the password has been cleared.
+       */
+      copyPasswordWithAutoClear: function(password, timeoutMs) {
+        timeoutMs = timeoutMs || 60000;
+        return navigator.clipboard.writeText(password).then(function() {
+          return new Promise(function(resolve) {
+            setTimeout(function() {
+              // Attempt to clear by writing empty string
+              navigator.clipboard.writeText("").catch(function(){}).finally(function() {
+                resolve();
+              });
+            }, timeoutMs);
+          });
+        });
+      }
     }
   };
 })();
@@ -330,6 +400,18 @@ const Canvas = {
     const url = new URL(window.location.href);
     this._artifactId = NevofluxPage.getParam('id') || url.pathname.replace(/^\//, '') || null;
     this._mode = NevofluxPage.getParam('mode', 'preview');
+
+    // Detect import mode: nevoflux://canvas/?mode=import&share_id=xxx
+    // UI code can check window._nevofluxImportShareId and show import dialog.
+    try {
+      const importShareId = NevofluxPage.getParam('share_id');
+      if (this._mode === 'import' && importShareId) {
+        window._nevofluxImportShareId = importShareId;
+        console.info('[Canvas] Import mode detected, share_id=', importShareId);
+      }
+    } catch (e) {
+      // NevofluxPage may not expose share_id via getParam; ignore
+    }
 
     console.error(
       `[Canvas] init: id=${this._artifactId}, mode=${this._mode}, url=${window.location.href}`
