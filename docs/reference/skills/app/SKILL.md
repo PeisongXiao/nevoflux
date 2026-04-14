@@ -1,7 +1,7 @@
 ---
 name: app
 description: Build interactive Canvas apps and visual outputs using NevofluxSDK. Supports HTML single-page apps, React components, multi-file projects (bundled with esbuild), SVG graphics, Mermaid diagrams, and Markdown documents — all with persistent storage, browser control, AI agent interaction, event bus pub/sub, whitelisted CLI tool invocation (ffmpeg/git/fs/etc.), and end-to-end encrypted sharing. Use this skill whenever the user wants to create any visual app, dashboard, widget, tool, game, calculator, chart, diagram, data visualization, interactive UI, or any output that should be rendered visually — even if they don't say "canvas" or "artifact" explicitly.
-version: 1.2.0
+version: 1.2.1
 tags:
   - canvas
   - artifact
@@ -316,15 +316,32 @@ Canvases publish as extensions, so use `ui:*` or unreserved topics for your own 
 
 ### Canvas Tools (whitelisted CLI invocation)
 
-Invoke pre-configured CLI tools (ffmpeg, git, fs, ffprobe, ...) from canvas. Tools are defined in TOML files and must be enabled in settings. See `nevoflux://settings` → "Canvas Tools".
+**Namespace is singular: `NevofluxSDK.tool`, NOT `NevofluxSDK.tools`.** Typing the plural form silently fails with `TypeError: Cannot read properties of undefined`.
+
+Invoke pre-configured CLI commands (ffmpeg, git, ffprobe, fs, ...) from canvas. Tools must be **registered in a TOML file** and **enabled** before they can be invoked. Configuration lives at:
+
+- Builtin (ships with daemon): tools the user can't disable the existence of
+- User-level: `~/.config/nevoflux/canvas-tools/*.toml` (one TOML per tool)
+- Session-level: dynamic, in-memory only
+
+Priority: **Builtin < User < Session** (user/session override builtin by name). Manage at `nevoflux://settings` → "Canvas Tools".
+
+#### API
 
 ```javascript
-// List available tools
+// Check what's available FIRST — never assume a tool exists
 const { tools } = await NevofluxSDK.tool.list();
-// [{ name: "ffmpeg.trim", description, kind, args_mode, enabled, source }, ...]
+// tools: [{ name, description, kind, args_mode, enabled, source }, ...]
+// kind: "command" (external CLI) or "internal" (daemon API)
+// source: "builtin" | "user" | "session"
+
+const hasFfmpeg = tools.some(t => t.name === 'ffmpeg.trim' && t.enabled);
+if (!hasFfmpeg) {
+  // Graceful fallback — don't call a tool that isn't registered
+}
 
 // Invoke with streaming events
-const result = await NevofluxSDK.tool.invoke('ffmpeg.trim', {
+await NevofluxSDK.tool.invoke('ffmpeg.trim', {
   input: '$SESSION_DIR/in.mp4',
   start: '00:00:10',
   end: '00:00:20',
@@ -332,24 +349,61 @@ const result = await NevofluxSDK.tool.invoke('ffmpeg.trim', {
 }, {
   timeoutMs: 120000,
   onEvent: (event) => {
-    // event.event_type: "started" | "stdout" | "stderr" | "progress" | "finished" | "error"
+    // event_type: "started" | "stdout" | "stderr" | "progress" | "finished" | "error"
     if (event.event_type === 'stdout') appendLog(event.data);
+    if (event.event_type === 'stderr') appendLog('[err] ' + event.data);
     if (event.event_type === 'progress') setProgress(event.progress);
+    if (event.event_type === 'finished') setStatus('done');
+    if (event.event_type === 'error') setStatus('error: ' + event.error);
   },
 });
-// result = { callId, pending: true } — final response via events
 ```
 
-Built-in tools (user/session overrides possible):
+`invoke()` resolves with `{ callId, pending: true }` when the server accepts the request. The actual execution result arrives through `onEvent` callbacks — don't wait for the Promise value to carry the output.
 
-| Tool           | Backend  | Purpose                              |
-| -------------- | -------- | ------------------------------------ |
-| `ffmpeg.trim`  | command  | Trim video/audio to time range        |
-| `ffmpeg.probe` | command  | Media metadata (duration/codecs)      |
-| `git`          | command  | Read-only git ops (status/log/diff)   |
-| `fs.read`      | internal | Read file from session directory      |
+#### Built-in tools (example set, may vary per deployment)
 
-Path params support `$SESSION_DIR` which expands to the canvas's sandboxed directory. Tools run with `Command::new` (no shell interpretation), 60-second default timeout, captured stdout/stderr.
+| Tool            | Backend   | Purpose                              | Example Params                              |
+| --------------- | --------- | ------------------------------------ | ------------------------------------------- |
+| `ffmpeg.trim`   | command   | Trim video/audio to time range       | `{ input, start, end, output }`             |
+| `ffmpeg.probe`  | command   | Media metadata (duration/codecs)     | `{ input }`                                 |
+| `git`           | command   | Read-only git ops                    | `{}` + `args: ['status', '--short']` (free)  |
+| `fs.read`       | internal  | Read file from session directory     | `{ path, encoding? }`                       |
+
+Path params support `$SESSION_DIR` which expands to the canvas's sandboxed directory. External tools run with `Command::new` (no shell interpretation), captured stdout/stderr, configurable timeout. Audit trail persists to SQLite.
+
+#### Tool args modes
+
+Tools in the whitelist use one of two `args_mode` configurations:
+
+1. **`template`** — fixed arg structure with `{param}` placeholders. Call with `invoke(name, paramsObj)`. Each `{placeholder}` is replaced with validated param value; no free args allowed.
+   Example: `ffmpeg.trim` uses `args = ["-y", "-i", "{input}", "-ss", "{start}", ...]`.
+
+2. **`free`** — user supplies raw args array, first element must be in `allowed_subcommands`.
+   Example: `git` with `allowed_subcommands = ["status", "log", "diff"]`. Call with `invoke('git', {}, { args: ['status', '--short'] })`.
+
+Pass `free` args via the options object, not the params object — `NevofluxSDK.tool.invoke(name, params, { args: [...], onEvent, timeoutMs })`.
+
+#### When the tool you need isn't registered
+
+If `tool.list()` doesn't include what you need, options:
+
+- Ask the user to add a TOML file to `~/.config/nevoflux/canvas-tools/` (user can do this in settings UI)
+- Delegate to the agent via `NevofluxSDK.agent.chat('run bash command: ...')` — agent has access to broader tool set (MCP Bash, etc.) under its own permission model
+- For file reading/writing, prefer `NevofluxSDK.storage.*` (safer, no external process) or `fs.read` (if registered)
+
+**Don't attempt**: `NevofluxSDK.callTool('bash', ...)` — `bash` is NOT a browser action. `callTool` only dispatches browser-side operations (navigate/click/screenshot/eval_js/web_fetch). It cannot run shell commands.
+
+#### Tool invocation decision table
+
+| Goal | Use |
+|------|-----|
+| Click/type/read current browser tab | `NevofluxSDK.callTool('click', ...)` etc. |
+| Read page text as markdown | `NevofluxSDK.callTool('get_markdown')` |
+| Run whitelisted CLI (ffmpeg/git/registered tool) | `NevofluxSDK.tool.invoke('name', params, { onEvent })` |
+| Run arbitrary shell / use MCP tools | `NevofluxSDK.agent.chat('please run ...')` |
+| Read/write files in session dir | `fs.read` tool if registered, else delegate to agent |
+| Store app state | `NevofluxSDK.storage.set(key, value)` |
 
 ### Canvas Share (encrypted link sharing)
 
@@ -759,12 +813,15 @@ Use for complex apps with multiple components and module imports. The canvas bun
 15. **Events topics** are colon-separated, `[a-zA-Z0-9_-]{1,64}` per segment, max 8 segments. Don't use dots: `"task:progress"` not `"task.progress"`
 16. **Events `replaySticky: true`** (default) fires handler once per matching sticky event immediately on subscribe — handle accordingly
 17. **Events `publish()` with permission errors** return EventBusResponse::Error — wrap in try/catch. Canvases cannot publish to `task:*` or `system:*`
-18. **Canvas tools** use snake_case in params but dotted names in tool name (e.g. `ffmpeg.trim` not `ffmpeg_trim`). Check enabled state via `tool.list()` before invoking
-19. **Canvas tool `onEvent` callbacks** fire multiple times per invocation; the returned Promise resolves with `{ callId, pending: true }` early — the actual result arrives through events
-20. **Share password is shown once only** — do not re-request it. Display immediately, offer copy-with-auto-clear, warn the user to save it
-21. **Share URL domain** is `share.nevoflux.app` (not `.com`). Recipients open `nevoflux://import/{share_id}` which triggers the import flow in this canvas page
-22. **Share import requires both URL and password** — no "password recovery". Wrong password fails with decryption error
-23. **Rich text editors** (Google Docs, Notion, ProseMirror, Lexical): `type`/`fill` often fail because target is `contenteditable`. Use `paste` to insert at caret or `fillRichText` to replace all content
-24. **`navigate` without `new_tab`** reuses the current tab or falls back to any existing web tab. If you always want a fresh tab, pass `{ url, new_tab: true }`
-25. **`uploadFile` `fileUrl`** is typically obtained from `cache_file` (returns a `file_path` usable as URL). Pass the file URL, not the raw bytes
-26. **`activateTab` vs `navigate`**: use `activateTab({ tab_id })` to switch focus to an already-open tab, `navigate` to change the URL. Combine with `query_tabs` to find the target tab id first
+18. **Canvas tool namespace is singular: `NevofluxSDK.tool` not `NevofluxSDK.tools`.** The plural form is `undefined` and `NevofluxSDK.tools.xxx()` throws `TypeError: Cannot read properties of undefined` — frequently silently caught by `try/catch` wrappers
+19. **`bash` is NOT a browser action.** `NevofluxSDK.callTool('bash', ...)` returns `Unknown action` error because `callTool` only dispatches browser operations (navigate/click/screenshot/web_fetch). For shell commands either (a) register `bash` (or a specific command) in canvas-tools TOML and use `tool.invoke()`, or (b) delegate via `agent.chat('run ...')`
+20. **Canvas tools** use snake_case in params but dotted names in tool name (e.g. `ffmpeg.trim` not `ffmpeg_trim`). Always call `tool.list()` first and verify the tool exists + is enabled before invoking — don't assume
+21. **Canvas tool `onEvent` callbacks** fire multiple times per invocation; the returned Promise resolves with `{ callId, pending: true }` early — the actual result arrives through events, not the Promise value
+22. **Free-mode tool args** go in the third argument (options), not the params object: `tool.invoke('git', {}, { args: ['status', '--short'], onEvent })`. Template-mode tools put values in the params (second arg)
+23. **Share password is shown once only** — do not re-request it. Display immediately, offer copy-with-auto-clear, warn the user to save it
+24. **Share URL domain** is `share.nevoflux.app` (not `.com`). Recipients open `nevoflux://import/{share_id}` which triggers the import flow in this canvas page
+25. **Share import requires both URL and password** — no "password recovery". Wrong password fails with decryption error
+26. **Rich text editors** (Google Docs, Notion, ProseMirror, Lexical): `type`/`fill` often fail because target is `contenteditable`. Use `paste` to insert at caret or `fillRichText` to replace all content
+27. **`navigate` without `new_tab`** reuses the current tab or falls back to any existing web tab. If you always want a fresh tab, pass `{ url, new_tab: true }`
+28. **`uploadFile` `fileUrl`** is typically obtained from `cache_file` (returns a `file_path` usable as URL). Pass the file URL, not the raw bytes
+29. **`activateTab` vs `navigate`**: use `activateTab({ tab_id })` to switch focus to an already-open tab, `navigate` to change the URL. Combine with `query_tabs` to find the target tab id first
