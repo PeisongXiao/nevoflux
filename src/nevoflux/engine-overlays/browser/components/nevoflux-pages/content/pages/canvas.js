@@ -398,20 +398,26 @@ const Canvas = {
     // loads via chrome:// protocol handler rewrite.  The ID lives in the path:
     //   nevoflux://canvas/{id}  →  hostname="canvas", pathname="/{id}"
     const url = new URL(window.location.href);
-    this._artifactId = NevofluxPage.getParam('id') || url.pathname.replace(/^\//, '') || null;
     this._mode = NevofluxPage.getParam('mode', 'preview');
 
-    // Detect import mode: nevoflux://canvas/?mode=import&share_id=xxx
-    // UI code can check window._nevofluxImportShareId and show import dialog.
-    try {
-      const importShareId = NevofluxPage.getParam('share_id');
-      if (this._mode === 'import' && importShareId) {
+    // In import mode the path segment is a share_id (handled by ImportDialog),
+    // NOT an artifact id — don't let the pathname fallback below claim it.
+    if (this._mode === 'import') {
+      this._artifactId = null;
+      const importShareId = NevofluxPage.getParam('share_id') || url.pathname.replace(/^\//, '') || null;
+      if (importShareId) {
         window._nevofluxImportShareId = importShareId;
         console.info('[Canvas] Import mode detected, share_id=', importShareId);
       }
-    } catch (e) {
-      // NevofluxPage may not expose share_id via getParam; ignore
+      console.info(
+        `[Canvas] init: mode=import, share_id=${importShareId}, url=${window.location.href}`
+      );
+      // ImportDialog is auto-opened by the DOMContentLoaded handler at the
+      // bottom of this file. No artifact to load.
+      return;
     }
+
+    this._artifactId = NevofluxPage.getParam('id') || url.pathname.replace(/^\//, '') || null;
 
     console.error(
       `[Canvas] init: id=${this._artifactId}, mode=${this._mode}, url=${window.location.href}`
@@ -511,7 +517,7 @@ const Canvas = {
     });
 
     document.getElementById('btn-share').addEventListener('click', () => {
-      this._shareLink();
+      ShareDialog.open();
     });
 
     this._highlightModeButton(this._mode);
@@ -974,24 +980,6 @@ ${slidesHtml}
     this._downloadBlob(blob, `${this._artifact.title || 'project'}.zip`);
   },
 
-  async _shareLink() {
-    const url = `nevoflux://canvas/${this._artifactId}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      const btn = document.getElementById('btn-share');
-      const originalSvg = btn.innerHTML;
-      btn.innerHTML =
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
-      btn.classList.add('success');
-      setTimeout(() => {
-        btn.innerHTML = originalSvg;
-        btn.classList.remove('success');
-      }, 1500);
-    } catch (e) {
-      console.error('Failed to copy link:', e);
-    }
-  },
-
   _downloadFile(content, filename, mimeType) {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
@@ -1157,7 +1145,13 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(artifa
         this._artifact = result.value;
         this._onArtifactUpdate(result.value);
       } else {
-        // Not in ContentStore — request hydration from backend (spinner already visible from HTML default)
+        // Not in ContentStore — request hydration from backend.
+        // Prefer the `config` table (via content_store.load prefix) since
+        // it's the authoritative source written by content_store.set
+        // (including write-through from agent edit_artifact). Only fall
+        // back to the legacy `artifacts` table (artifact.get) if config
+        // is empty — the two tables can diverge because content_store.set
+        // never writes to the artifacts table.
         this._updateStatus('Loading');
 
         NevofluxPage.sendQuery('bridge:request', {
@@ -1165,19 +1159,38 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(artifa
           payload: {
             type: 'system_command',
             payload: {
-              request_id: `art-get-${Date.now()}`,
-              command: 'artifact.get',
-              params: { artifact_id: this._artifactId },
+              request_id: `cs_load_${Date.now()}`,
+              command: 'content_store.load',
+              params: { prefix: `canvas:${this._artifactId}` },
             },
           },
-        }).catch((e) => console.warn('[Canvas] artifact.get request failed:', e));
+        }).catch((e) => console.warn('[Canvas] content_store.load request failed:', e));
 
+        // Fallback to legacy `artifacts` table after a short delay if the
+        // subscription hasn't fired yet (config is empty for this id).
         this._loadTimeout = setTimeout(() => {
           if (!this._artifact) {
-            this._showEmpty('Artifact not found');
-            this._updateStatus('Not found');
+            console.log('[Canvas] config empty, falling back to artifact.get');
+            NevofluxPage.sendQuery('bridge:request', {
+              type: 'send_to_agent',
+              payload: {
+                type: 'system_command',
+                payload: {
+                  request_id: `art-get-${Date.now()}`,
+                  command: 'artifact.get',
+                  params: { artifact_id: this._artifactId },
+                },
+              },
+            }).catch((e) => console.warn('[Canvas] artifact.get request failed:', e));
+
+            this._loadTimeout = setTimeout(() => {
+              if (!this._artifact) {
+                this._showEmpty('Artifact not found');
+                this._updateStatus('Not found');
+              }
+            }, 3000);
           }
-        }, 5000);
+        }, 1500);
       }
 
       // Subscribe to future updates (clears loading state when data arrives)
@@ -2038,6 +2051,31 @@ document.addEventListener('DOMContentLoaded', () => Canvas.init());
 // Share Dialog + Import Dialog + Canvas List
 // =============================
 
+// Bridge helper for the Share/Import dialogs which run in the canvas page's
+// own window (unlike artifact iframes, which get NevofluxSDK injected via
+// _SDK_SCRIPT).
+//
+// NevofluxParent wraps every bridge:request in { success: true, data: result }
+// regardless of whether the inner payload itself carries a success flag.
+// So an error response from background.js such as { success: false, error: {...} }
+// arrives here as { success: true, data: { success: false, error: {...} } }.
+// We must unwrap both layers.
+async function _shareBridge(method, payload) {
+  const res = await NevofluxPage.sendQuery('bridge:request', {
+    type: method,
+    payload: payload || {},
+  });
+  if (res && res.success === false) {
+    throw new Error((res.error && res.error.message) || ('Bridge request failed: ' + method));
+  }
+  const data = res && res.data !== undefined ? res.data : res;
+  if (data && data.success === false) {
+    const err = data.error || {};
+    throw new Error(err.message || ('Bridge request failed: ' + method));
+  }
+  return data;
+}
+
 const ShareDialog = {
   open() {
     this._show('share');
@@ -2047,7 +2085,10 @@ const ShareDialog = {
   async confirm(artifactId) {
     this._showStep('share', 'loading');
     try {
-      const result = await NevofluxSDK.share.share(artifactId);
+      const result = await _shareBridge('canvas.share', {
+        artifact_id: artifactId,
+        ttl_secs: null,
+      });
       document.getElementById('share-url-input').value = result.share_url || '';
       document.getElementById('share-password-input').value = result.password || '';
       const expiresEl = document.getElementById('share-expires-date');
@@ -2070,26 +2111,38 @@ const ShareDialog = {
   },
 
   copyPassword() {
-    const input = document.getElementById('share-password-input');
-    const password = input.value;
-    navigator.clipboard.writeText(password).then(() => {
-      const notice = document.getElementById('share-clipboard-notice');
-      const countdown = document.getElementById('share-clear-countdown');
-      notice.hidden = false;
-      let remaining = 60;
+    const password = document.getElementById('share-password-input').value;
+    navigator.clipboard.writeText(password)
+      .then(() => this._showClipboardCountdown())
+      .catch(() => {});
+  },
+
+  copyBoth() {
+    const url = document.getElementById('share-url-input').value;
+    const password = document.getElementById('share-password-input').value;
+    const text = `URL: ${url}\nPassword: ${password}`;
+    navigator.clipboard.writeText(text)
+      .then(() => this._showClipboardCountdown())
+      .catch(() => {});
+  },
+
+  _showClipboardCountdown() {
+    const notice = document.getElementById('share-clipboard-notice');
+    const countdown = document.getElementById('share-clear-countdown');
+    notice.hidden = false;
+    let remaining = 60;
+    countdown.textContent = remaining;
+    if (this._clearInterval) clearInterval(this._clearInterval);
+    this._clearInterval = setInterval(() => {
+      remaining--;
       countdown.textContent = remaining;
-      if (this._clearInterval) clearInterval(this._clearInterval);
-      this._clearInterval = setInterval(() => {
-        remaining--;
-        countdown.textContent = remaining;
-        if (remaining <= 0) {
-          clearInterval(this._clearInterval);
-          this._clearInterval = null;
-          navigator.clipboard.writeText('').catch(() => {});
-          notice.hidden = true;
-        }
-      }, 1000);
-    }).catch(() => {});
+      if (remaining <= 0) {
+        clearInterval(this._clearInterval);
+        this._clearInterval = null;
+        navigator.clipboard.writeText('').catch(() => {});
+        notice.hidden = true;
+      }
+    }, 1000);
   },
 
   _show(which) {
@@ -2108,14 +2161,32 @@ const ShareDialog = {
       const el = document.getElementById(`${dialog}-step-${s}`);
       if (el) el.hidden = (s !== step);
     });
+
+    // Drive the stepper indicator (01/02/03) alongside step visibility.
+    // Each dialog defines its own ordered flow; 'error' doesn't advance the stepper.
+    const flows = {
+      share:  ['confirm', 'loading', 'result'],
+      import: ['prompt',  'loading', 'success'],
+    };
+    const flow = flows[dialog];
+    const stepper = document.getElementById(`${dialog}-stepper`);
+    if (!flow || !stepper) return;
+    const activeIdx = flow.indexOf(step);
+    if (activeIdx < 0) return; // error state: leave stepper as-is
+    stepper.querySelectorAll('li').forEach((li, i) => {
+      li.classList.toggle('is-active', i === activeIdx);
+      li.classList.toggle('is-done',   i <  activeIdx);
+    });
   },
 };
 
 const ImportDialog = {
   _shareId: null,
+  _importedArtifactId: null,
 
   open(shareId) {
     this._shareId = shareId;
+    this._importedArtifactId = null;
     document.getElementById('import-share-id').textContent = shareId || '';
     document.getElementById('import-password-input').value = '';
     ShareDialog._show('import');
@@ -2128,7 +2199,11 @@ const ImportDialog = {
 
     ShareDialog._showStep('import', 'loading');
     try {
-      const result = await NevofluxSDK.share.import(this._shareId, password);
+      const result = await _shareBridge('canvas.import', {
+        share_id: this._shareId,
+        password: password,
+      });
+      this._importedArtifactId = (result && result.artifact_id) || null;
       document.getElementById('import-result-name').textContent =
         (result && (result.artifact_name || result.artifact_id)) || '(imported)';
       ShareDialog._showStep('import', 'success');
@@ -2137,6 +2212,11 @@ const ImportDialog = {
         (err && err.message) || String(err);
       ShareDialog._showStep('import', 'error');
     }
+  },
+
+  openImported() {
+    if (!this._importedArtifactId) return;
+    window.location.href = 'nevoflux://canvas/' + this._importedArtifactId;
   },
 
   retry() {
@@ -2150,7 +2230,7 @@ const CanvasList = {
 
   async load() {
     try {
-      const res = await NevofluxSDK.share.list();
+      const res = await _shareBridge('canvas.share.list', {});
       this._shares = (res && res.shares) || [];
       this._render();
     } catch (err) {
@@ -2240,12 +2320,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const shareCopyPw = document.getElementById('share-copy-password-btn');
   if (shareCopyPw) shareCopyPw.addEventListener('click', () => ShareDialog.copyPassword());
 
+  const shareCopyBoth = document.getElementById('share-copy-both-btn');
+  if (shareCopyBoth) shareCopyBoth.addEventListener('click', () => ShareDialog.copyBoth());
+
   // Import dialog buttons
   const importSubmit = document.getElementById('import-submit-btn');
   if (importSubmit) importSubmit.addEventListener('click', () => ImportDialog.submit());
 
   const importRetry = document.getElementById('import-retry-btn');
   if (importRetry) importRetry.addEventListener('click', () => ImportDialog.retry());
+
+  const importOpen = document.getElementById('import-open-btn');
+  if (importOpen) importOpen.addEventListener('click', () => ImportDialog.openImported());
 
   // Enter submits the import password
   const importPwInput = document.getElementById('import-password-input');

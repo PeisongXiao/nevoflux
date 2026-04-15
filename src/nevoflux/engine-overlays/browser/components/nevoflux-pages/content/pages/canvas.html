@@ -317,163 +317,514 @@
       iframe { border: none !important; width: 100% !important; height: auto !important; }
     }
 
-    /* Share/Import Dialogs */
+    /* ─────────────────────────────────────────────────────────────
+       Share / Import Dialogs — "Cryptographic Vault Terminal"
+       ─ Deep ink surface, mint accent, amber cautions, mono ceremony
+       ───────────────────────────────────────────────────────────── */
     .nevoflux-modal {
+      --vault-ink:       #0a0b0f;
+      --vault-surface:   #101219;
+      --vault-surface-2: #161923;
+      --vault-hairline:  rgba(126, 240, 197, 0.14);
+      --vault-hairline-strong: rgba(126, 240, 197, 0.28);
+      --vault-text:      #e6eaf2;
+      --vault-text-dim:  rgba(230, 234, 242, 0.58);
+      --vault-text-mute: rgba(230, 234, 242, 0.38);
+      --vault-mint:      #7ef0c5;
+      --vault-mint-soft: rgba(126, 240, 197, 0.10);
+      --vault-amber:     #f5b544;
+      --vault-amber-soft:rgba(245, 181, 68, 0.09);
+      --vault-danger:    #ff8a8a;
+      --vault-danger-soft:rgba(255, 138, 138, 0.08);
+      --vault-mono:      "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, "Menlo", monospace;
+
       position: fixed;
       inset: 0;
       z-index: 10000;
       display: flex;
       align-items: center;
       justify-content: center;
+      font-family: var(--vault-mono);
     }
     .nevoflux-modal[hidden] { display: none; }
     .nevoflux-modal-backdrop {
       position: absolute;
       inset: 0;
-      background: rgba(0, 0, 0, 0.6);
-      backdrop-filter: blur(4px);
+      background:
+        radial-gradient(120% 80% at 50% 0%, rgba(126, 240, 197, 0.06), transparent 60%),
+        rgba(5, 6, 10, 0.72);
+      backdrop-filter: blur(8px) saturate(120%);
+      -webkit-backdrop-filter: blur(8px) saturate(120%);
     }
     .nevoflux-modal-content {
       position: relative;
-      background: var(--nevoflux-surface, var(--nevoflux-bg-secondary, #1a1a24));
-      color: var(--nevoflux-text-primary, var(--nevoflux-text, #e0e0e8));
-      border: 1px solid var(--nevoflux-border, #2a2a3a);
-      border-radius: 12px;
-      padding: 32px;
-      max-width: 480px;
-      width: 90%;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      background: linear-gradient(180deg, var(--vault-surface) 0%, var(--vault-ink) 100%);
+      color: var(--vault-text);
+      border: 1px solid var(--vault-hairline);
+      border-radius: 4px;
+      padding: 32px 36px 28px;
+      max-width: 520px;
+      width: 92%;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,0.02) inset,
+        0 0 0 1px rgba(0,0,0,0.4),
+        0 40px 80px -20px rgba(0,0,0,0.75),
+        0 0 120px -40px rgba(126, 240, 197, 0.25);
+      animation: vault-enter 340ms cubic-bezier(0.16, 1, 0.3, 1) both;
     }
+    /* Decorative corner ticks — "this is a precise instrument" */
+    .nevoflux-modal-content::before,
+    .nevoflux-modal-content::after {
+      content: "";
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      border-color: var(--vault-hairline-strong);
+      pointer-events: none;
+    }
+    .nevoflux-modal-content::before {
+      top: -1px; left: -1px;
+      border-top: 1px solid;
+      border-left: 1px solid;
+    }
+    .nevoflux-modal-content::after {
+      bottom: -1px; right: -1px;
+      border-bottom: 1px solid;
+      border-right: 1px solid;
+    }
+    @keyframes vault-enter {
+      from { opacity: 0; transform: translateY(8px) scale(0.985); filter: blur(4px); }
+      to   { opacity: 1; transform: translateY(0)    scale(1);     filter: blur(0); }
+    }
+    @keyframes vault-stagger {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .nevoflux-modal-content > * { animation: vault-stagger 420ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .nevoflux-modal-content > *:nth-child(1) { animation-delay: 60ms; }
+    .nevoflux-modal-content > *:nth-child(2) { animation-delay: 100ms; }
+    .nevoflux-modal-content > *:nth-child(3) { animation-delay: 140ms; }
+    .nevoflux-modal-content > *:nth-child(4) { animation-delay: 180ms; }
+    .nevoflux-modal-content > *:nth-child(5) { animation-delay: 220ms; }
+    .nevoflux-modal-content > *:nth-child(6) { animation-delay: 260ms; }
+
     .nevoflux-modal-close {
       position: absolute;
-      top: 12px;
-      right: 12px;
+      top: 10px;
+      right: 10px;
       background: transparent;
-      border: none;
-      color: var(--nevoflux-text-secondary, #888);
-      font-size: 24px;
+      border: 1px solid transparent;
+      color: var(--vault-text-mute);
+      font-size: 16px;
+      font-family: var(--vault-mono);
       cursor: pointer;
-      width: 32px;
-      height: 32px;
-      border-radius: 6px;
+      width: 28px;
+      height: 28px;
+      border-radius: 2px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
     }
-    .nevoflux-modal-close:hover { background: rgba(255, 255, 255, 0.05); }
-    .nevoflux-modal h2 { margin: 0 0 16px 0; font-size: 20px; }
+    .nevoflux-modal-close:hover {
+      color: var(--vault-mint);
+      border-color: var(--vault-hairline-strong);
+      background: var(--vault-mint-soft);
+    }
+
+    /* Kicker line + header */
+    .nevoflux-modal .vault-kicker {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 14px;
+      font-family: var(--vault-mono);
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--vault-mint);
+    }
+    .nevoflux-modal .vault-kicker .vault-dot {
+      width: 6px; height: 6px;
+      background: var(--vault-mint);
+      border-radius: 50%;
+      box-shadow: 0 0 12px var(--vault-mint);
+      animation: vault-pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes vault-pulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.35; }
+    }
+    .nevoflux-modal .vault-kicker .vault-rule {
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, var(--vault-hairline-strong), transparent);
+    }
+
+    .nevoflux-modal h2 {
+      margin: 0 0 22px;
+      font-family: var(--vault-mono);
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      color: var(--vault-text);
+      line-height: 1.2;
+    }
+    .nevoflux-modal h2 .vault-mark {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      background: var(--vault-mint);
+      margin-left: 8px;
+      vertical-align: middle;
+      transform: rotate(45deg);
+      box-shadow: 0 0 16px var(--vault-mint);
+    }
+
+    /* Stepper */
+    .vault-stepper {
+      display: flex;
+      gap: 0;
+      margin: 0 0 24px;
+      padding: 0;
+      list-style: none;
+      border-top: 1px solid var(--vault-hairline);
+      border-bottom: 1px solid var(--vault-hairline);
+    }
+    .vault-stepper li {
+      flex: 1;
+      padding: 10px 12px;
+      font-family: var(--vault-mono);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--vault-text-mute);
+      border-right: 1px dashed var(--vault-hairline);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: color 220ms ease, background 220ms ease;
+    }
+    .vault-stepper li:last-child { border-right: none; }
+    .vault-stepper li .vault-step-num {
+      font-variant-numeric: tabular-nums;
+      color: var(--vault-text-mute);
+      transition: color 220ms ease;
+    }
+    .vault-stepper li.is-active {
+      color: var(--vault-mint);
+      background: linear-gradient(180deg, var(--vault-mint-soft), transparent);
+    }
+    .vault-stepper li.is-active .vault-step-num { color: var(--vault-mint); }
+    .vault-stepper li.is-done { color: var(--vault-text-dim); }
+    .vault-stepper li.is-done .vault-step-num::before {
+      content: "✓ ";
+      color: var(--vault-mint);
+    }
+
+    /* Steps */
     .share-step, .import-step { display: block; }
     .share-step[hidden], .import-step[hidden] { display: none; }
+    .share-step p, .import-step p {
+      margin: 0 0 12px;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 13.5px;
+      line-height: 1.6;
+      color: var(--vault-text-dim);
+    }
+    .share-step p strong, .import-step p strong {
+      color: var(--vault-text);
+      font-weight: 500;
+    }
+
+    /* Warning / error / success chips */
     .share-warning {
-      background: rgba(251, 191, 36, 0.12);
-      border: 1px solid rgba(251, 191, 36, 0.3);
-      color: #fbbf24;
-      padding: 12px 16px;
-      border-radius: 8px;
-      margin-bottom: 20px;
-      font-size: 14px;
+      position: relative;
+      background: var(--vault-amber-soft);
+      border: 1px solid rgba(245, 181, 68, 0.28);
+      border-left: 3px solid var(--vault-amber);
+      color: #f3c67c;
+      padding: 12px 14px 12px 38px;
+      border-radius: 2px;
+      margin: 0 0 22px;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 13px;
+      line-height: 1.55;
     }
+    .share-warning::before {
+      content: "";
+      position: absolute;
+      left: 14px;
+      top: 13px;
+      width: 14px;
+      height: 14px;
+      background:
+        linear-gradient(var(--vault-amber), var(--vault-amber)) center 2px / 2px 7px no-repeat,
+        linear-gradient(var(--vault-amber), var(--vault-amber)) center 11px / 2px 2px no-repeat;
+      border: 1px solid var(--vault-amber);
+      border-radius: 50%;
+    }
+    .share-warning strong { color: #fad28a; font-weight: 600; }
+
     .share-error, .import-error {
-      background: rgba(248, 113, 113, 0.12);
-      border: 1px solid rgba(248, 113, 113, 0.3);
-      color: #f87171;
-      padding: 12px 16px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-      font-size: 14px;
+      background: var(--vault-danger-soft);
+      border: 1px solid rgba(255, 138, 138, 0.28);
+      border-left: 3px solid var(--vault-danger);
+      color: #ffbcbc;
+      padding: 12px 14px;
+      border-radius: 2px;
+      margin: 0 0 16px;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
     }
+    .share-error strong, .import-error strong { color: var(--vault-danger); font-weight: 600; }
+
     .import-success {
-      background: rgba(74, 222, 128, 0.12);
-      border: 1px solid rgba(74, 222, 128, 0.3);
-      color: #4ade80;
-      padding: 12px 16px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-      font-size: 14px;
+      background: var(--vault-mint-soft);
+      border: 1px solid var(--vault-hairline-strong);
+      border-left: 3px solid var(--vault-mint);
+      color: var(--vault-mint);
+      padding: 12px 14px;
+      border-radius: 2px;
+      margin: 0 0 16px;
+      font-family: var(--vault-mono);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
+
+    /* Labels */
+    .nevoflux-modal label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--vault-mono);
+      font-size: 10px;
+      color: var(--vault-text-mute);
+      margin: 18px 0 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.22em;
+    }
+    .nevoflux-modal label::before {
+      content: "";
+      width: 4px;
+      height: 4px;
+      background: var(--vault-mint);
+      border-radius: 50%;
+    }
+
+    /* Field (input + inline button) */
     .share-field {
       display: flex;
-      gap: 8px;
-      margin-bottom: 16px;
-      align-items: center;
+      gap: 0;
+      margin: 0 0 4px;
+      align-items: stretch;
+      background: var(--vault-ink);
+      border: 1px solid var(--vault-hairline);
+      border-radius: 2px;
+      overflow: hidden;
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+    }
+    .share-field:focus-within {
+      border-color: var(--vault-hairline-strong);
+      box-shadow: 0 0 0 3px var(--vault-mint-soft);
     }
     .share-field input {
       flex: 1;
-      background: var(--nevoflux-bg, #12121a);
-      border: 1px solid var(--nevoflux-border, #2a2a3a);
-      color: inherit;
-      padding: 10px 12px;
-      border-radius: 6px;
-      font-family: ui-monospace, monospace;
-      font-size: 14px;
-    }
-    .share-field input.share-password { letter-spacing: 0.5px; }
-    .share-notice {
-      background: rgba(99, 102, 241, 0.1);
-      border-left: 3px solid #6366f1;
-      padding: 10px 12px;
-      margin-bottom: 16px;
+      background: transparent;
+      border: none;
+      color: var(--vault-text);
+      padding: 12px 14px;
+      font-family: var(--vault-mono);
       font-size: 13px;
-      color: var(--nevoflux-text-secondary, #a0a0a8);
+      letter-spacing: 0.02em;
+      outline: none;
+      min-width: 0;
     }
+    .share-field input.share-password {
+      font-size: 15px;
+      letter-spacing: 0.12em;
+      color: var(--vault-mint);
+      font-weight: 500;
+    }
+    .share-field .nevoflux-btn-secondary {
+      border-radius: 0;
+      border: none;
+      border-left: 1px solid var(--vault-hairline);
+      padding: 0 16px;
+      background: transparent;
+      color: var(--vault-text-dim);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .share-field .nevoflux-btn-secondary:hover {
+      background: var(--vault-mint-soft);
+      color: var(--vault-mint);
+    }
+
+    .share-notice {
+      background: var(--vault-mint-soft);
+      border: 1px solid var(--vault-hairline);
+      border-left: 3px solid var(--vault-mint);
+      padding: 10px 14px;
+      margin: 12px 0 0;
+      font-family: var(--vault-mono);
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      color: var(--vault-text-dim);
+    }
+    .share-notice #share-clear-countdown {
+      color: var(--vault-mint);
+      font-weight: 500;
+    }
+
     .share-info, .import-info {
-      font-size: 14px;
-      color: var(--nevoflux-text-secondary, #a0a0a8);
-      margin-bottom: 16px;
+      font-family: var(--vault-mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: var(--vault-text-mute);
+      margin: 14px 0 0;
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
     }
+    .share-info strong, .import-info strong {
+      color: var(--vault-text-dim);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-size: 10px;
+    }
+
     .share-actions, .import-actions {
       display: flex;
       gap: 8px;
       justify-content: flex-end;
-      margin-top: 20px;
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px dashed var(--vault-hairline);
     }
-    .nevoflux-modal label {
-      display: block;
-      font-size: 12px;
-      color: var(--nevoflux-text-secondary, #a0a0a8);
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .nevoflux-modal input[type="text"] {
+
+    .nevoflux-modal input[type="text"]:not(.share-field input) {
       width: 100%;
-      background: var(--nevoflux-bg, #12121a);
-      border: 1px solid var(--nevoflux-border, #2a2a3a);
-      color: inherit;
-      padding: 10px 12px;
-      border-radius: 6px;
-      font-family: ui-monospace, monospace;
+      background: var(--vault-ink);
+      border: 1px solid var(--vault-hairline);
+      color: var(--vault-text);
+      padding: 13px 14px;
+      border-radius: 2px;
+      font-family: var(--vault-mono);
       font-size: 14px;
-      margin-bottom: 16px;
+      letter-spacing: 0.05em;
+      margin-bottom: 0;
       box-sizing: border-box;
+      outline: none;
+      transition: border-color 160ms ease, box-shadow 160ms ease;
     }
+    .nevoflux-modal input[type="text"]:not(.share-field input):focus {
+      border-color: var(--vault-hairline-strong);
+      box-shadow: 0 0 0 3px var(--vault-mint-soft);
+    }
+    .nevoflux-modal input[type="text"]::placeholder {
+      color: var(--vault-text-mute);
+      letter-spacing: 0.1em;
+    }
+
+    /* Buttons */
     .nevoflux-btn-primary, .nevoflux-btn-secondary {
-      padding: 10px 20px;
-      border-radius: 6px;
-      border: none;
+      padding: 11px 22px;
+      border-radius: 2px;
+      border: 1px solid transparent;
       cursor: pointer;
-      font-size: 14px;
+      font-family: var(--vault-mono);
+      font-size: 11px;
       font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 80ms ease;
     }
     .nevoflux-btn-primary {
-      background: #6366f1;
-      color: #fff;
+      background: var(--vault-mint);
+      color: var(--vault-ink);
+      border-color: var(--vault-mint);
+      box-shadow:
+        0 0 0 1px rgba(0,0,0,0.2) inset,
+        0 0 24px -6px var(--vault-mint);
     }
-    .nevoflux-btn-primary:hover { background: #4f46e5; }
+    .nevoflux-btn-primary:hover {
+      background: #a8f5d4;
+      border-color: #a8f5d4;
+    }
+    .nevoflux-btn-primary:active { transform: translateY(1px); }
     .nevoflux-btn-secondary {
-      background: var(--nevoflux-surface-hover, var(--nevoflux-bg-tertiary, #2a2a3a));
-      color: var(--nevoflux-text-primary, var(--nevoflux-text, #e0e0e8));
+      background: transparent;
+      color: var(--vault-text-dim);
+      border-color: var(--vault-hairline);
     }
-    .nevoflux-btn-secondary:hover { background: var(--nevoflux-border, #3a3a4a); }
+    .nevoflux-btn-secondary:hover {
+      color: var(--vault-mint);
+      border-color: var(--vault-hairline-strong);
+      background: var(--vault-mint-soft);
+    }
+    .nevoflux-btn-secondary:active { transform: translateY(1px); }
+
+    /* Primary confirm — taller block button with an arrow */
+    .vault-primary-block {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 22px;
+    }
+    .vault-primary-block::after {
+      content: "→";
+      font-size: 14px;
+      transform: translateX(0);
+      transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .vault-primary-block:hover::after { transform: translateX(4px); }
+
+    /* Loading — three-dot encoder pulse */
     .nevoflux-spinner {
+      position: relative;
       display: block;
-      width: 32px;
-      height: 32px;
-      border: 3px solid var(--nevoflux-border, #2a2a3a);
-      border-top-color: #6366f1;
-      border-radius: 50%;
-      margin: 20px auto;
-      animation: nevoflux-spin 0.8s linear infinite;
+      width: 70px;
+      height: 10px;
+      margin: 32px auto;
+      padding: 0;
+      border: none;
+      border-radius: 0;
+      background: radial-gradient(circle, var(--vault-mint) 5px, transparent 5.5px) center / 10px 10px no-repeat;
+      animation: vault-encode 1.2s ease-in-out 0.2s infinite;
     }
-    @keyframes nevoflux-spin {
-      to { transform: rotate(360deg); }
+    .nevoflux-spinner::before,
+    .nevoflux-spinner::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      width: 10px;
+      height: 10px;
+      background: var(--vault-mint);
+      border-radius: 50%;
+      box-shadow: 0 0 12px var(--vault-mint);
+      animation: vault-encode 1.2s ease-in-out infinite;
+    }
+    .nevoflux-spinner::before { left: 0;  animation-delay: 0s; }
+    .nevoflux-spinner::after  { right: 0; animation-delay: 0.4s; }
+    @keyframes vault-encode {
+      0%, 80%, 100% { transform: scale(0.5); opacity: 0.35; }
+      40%           { transform: scale(1);   opacity: 1; }
+    }
+    @keyframes nevoflux-spin { to { transform: rotate(360deg); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .nevoflux-modal-content,
+      .nevoflux-modal-content > *,
+      .vault-kicker .vault-dot,
+      .nevoflux-spinner,
+      .nevoflux-spinner::before,
+      .nevoflux-spinner::after { animation: none !important; }
     }
 
     /* Canvas Management List */
@@ -570,7 +921,7 @@
           <button class="export-dropdown-item export-conditional" role="menuitem" data-format="zip" style="display:none"><span class="export-icon">📦</span> ZIP</button>
         </div>
       </div>
-      <button class="toolbar-btn" id="btn-share" title="Copy link" aria-label="Copy link">
+      <button class="toolbar-btn" id="btn-share" title="Share" aria-label="Share">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
       </button>
     </div>
@@ -604,44 +955,62 @@
     <div class="nevoflux-modal-backdrop" data-close-dialog></div>
     <div class="nevoflux-modal-content">
       <button class="nevoflux-modal-close" data-close-dialog aria-label="Close">×</button>
-      <h2>Share Canvas</h2>
+
+      <div class="vault-kicker">
+        <span class="vault-dot" aria-hidden="true"></span>
+        <span>Encrypted Canvas · E2EE</span>
+        <span class="vault-rule" aria-hidden="true"></span>
+        <span>AES-GCM</span>
+      </div>
+
+      <h2>Share Canvas<span class="vault-mark" aria-hidden="true"></span></h2>
+
+      <ol class="vault-stepper" id="share-stepper" aria-hidden="true">
+        <li data-step="confirm"><span class="vault-step-num">01</span><span>Confirm</span></li>
+        <li data-step="loading"><span class="vault-step-num">02</span><span>Encrypt</span></li>
+        <li data-step="result"><span class="vault-step-num">03</span><span>Reveal</span></li>
+      </ol>
 
       <div id="share-step-confirm" class="share-step">
-        <p>Share this canvas as an encrypted link. Anyone with the link and password can import it.</p>
-        <p><strong>TTL:</strong> 30 days (default)</p>
-        <button id="share-confirm-btn" class="nevoflux-btn-primary">Create Share Link</button>
+        <p>Create an end-to-end encrypted link. Anyone with <strong>both</strong> the URL and the password can import this canvas — we cannot see the contents.</p>
+        <p><strong>TTL:</strong> 30 days · <strong>Algorithm:</strong> AES-256-GCM</p>
+        <div class="share-actions">
+          <button data-close-dialog class="nevoflux-btn-secondary">Cancel</button>
+          <button id="share-confirm-btn" class="nevoflux-btn-primary vault-primary-block">Create Share Link</button>
+        </div>
       </div>
 
       <div id="share-step-loading" class="share-step" hidden>
-        <p>Encrypting and uploading... This may take a moment.</p>
-        <div class="nevoflux-spinner"></div>
+        <p>Encrypting payload and uploading to storage. Your device is deriving a unique key — this will only take a moment.</p>
+        <div class="nevoflux-spinner" aria-label="Encrypting"></div>
       </div>
 
       <div id="share-step-result" class="share-step" hidden>
         <div class="share-warning">
-          ⚠️ <strong>Save the password now.</strong> We cannot recover it later.
+          <strong>Save the password now.</strong> It is shown only once. If you lose it, the canvas cannot be recovered — not by you, not by us.
         </div>
 
         <label>Share URL</label>
         <div class="share-field">
           <input id="share-url-input" type="text" readonly>
-          <button id="share-copy-url-btn" class="nevoflux-btn-secondary">Copy URL</button>
+          <button id="share-copy-url-btn" class="nevoflux-btn-secondary">Copy</button>
         </div>
 
         <label>Password</label>
         <div class="share-field">
           <input id="share-password-input" type="text" readonly class="share-password">
-          <button id="share-copy-password-btn" class="nevoflux-btn-secondary">Copy Password</button>
+          <button id="share-copy-password-btn" class="nevoflux-btn-secondary">Copy</button>
         </div>
 
         <div id="share-clipboard-notice" class="share-notice" hidden>
-          Password copied to clipboard. It will be cleared in <span id="share-clear-countdown">60</span>s.
+          Password copied · clipboard will be cleared in <span id="share-clear-countdown">60</span>s
         </div>
 
-        <p class="share-info"><strong>Expires:</strong> <span id="share-expires-date"></span></p>
+        <p class="share-info"><strong>Expires</strong> <span id="share-expires-date"></span></p>
 
         <div class="share-actions">
-          <button class="nevoflux-btn-secondary" data-close-dialog>Done</button>
+          <button class="nevoflux-btn-secondary" data-close-dialog>Close</button>
+          <button id="share-copy-both-btn" class="nevoflux-btn-primary vault-primary-block">Copy URL &amp; Password</button>
         </div>
       </div>
 
@@ -649,7 +1018,9 @@
         <div class="share-error">
           <strong>Failed to share:</strong> <span id="share-error-msg"></span>
         </div>
-        <button class="nevoflux-btn-secondary" data-close-dialog>Close</button>
+        <div class="share-actions">
+          <button class="nevoflux-btn-secondary" data-close-dialog>Close</button>
+        </div>
       </div>
     </div>
   </div>
@@ -659,32 +1030,49 @@
     <div class="nevoflux-modal-backdrop" data-close-dialog></div>
     <div class="nevoflux-modal-content">
       <button class="nevoflux-modal-close" data-close-dialog aria-label="Close">×</button>
-      <h2>Import Shared Canvas</h2>
+
+      <div class="vault-kicker">
+        <span class="vault-dot" aria-hidden="true"></span>
+        <span>Decrypt Incoming Canvas</span>
+        <span class="vault-rule" aria-hidden="true"></span>
+        <span>AES-GCM</span>
+      </div>
+
+      <h2>Import Shared Canvas<span class="vault-mark" aria-hidden="true"></span></h2>
+
+      <ol class="vault-stepper" id="import-stepper" aria-hidden="true">
+        <li data-step="prompt"><span class="vault-step-num">01</span><span>Key</span></li>
+        <li data-step="loading"><span class="vault-step-num">02</span><span>Decrypt</span></li>
+        <li data-step="success"><span class="vault-step-num">03</span><span>Done</span></li>
+      </ol>
 
       <div id="import-step-prompt" class="import-step">
-        <p>Enter the password to decrypt and import this canvas.</p>
-        <p class="import-info"><strong>Share ID:</strong> <span id="import-share-id"></span></p>
+        <p>Enter the password provided by the sender to decrypt and import this canvas.</p>
+        <p class="import-info"><strong>Share ID</strong> <span id="import-share-id"></span></p>
 
         <label for="import-password-input">Password</label>
-        <input id="import-password-input" type="text" placeholder="x-xxxx-xxxx-xxxx" autocomplete="off">
+        <input id="import-password-input" type="text" placeholder="x-xxxx-xxxx-xxxx" autocomplete="off" spellcheck="false">
 
         <div class="import-actions">
           <button data-close-dialog class="nevoflux-btn-secondary">Cancel</button>
-          <button id="import-submit-btn" class="nevoflux-btn-primary">Import</button>
+          <button id="import-submit-btn" class="nevoflux-btn-primary vault-primary-block">Decrypt &amp; Import</button>
         </div>
       </div>
 
       <div id="import-step-loading" class="import-step" hidden>
-        <p>Downloading and decrypting...</p>
-        <div class="nevoflux-spinner"></div>
+        <p>Downloading encrypted payload and decrypting locally on your device.</p>
+        <div class="nevoflux-spinner" aria-label="Decrypting"></div>
       </div>
 
       <div id="import-step-success" class="import-step" hidden>
         <div class="import-success">
-          ✓ Canvas imported successfully
+          ✓ Canvas imported
         </div>
         <p><strong>Name:</strong> <span id="import-result-name"></span></p>
-        <button data-close-dialog class="nevoflux-btn-primary">Close</button>
+        <div class="import-actions">
+          <button data-close-dialog class="nevoflux-btn-secondary">Close</button>
+          <button id="import-open-btn" class="nevoflux-btn-primary vault-primary-block">Open Canvas</button>
+        </div>
       </div>
 
       <div id="import-step-error" class="import-step" hidden>

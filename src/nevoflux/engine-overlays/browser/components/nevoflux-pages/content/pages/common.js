@@ -38,6 +38,10 @@ const NevofluxPage = {
           if (segments[0]) params.set('id', segments[0]);
           params.set('mode', segments[1] || 'preview');
           break;
+        case 'import':
+          if (segments[0]) params.set('share_id', segments[0]);
+          params.set('mode', 'import');
+          break;
         case 'settings':
           params.set('section', segments[0] || 'general');
           break;
