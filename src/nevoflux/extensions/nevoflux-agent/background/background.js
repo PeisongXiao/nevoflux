@@ -144,7 +144,18 @@ const MAX_RECONNECT_ATTEMPTS = 20;
 
 const CONTENT_STORE_DEBOUNCE_MS = 1000; // 1 second per-key debounce
 const CONTENT_STORE_MAX_VALUE_SIZE = 500_000; // 500KB max value size
+const CONTENT_STORE_PERSIST_TIMEOUT_MS = 10000; // 10s timeout for awaited writes
 const contentStoreDebounceTimers = new Map(); // key -> timeoutId
+
+// High-priority key prefixes bypass the 1s debounce and are written through
+// synchronously so callers can await the daemon ACK. This prevents data loss
+// when the browser closes or the agent restarts within the debounce window.
+const HIGH_PRIORITY_KEY_PREFIXES = ['canvas:'];
+
+// Tracks the most recent in-flight persist promise per high-priority key.
+// Callers (e.g. agent tool handlers) can await the latest write via
+// awaitArtifactPersist(id) before returning success to the daemon.
+const artifactPersistAcks = new Map(); // key -> Promise<void>
 
 // Pending agent:command bridge requests: requestId → bridgeId
 const pendingAgentCommands = new Map();
@@ -1135,6 +1146,29 @@ class ChannelManager {
       }
     }
 
+    // Daemon error responses: when a canvas_share/import/extend/delete fails,
+    // the daemon emits a generic { type: "error", payload: { code, message } }
+    // (server.rs:1708). Without explicit handling this would silently sit until
+    // the bridge times out at 30s. If a share request is in flight, surface
+    // the real error to the caller instead.
+    if (msgType === 'error' && pendingShareRequests.size > 0) {
+      for (const [requestId, bridgeId] of pendingShareRequests) {
+        const errPayload = message.payload || {};
+        browser.nevoflux
+          .bridgeRespond(bridgeId, {
+            success: false,
+            error: {
+              code: errPayload.code || 'AGENT_ERROR',
+              message: errPayload.message || 'Agent returned an error',
+            },
+          })
+          .catch(() => {});
+        pendingShareRequests.delete(requestId);
+        break;
+      }
+      return;
+    }
+
     // Forward to canvas sessions.
     // Try matching by session_id in payload first; fall back to
     // _activeCanvasSessionId for messages that don't carry session_id
@@ -1339,6 +1373,114 @@ function broadcastToSidebar(message) {
  * Uses per-key debouncing (1s) to coalesce rapid writes (e.g. artifact streaming).
  * Wrapped in guard: browser.nevoflux API may not be available on all platforms.
  */
+/**
+ * Send a content_store.set or content_store.delete to the daemon and wait for
+ * the SYSTEM_RESPONSE ACK. Resolves on success, rejects on failure or timeout.
+ *
+ * Used for write-through persistence of high-priority keys (artifacts) so
+ * callers can guarantee the write landed in daemon SQLite before returning.
+ */
+function persistContentStoreNow(operation, key, value) {
+  const requestId = `cs_${operation}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingSystemCommands.delete(requestId);
+      reject(new Error(`content_store.${operation} timed out for ${key}`));
+    }, CONTENT_STORE_PERSIST_TIMEOUT_MS);
+
+    pendingSystemCommands.set(requestId, {
+      sendResponse: (payload) => {
+        if (payload?.success) {
+          resolve(payload);
+        } else {
+          reject(new Error(payload?.error?.message || `content_store.${operation} failed`));
+        }
+      },
+      timeout: timer,
+    });
+
+    const params = operation === 'set' ? { key, value } : { key };
+    const sent = channelManager.sendToAgent({
+      type: MessageTypes.SYSTEM_COMMAND,
+      payload: {
+        command: `content_store.${operation}`,
+        request_id: requestId,
+        params,
+      },
+    });
+
+    if (!sent) {
+      clearTimeout(timer);
+      pendingSystemCommands.delete(requestId);
+      reject(new Error('Not connected to agent'));
+    }
+  });
+}
+
+function isHighPriorityKey(key) {
+  return HIGH_PRIORITY_KEY_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+/**
+ * Durable persist for an artifact. Called by agent tool handlers after
+ * updateArtifact/createArtifact to guarantee the write reached daemon SQLite
+ * before returning success to the daemon.
+ *
+ * Coordinates with the onContentStoreChanged listener via artifactPersistAcks:
+ * - If the listener already started a persist for this key, joins that promise
+ *   (avoids duplicate writes).
+ * - Otherwise reads the current value from ContentStore and triggers its own
+ *   persist, registering the promise for the listener to observe and skip.
+ *
+ * The listener's event arrives via async IPC from the parent process so it
+ * may fire before OR after this helper runs — the shared map makes both
+ * orderings safe and deduplicated.
+ */
+async function awaitArtifactPersist(id) {
+  const key = `canvas:${id}`;
+
+  // If a persist is already in-flight (from listener or a previous caller),
+  // join it rather than starting a new one.
+  const existing = artifactPersistAcks.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  // Read the authoritative value from ContentStore. We can't trust the value
+  // parameter of updateArtifact because callers may only pass partial updates.
+  let value;
+  try {
+    const result = await browser.nevoflux.getArtifact(id);
+    if (!result?.success) {
+      throw new Error(`Artifact ${id} not found in ContentStore`);
+    }
+    value = result.data;
+  } catch (err) {
+    console.error(`[NevoFlux] awaitArtifactPersist(${id}) getArtifact failed:`, err.message);
+    throw err;
+  }
+
+  // Check again — the listener may have fired during the await above.
+  const existingAfterRead = artifactPersistAcks.get(key);
+  if (existingAfterRead) {
+    return existingAfterRead;
+  }
+
+  const promise = persistContentStoreNow('set', key, value).catch((err) => {
+    console.error(`[NevoFlux] awaitArtifactPersist(${id}) persist failed:`, err.message);
+    throw err;
+  });
+  artifactPersistAcks.set(key, promise);
+  promise.finally(() => {
+    if (artifactPersistAcks.get(key) === promise) {
+      artifactPersistAcks.delete(key);
+    }
+  });
+
+  return promise;
+}
+
 if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onContentStoreChanged) {
   browser.nevoflux.onContentStoreChanged.addListener((operation, key, value) => {
     // Skip if agent not connected
@@ -1350,12 +1492,55 @@ if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onContentStoreCh
       return;
     }
 
-    // Clear existing debounce timer for this key
+    // High-priority keys (canvas artifacts): write-through, no debounce.
+    // The caller can await the ACK via awaitArtifactPersist(id).
+    if (isHighPriorityKey(key)) {
+      // If a caller-initiated persist (from awaitArtifactPersist) is already
+      // in flight, skip — the shared promise is already tracked and will be
+      // awaited by the caller. Prevents duplicate writes.
+      if (artifactPersistAcks.has(key)) {
+        console.log(`[NevoFlux] Skipping listener persist for ${key} (already in flight)`);
+        return;
+      }
+
+      if (operation === 'set') {
+        const serialized = JSON.stringify(value);
+        if (serialized && serialized.length > CONTENT_STORE_MAX_VALUE_SIZE) {
+          console.warn(
+            `[NevoFlux] ContentStore value too large (${serialized.length}), skipping persist: ${key}`
+          );
+          return;
+        }
+      }
+
+      console.log(`[NevoFlux] Persisting immediately: content_store.${operation} ${key}`);
+      const promise = persistContentStoreNow(operation, key, value).catch((err) => {
+        console.error(`[NevoFlux] content_store.${operation} failed for ${key}:`, err.message);
+        throw err;
+      });
+
+      artifactPersistAcks.set(key, promise);
+      // Clear from tracking once settled, but only if we're still the latest.
+      promise.finally(() => {
+        if (artifactPersistAcks.get(key) === promise) {
+          artifactPersistAcks.delete(key);
+        }
+      });
+
+      // Also clear any stale debounce timer (defensive — shouldn't exist for
+      // high-priority keys but kept in case of prior low-priority write).
+      if (contentStoreDebounceTimers.has(key)) {
+        clearTimeout(contentStoreDebounceTimers.get(key));
+        contentStoreDebounceTimers.delete(key);
+      }
+      return;
+    }
+
+    // Low-priority keys: keep 1s per-key debounce to coalesce rapid writes.
     if (contentStoreDebounceTimers.has(key)) {
       clearTimeout(contentStoreDebounceTimers.get(key));
     }
 
-    // Debounce per key
     const timerId = setTimeout(() => {
       contentStoreDebounceTimers.delete(key);
 
@@ -2139,6 +2324,17 @@ async function handleArtifactMessage(message) {
           console.warn(
             `[NevoFlux] ARTIFACT_COMPLETE: updateArtifact failed for ${id} (artifact not found), will rely on tool call handler`
           );
+          return;
+        }
+        // Write-through: wait for daemon SQLite ACK of the completed artifact.
+        // Intermediate streaming deltas are allowed to race; only the final
+        // state needs to be durable.
+        try {
+          await awaitArtifactPersist(id);
+        } catch (err) {
+          console.warn(
+            `[NevoFlux] ARTIFACT_COMPLETE: persist failed for ${id}: ${err.message}`
+          );
         }
       });
       break;
@@ -2220,6 +2416,12 @@ async function handleCreateArtifactToolCall(toolCall) {
       }
       if (content.length > 0) updates.code = content;
       await browser.nevoflux.updateArtifact(id, updates);
+      // Write-through: final tool-call artifact must be durable.
+      try {
+        await awaitArtifactPersist(id);
+      } catch (err) {
+        console.warn(`[NevoFlux] create_artifact: persist failed for ${id}: ${err.message}`);
+      }
       return;
     }
 
@@ -2241,6 +2443,14 @@ async function handleCreateArtifactToolCall(toolCall) {
       }
       if (content.length > 0) updates.code = content;
       await browser.nevoflux.updateArtifact(streamedEntry.id, updates);
+      // Write-through for the deduped streamed artifact.
+      try {
+        await awaitArtifactPersist(streamedEntry.id);
+      } catch (err) {
+        console.warn(
+          `[NevoFlux] create_artifact: persist failed for ${streamedEntry.id}: ${err.message}`
+        );
+      }
       _streamedArtifacts.delete(normalizedTitle);
       return;
     }
@@ -2263,6 +2473,12 @@ async function handleCreateArtifactToolCall(toolCall) {
       createOpts.entry = entry;
     }
     await browser.nevoflux.createArtifact(createOpts);
+    // Write-through: new tool-call artifact must be durable before the tab opens.
+    try {
+      await awaitArtifactPersist(id);
+    } catch (err) {
+      console.warn(`[NevoFlux] create_artifact: persist failed for ${id}: ${err.message}`);
+    }
 
     // Open canvas tab only if streaming protocol hasn't already
     try {
@@ -2885,6 +3101,21 @@ async function executeEditArtifact(params) {
     return result;
   }
 
+  // Write-through: wait for daemon SQLite ACK before reporting success to the
+  // agent. Guarantees the edit persists across browser/daemon restarts.
+  try {
+    await awaitArtifactPersist(id);
+  } catch (err) {
+    return {
+      success: false,
+      error: {
+        code: 12007,
+        message: `Artifact edit applied locally but failed to persist: ${err.message}`,
+        recoverable: true,
+      },
+    };
+  }
+
   return { success: true, result: { lines: newContent.split('\n').length } };
 }
 
@@ -2933,6 +3164,8 @@ async function executeCanvasRender(params) {
       source: 'agent',
       permissions: [],
     });
+    // Write-through: wait for daemon SQLite ACK before continuing.
+    await awaitArtifactPersist(id);
   } catch (e) {
     console.error('[NevoFlux] canvas_render: Failed to create artifact:', e);
     return {
@@ -5380,6 +5613,26 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
+  // Web content cannot link to nevoflux:// directly (UI_RESOURCE scheme).
+  // Content script intercepts such clicks and asks us to navigate on its
+  // behalf — extension API navigations satisfy URI_LOADABLE_BY_EXTENSIONS.
+  if (msgType === 'nevoflux:openUrl') {
+    const url = message.url;
+    if (!url || !/^nevoflux:/i.test(url)) {
+      sendResponse({ success: false, error: 'invalid-url' });
+      return;
+    }
+    const tabId = sender && sender.tab && sender.tab.id;
+    const p = message.newTab || tabId == null
+      ? browser.tabs.create({ url })
+      : browser.tabs.update(tabId, { url });
+    p.then(
+      () => sendResponse({ success: true }),
+      (err) => sendResponse({ success: false, error: String(err && err.message || err) })
+    );
+    return true; // async sendResponse
+  }
+
   // Ignore other messages (Sidebar handles them)
   return false;
 });
@@ -5586,21 +5839,73 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
         return true;
       }
 
-      // Hydrate ContentStore from backend if artifact not yet in memory
+      // Hydrate ContentStore from backend if artifact not yet in memory.
+      // Source preference:
+      //   1. In-memory ContentStore (fast path).
+      //   2. `config` table (via content_store.load prefix) — authoritative
+      //      source written by content_store.set (including write-through).
+      //   3. `artifacts` table (via artifact.get) — legacy fallback for
+      //      artifacts created before write-through existed.
+      //
+      // The two tables can diverge because content_store.set only writes to
+      // config. Always prefer config so edits persist across browser restarts.
       (async () => {
         try {
           const existing = await browser.nevoflux.getArtifact(artifactId);
-          if (!existing || !existing.success) {
-            // Not in ContentStore — request from backend
+          if (existing && existing.success) {
+            return; // Already in memory
+          }
+
+          // Ask daemon for this specific canvas entry via content_store.load.
+          // Use pendingSystemCommands to await the response and decide
+          // whether to fall back to artifact.get.
+          const loadReqId = `cs_load_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const loadResponse = await new Promise((resolve) => {
+            const timer = setTimeout(() => {
+              pendingSystemCommands.delete(loadReqId);
+              resolve(null);
+            }, 5000);
+            pendingSystemCommands.set(loadReqId, {
+              sendResponse: (payload) => resolve(payload),
+              timeout: timer,
+            });
             channelManager.sendToAgent({
               type: 'system_command',
               payload: {
-                request_id: `art-get-${Date.now()}`,
-                command: 'artifact.get',
-                params: { artifact_id: artifactId },
+                command: 'content_store.load',
+                request_id: loadReqId,
+                params: { prefix: `canvas:${artifactId}` },
               },
             });
+          });
+
+          const entries = loadResponse?.data?.entries || [];
+          if (entries.length > 0) {
+            // Config has a fresh entry — hydrate directly, skip artifact.get
+            // so the stale `artifacts` table doesn't clobber this data.
+            console.log(
+              `[NevoFlux] bg:open_artifact: hydrated ${artifactId} from config table (${entries.length} entries)`
+            );
+            try {
+              await browser.nevoflux.contentStoreLoad(entries);
+            } catch (err) {
+              console.error('[NevoFlux] contentStoreLoad failed:', err);
+            }
+            return;
           }
+
+          // Not in config — fall back to legacy artifacts table.
+          console.log(
+            `[NevoFlux] bg:open_artifact: ${artifactId} not in config, falling back to artifact.get`
+          );
+          channelManager.sendToAgent({
+            type: 'system_command',
+            payload: {
+              request_id: `art-get-${Date.now()}`,
+              command: 'artifact.get',
+              params: { artifact_id: artifactId },
+            },
+          });
         } catch (e) {
           console.warn('[NevoFlux] getArtifact check failed, requesting from backend:', e);
           channelManager.sendToAgent({

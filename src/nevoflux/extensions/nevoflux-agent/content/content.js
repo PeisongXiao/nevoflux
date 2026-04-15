@@ -1433,4 +1433,34 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Intercept clicks on <a href="nevoflux://..."> anchors in web pages and
+// forward them to the background. Web content cannot navigate to nevoflux://
+// directly (the scheme has URI_IS_UI_RESOURCE), but the background (extension
+// principal) can — see URI_LOADABLE_BY_EXTENSIONS in components.conf.
+document.addEventListener(
+  'click',
+  (event) => {
+    if (event.defaultPrevented) return;
+    if (event.button !== 0) return;
+    const anchor = event.target.closest && event.target.closest('a[href]');
+    if (!anchor) return;
+    const href = anchor.getAttribute('href') || '';
+    if (!/^nevoflux:/i.test(href)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const openInNewTab = event.ctrlKey || event.metaKey || event.shiftKey;
+    browser.runtime
+      .sendMessage({
+        type: 'nevoflux:openUrl',
+        url: anchor.href,
+        newTab: openInNewTab,
+      })
+      .catch((err) => {
+        console.error('[NevoFlux] Failed to open nevoflux:// URL:', err);
+      });
+  },
+  true
+);
+
 console.log('[NevoFlux] Agent content script loaded');
