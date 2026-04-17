@@ -45,6 +45,16 @@ export class NevofluxParent extends JSWindowActorParent {
       }
       this._agentSessionUnsubs = null;
     }
+
+    // Cleanup EventBus push channels
+    if (this._eventChannelUnsubs) {
+      for (const unsub of this._eventChannelUnsubs.values()) {
+        try {
+          unsub();
+        } catch (e) {}
+      }
+      this._eventChannelUnsubs = null;
+    }
   }
 
   _setupDialogObserver() {
@@ -212,6 +222,39 @@ export class NevofluxParent extends JSWindowActorParent {
         if (unsub) {
           unsub();
           this._agentSessionUnsubs.delete(sessionId);
+        }
+        return { success: true };
+      }
+
+      // EventBus persistent push channel. Bridge:request's 5-second push grace
+      // is too short for long-lived event subscriptions, so subscribers open a
+      // dedicated channel here (keyed by a client-chosen channelId) and close
+      // it on unsubscribe. bridgePush in background.js targets this channelId.
+      case 'events:channel_open': {
+        const { channelId } = data;
+        if (!this._eventChannelUnsubs) {
+          this._eventChannelUnsubs = new Map();
+        }
+        if (this._eventChannelUnsubs.has(channelId)) {
+          return { success: true, already_open: true };
+        }
+        const unsub = lazy.NevofluxBridgeRouter.subscribe(channelId, (msg) => {
+          try {
+            this.sendAsyncMessage('bridge:push', { msg });
+          } catch (e) {
+            unsub();
+          }
+        });
+        this._eventChannelUnsubs.set(channelId, unsub);
+        return { success: true };
+      }
+
+      case 'events:channel_close': {
+        const { channelId } = data;
+        const unsub = this._eventChannelUnsubs?.get(channelId);
+        if (unsub) {
+          unsub();
+          this._eventChannelUnsubs.delete(channelId);
         }
         return { success: true };
       }

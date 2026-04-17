@@ -269,6 +269,13 @@ fn handle_event_delivery(mut ctx: AppContext, delivery: shared_protocol::EventBu
             .to_string();
 
         let mut notifications = ctx.event_notifications.write();
+        // Dedupe by event_id — the same event may be delivered via multiple
+        // subscriptions (e.g. stale subscriptions left on daemon side after
+        // proxy reconnects), which would yield duplicate Dioxus keys and
+        // panic the diff engine.
+        if notifications.iter().any(|n| n.id == delivery.event.event_id) {
+            return;
+        }
         notifications.push(crate::context::EventNotification {
             id: delivery.event.event_id.clone(),
             title,

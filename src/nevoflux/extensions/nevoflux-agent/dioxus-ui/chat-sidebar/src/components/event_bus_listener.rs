@@ -5,11 +5,30 @@
 use dioxus::prelude::*;
 use crate::context::AppContext;
 
+/// Auto-dismiss delay in milliseconds.
+const TOAST_TTL_MS: u32 = 5000;
+
 #[component]
 pub fn EventBusListener() -> Element {
-    let ctx = use_context::<AppContext>();
+    let mut ctx = use_context::<AppContext>();
     let notifications = ctx.event_notifications.read();
     let visible: Vec<_> = notifications.iter().rev().take(3).collect();
+    let count = notifications.len();
+
+    // Schedule auto-dismiss whenever a new notification arrives.
+    use_effect(move || {
+        if count == 0 {
+            return;
+        }
+        spawn(async move {
+            crate::messaging::sleep_ms(TOAST_TTL_MS).await;
+            let mut notifs = ctx.event_notifications.write();
+            // Remove the oldest notification (the one that just expired).
+            if !notifs.is_empty() {
+                notifs.remove(0);
+            }
+        });
+    });
 
     rsx! {
         if !visible.is_empty() {

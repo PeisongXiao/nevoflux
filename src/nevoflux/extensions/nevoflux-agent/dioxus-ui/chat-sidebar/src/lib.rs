@@ -118,6 +118,9 @@ fn ChatSidebar() -> Element {
 
                 // AskUser dialog (modal, for agent questions)
                 AskUserDialog {}
+
+                // EventBus notification toasts (bottom-right overlay)
+                EventBusListener {}
             }
         }
     }

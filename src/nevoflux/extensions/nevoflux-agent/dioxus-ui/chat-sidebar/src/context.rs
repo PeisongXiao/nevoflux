@@ -212,6 +212,19 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
                 // Send ping
                 let _ = crate::messaging::send_ping().await;
 
+                // Subscribe to UI notification events so incoming
+                // `ui:notification:*` topics render as toasts via
+                // handler::handle_event_delivery.
+                if let Err(e) = crate::messaging::send_events_subscribe(
+                    vec!["ui:notification:*".to_string()],
+                    false,
+                    256,
+                )
+                .await
+                {
+                    tracing::warn!("EventBus subscribe to ui:notification:* failed: {}", e);
+                }
+
                 // Resolve window-session binding
                 match crate::bindings::nevoflux_api::get_window_session().await {
                     Ok(Some(session_id)) => {

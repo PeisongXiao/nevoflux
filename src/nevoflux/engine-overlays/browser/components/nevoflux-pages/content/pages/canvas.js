@@ -18,6 +18,9 @@ const Canvas = {
   _artifact: null,
   _vendorCache: {},
   _cmView: null,
+  // EventBus: map subscription_id -> channelId so unsubscribe can close the
+  // persistent push channel opened during subscribe.
+  _eventChannels: new Map(),
 
   // SDK script injected into every srcdoc iframe for postMessage bridge
   _SDK_SCRIPT: `<script>
@@ -218,7 +221,7 @@ const Canvas = {
           replay_sticky: options.replaySticky !== false,
           buffer_size: options.bufferSize || 256,
         }).then(function(res) {
-          var subId = res.subscriptionId;
+          var subId = res.subscription_id || res.subscriptionId;
           _subHandlers[subId] = handler;
           return {
             subscriptionId: subId,
@@ -734,8 +737,42 @@ const Canvas = {
       case 'canvas.tool.invoke':
       case 'canvas.tool.list':
       // ── EventBus ─────────────────────────────────────────
-      case 'events.subscribe':
-      case 'events.unsubscribe':
+      case 'events.subscribe': {
+        // Open a persistent push channel BEFORE subscribing — bridge:request's
+        // 5s push grace is too short for long-lived event subscriptions.
+        const channelId =
+          'evch_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        await NevofluxPage.sendQuery('events:channel_open', { channelId });
+        const res = await NevofluxPage.sendQuery('bridge:request', {
+          type: 'events.subscribe',
+          payload: { ...(args || {}), channel_id: channelId },
+        });
+        if (res && res.success === false) {
+          await NevofluxPage.sendQuery('events:channel_close', { channelId });
+          throw new Error(res.error?.message || 'Bridge request failed: events.subscribe');
+        }
+        const data = res?.data !== undefined ? res.data : res;
+        const subId = data?.subscription_id || data?.subscriptionId;
+        if (subId) this._eventChannels.set(subId, channelId);
+        return data;
+      }
+      case 'events.unsubscribe': {
+        const subId =
+          (args && (args.subscription_id || args.subscriptionId)) || null;
+        const channelId = subId ? this._eventChannels.get(subId) : null;
+        const res = await NevofluxPage.sendQuery('bridge:request', {
+          type: 'events.unsubscribe',
+          payload: args || {},
+        });
+        if (channelId) {
+          this._eventChannels.delete(subId);
+          await NevofluxPage.sendQuery('events:channel_close', { channelId });
+        }
+        if (res && res.success === false) {
+          throw new Error(res.error?.message || 'Bridge request failed: events.unsubscribe');
+        }
+        return res?.data !== undefined ? res.data : res;
+      }
       case 'events.publish':
       case 'events.history':
       case 'events.recover': {

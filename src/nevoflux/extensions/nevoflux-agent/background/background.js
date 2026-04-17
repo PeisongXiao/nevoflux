@@ -168,6 +168,17 @@ const eventBusSubscriptions = new Map(); // subscription_id → { source, tabId,
 const tabSubscriptions = new Map(); // tabId → Set<subscription_id>
 const pendingEventHistoryRequests = new Map(); // requestId → bridgeRequestId
 
+// Convert SDK delivery string/object to the Rust DeliveryMode JSON shape.
+//   "ephemeral" / "sticky" -> same string (unit variants)
+//   "persistent"           -> { persistent: {} } (struct variant, null ttl)
+//   { persistent: {...} }  -> passthrough
+function toEventBusDeliveryMode(d) {
+  if (d === 'ephemeral' || d === 'sticky') return d;
+  if (d === 'persistent') return { persistent: {} };
+  if (d && typeof d === 'object') return d;
+  return 'ephemeral';
+}
+
 // Canvas Tool Active Calls: call_id → { tabId, bridgeId, startTime, invocationId? }
 //   invocationId is bound on the first daemon event for FIFO matching
 //   (background.js generates call_id; daemon generates its own invocation_id;
@@ -1012,45 +1023,63 @@ class ChannelManager {
 
     // Handle EventBus delivery — route events to matching subscribers
     if (msgType === MessageTypes.EVENTS_DELIVERY) {
+      // Wire format is EventBusDelivery: { subscription_id, event: BusEventPayload }
+      // Daemon's subscription_id uses the daemon's internal id; background keeps
+      // its own local id per bridge/sidebar subscriber, so we rewrite it on push
+      // so the SDK-side handler lookup (keyed by the id returned from subscribe)
+      // matches.
       const eventPayload = message.payload;
-      const topic = eventPayload?.topic;
+      const topic = eventPayload?.event?.topic;
       console.log(`[NevoFlux] EventBus delivery: topic=${topic}`);
 
-      for (const [subId, sub] of eventBusSubscriptions) {
-        // Check if subscription patterns match the topic
-        const matches = sub.patterns.some((pattern) => {
-          if (pattern === '*' || pattern === topic) return true;
-          // Simple wildcard: "foo.*" matches "foo.bar", "foo.baz"
-          if (pattern.endsWith('.*')) {
-            const prefix = pattern.slice(0, -2);
-            return topic === prefix || topic.startsWith(prefix + '.');
-          }
-          // Double wildcard: "foo.**" matches "foo.bar.baz"
-          if (pattern.endsWith('.**')) {
-            const prefix = pattern.slice(0, -3);
-            return topic === prefix || topic.startsWith(prefix + '.');
-          }
-          return false;
-        });
+      // EventBus topics use ":" segments; match our topic-segment grammar.
+      const topicMatches = (pattern, t) => {
+        if (!t) return false;
+        if (pattern === '*' || pattern === t) return true;
+        if (pattern.endsWith(':*')) {
+          const prefix = pattern.slice(0, -2);
+          return t === prefix || t.startsWith(prefix + ':');
+        }
+        if (pattern.endsWith(':**')) {
+          const prefix = pattern.slice(0, -3);
+          return t === prefix || t.startsWith(prefix + ':');
+        }
+        // Legacy dot-segment patterns (kept for backward compat)
+        if (pattern.endsWith('.*')) {
+          const prefix = pattern.slice(0, -2);
+          return t === prefix || t.startsWith(prefix + '.');
+        }
+        if (pattern.endsWith('.**')) {
+          const prefix = pattern.slice(0, -3);
+          return t === prefix || t.startsWith(prefix + '.');
+        }
+        return false;
+      };
 
-        if (matches) {
-          if (sub.source === 'bridge') {
-            // Push to canvas iframe via bridgePush — use the subscription_id as channel
-            browser.nevoflux
-              .bridgePush(subId, {
-                type: 'events:delivery',
-                payload: eventPayload,
-              })
-              .catch((err) => {
-                console.warn(`[NevoFlux] EventBus bridgePush failed for sub ${subId}:`, err);
-              });
-          } else if (sub.source === 'sidebar') {
-            // Forward to sidebar
-            broadcastToSidebar({
-              type: MessageTypes.EVENTS_DELIVERY,
-              payload: eventPayload,
+      for (const [subId, sub] of eventBusSubscriptions) {
+        const matches = sub.patterns.some((p) => topicMatches(p, topic));
+        if (!matches) continue;
+
+        // Rewrite subscription_id to the caller-visible id so SDK handlers match.
+        const pushPayload = { ...eventPayload, subscription_id: subId };
+
+        if (sub.source === 'bridge') {
+          // sub.bridgeId is the persistent push channel (events:channel_open),
+          // not the bridge:request id — bridge:request's 5s push grace is too
+          // short for long-lived event subscribers.
+          browser.nevoflux
+            .bridgePush(sub.bridgeId, {
+              type: 'events:delivery',
+              payload: pushPayload,
+            })
+            .catch((err) => {
+              console.warn(`[NevoFlux] EventBus bridgePush failed for sub ${subId}:`, err);
             });
-          }
+        } else if (sub.source === 'sidebar') {
+          broadcastToSidebar({
+            type: MessageTypes.EVENTS_DELIVERY,
+            payload: pushPayload,
+          });
         }
       }
       // Don't fall through to sidebar broadcast — we handled routing above
@@ -1806,12 +1835,19 @@ if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onBridgeRequest)
             `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           const patterns = payload.patterns || [];
           const tabId = payload.tab_id || null;
+          const replaySticky = payload.replay_sticky !== false;
+          const bufferSize = payload.buffer_size || 256;
+          // Canvas SDK opens a persistent push channel before subscribing and
+          // passes its id here; fall back to the bridge:request id for callers
+          // that don't (whose subscription will only receive events within the
+          // 5s push-grace window).
+          const channelId = payload.channel_id || id;
 
           // Track subscription locally
           eventBusSubscriptions.set(subscriptionId, {
             source: 'bridge',
             tabId,
-            bridgeId: id, // bridge request id for future push
+            bridgeId: channelId, // persistent push channel id
             patterns,
           });
 
@@ -1823,13 +1859,14 @@ if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onBridgeRequest)
             tabSubscriptions.get(tabId).add(subscriptionId);
           }
 
-          // Forward to agent
+          // Forward to agent (EventBusRequest::Subscribe shape)
           channelManager.sendToAgent({
             type: MessageTypes.EVENTS_REQUEST,
             payload: {
               action: 'subscribe',
-              subscription_id: subscriptionId,
               patterns,
+              replay_sticky: replaySticky,
+              buffer_size: bufferSize,
             },
           });
 
@@ -1838,7 +1875,7 @@ if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onBridgeRequest)
         }
 
         case 'events.unsubscribe': {
-          const subId = payload.subscription_id;
+          const subId = payload.subscription_id || payload.subscriptionId;
           if (!subId) {
             result = { success: false, error: { code: -1, message: 'subscription_id required' } };
             break;
@@ -1876,14 +1913,14 @@ if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onBridgeRequest)
             break;
           }
 
+          // EventBusRequest::Publish(PublishOptions { topic, payload, delivery })
           channelManager.sendToAgent({
             type: MessageTypes.EVENTS_REQUEST,
             payload: {
               action: 'publish',
               topic,
-              data: payload.data || {},
-              source: payload.source || 'bridge',
-              metadata: payload.metadata || {},
+              payload: payload.data !== undefined ? payload.data : payload.payload || {},
+              delivery: toEventBusDeliveryMode(payload.delivery),
             },
           });
 
@@ -5968,6 +6005,8 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
       const subscriptionId =
         message.subscription_id ||
         `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const replaySticky = message.replay_sticky !== false;
+      const bufferSize = message.buffer_size || 256;
 
       // Track subscription locally (sidebar source)
       eventBusSubscriptions.set(subscriptionId, {
@@ -5977,13 +6016,14 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
         patterns,
       });
 
-      // Forward to agent
+      // Forward to agent (EventBusRequest::Subscribe shape)
       channelManager.sendToAgent({
         type: MessageTypes.EVENTS_REQUEST,
         payload: {
           action: 'subscribe',
-          subscription_id: subscriptionId,
           patterns,
+          replay_sticky: replaySticky,
+          buffer_size: bufferSize,
         },
       });
 
@@ -6030,14 +6070,14 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
         break;
       }
 
+      // EventBusRequest::Publish(PublishOptions { topic, payload, delivery })
       channelManager.sendToAgent({
         type: MessageTypes.EVENTS_REQUEST,
         payload: {
           action: 'publish',
           topic,
-          data: message.data || {},
-          source: message.source || 'sidebar',
-          metadata: message.metadata || {},
+          payload: message.data !== undefined ? message.data : message.payload || {},
+          delivery: toEventBusDeliveryMode(message.delivery),
         },
       });
 

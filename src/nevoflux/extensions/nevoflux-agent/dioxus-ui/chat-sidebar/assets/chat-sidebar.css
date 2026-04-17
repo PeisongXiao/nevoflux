@@ -4264,31 +4264,37 @@ body {
 }
 
 .nevo-event-toast {
-  background: var(--nevo-surface-elevated, #2a2a30);
-  border: 1px solid var(--nevo-border-color, #3a3a42);
+  background: color-mix(in srgb, var(--nevo-surface-elevated, #2a2a30) 95%, white 5%);
+  border: 1px solid var(--nevo-border-color, #4a4a54);
   border-radius: 8px;
   padding: 10px 14px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  animation: nevo-toast-in 0.2s ease-out;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: nevo-toast-in 0.25s ease-out, nevo-toast-out 0.3s ease-in 4.7s forwards;
   pointer-events: auto;
 }
 
 .nevo-event-toast-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--nevo-text-primary, #e0e0e6);
-  margin-bottom: 2px;
+  color: var(--nevo-text-primary, #f0f0f4);
+  margin-bottom: 3px;
 }
 
 .nevo-event-toast-body {
   font-size: 12px;
-  color: var(--nevo-text-secondary, #a0a0a8);
+  color: var(--nevo-text-primary, #dcdce2);
   line-height: 1.4;
+  opacity: 0.85;
 }
 
 @keyframes nevo-toast-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes nevo-toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-8px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
