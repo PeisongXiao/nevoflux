@@ -187,6 +187,10 @@ function toEventBusDeliveryMode(d) {
 const activeToolCalls = new Map();
 // Canvas Tool pending list requests: requestId → bridgeId
 const pendingToolListRequests = new Map();
+const pendingToolGetRawRequests = new Map();   // requestId → bridgeId
+const pendingToolSaveRequests = new Map();
+const pendingToolDeleteRequests = new Map();
+const pendingToolValidateRequests = new Map();
 // Canvas Share pending requests: requestId → bridgeId
 const pendingShareRequests = new Map();
 
@@ -1153,6 +1157,58 @@ class ChannelManager {
       }
     }
 
+    if (msgType === 'canvas_tool_get_raw_response') {
+      const reqId = message.payload?.request_id;
+      const bridgeId = reqId ? pendingToolGetRawRequests.get(reqId) : null;
+      if (bridgeId) {
+        pendingToolGetRawRequests.delete(reqId);
+        const p = message.payload || {};
+        browser.nevoflux
+          .bridgeRespond(bridgeId, { success: true, data: p })
+          .catch(() => {});
+      }
+      return;
+    }
+
+    if (msgType === 'canvas_tool_save_response') {
+      const reqId = message.payload?.request_id;
+      const bridgeId = reqId ? pendingToolSaveRequests.get(reqId) : null;
+      if (bridgeId) {
+        pendingToolSaveRequests.delete(reqId);
+        const p = message.payload || {};
+        browser.nevoflux
+          .bridgeRespond(bridgeId, { success: true, data: p })
+          .catch(() => {});
+      }
+      return;
+    }
+
+    if (msgType === 'canvas_tool_delete_response') {
+      const reqId = message.payload?.request_id;
+      const bridgeId = reqId ? pendingToolDeleteRequests.get(reqId) : null;
+      if (bridgeId) {
+        pendingToolDeleteRequests.delete(reqId);
+        const p = message.payload || {};
+        browser.nevoflux
+          .bridgeRespond(bridgeId, { success: true, data: p })
+          .catch(() => {});
+      }
+      return;
+    }
+
+    if (msgType === 'canvas_tool_validate_response') {
+      const reqId = message.payload?.request_id;
+      const bridgeId = reqId ? pendingToolValidateRequests.get(reqId) : null;
+      if (bridgeId) {
+        pendingToolValidateRequests.delete(reqId);
+        const p = message.payload || {};
+        browser.nevoflux
+          .bridgeRespond(bridgeId, { success: true, data: p })
+          .catch(() => {});
+      }
+      return;
+    }
+
     // Handle canvas share responses (share/import/extend/delete/list)
     const SHARE_RESPONSE_TYPES = [
       'canvas_share_response',
@@ -2016,6 +2072,66 @@ if (typeof browser.nevoflux !== 'undefined' && browser.nevoflux.onBridgeRequest)
             result = { success: false, error: { code: -1, message: err.message } };
           }
           break;
+        }
+
+        case 'canvas.tool.get_raw': {
+          try {
+            const requestId = `tgr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            pendingToolGetRawRequests.set(requestId, id);
+            channelManager.sendToAgent({
+              type: 'canvas_tool_get_raw',
+              payload: { request_id: requestId, ...(payload || {}) },
+            });
+            return;
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+            break;
+          }
+        }
+
+        case 'canvas.tool.save': {
+          try {
+            const requestId = `tsv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            pendingToolSaveRequests.set(requestId, id);
+            channelManager.sendToAgent({
+              type: 'canvas_tool_save',
+              payload: { request_id: requestId, ...(payload || {}) },
+            });
+            return;
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+            break;
+          }
+        }
+
+        case 'canvas.tool.delete': {
+          try {
+            const requestId = `tdl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            pendingToolDeleteRequests.set(requestId, id);
+            channelManager.sendToAgent({
+              type: 'canvas_tool_delete',
+              payload: { request_id: requestId, ...(payload || {}) },
+            });
+            return;
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+            break;
+          }
+        }
+
+        case 'canvas.tool.validate': {
+          try {
+            const requestId = `tvl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            pendingToolValidateRequests.set(requestId, id);
+            channelManager.sendToAgent({
+              type: 'canvas_tool_validate',
+              payload: { request_id: requestId, ...(payload || {}) },
+            });
+            return;
+          } catch (err) {
+            result = { success: false, error: { code: -1, message: err.message } };
+            break;
+          }
         }
 
         // ----- End Canvas Tool bridge requests -----
