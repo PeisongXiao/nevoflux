@@ -1200,11 +1200,7 @@ class ChannelManager {
     if (routeCanvasToolResponse('canvas_tool_validate_response', pendingToolValidateRequests)) return;
 
     if (routeCanvasToolResponse('canvas_persist_list_response', pendingPersistListRequests)) return;
-    if (routeCanvasToolResponse('canvas_persist_save_response', pendingPersistSaveRequests)) return;
-    if (routeCanvasToolResponse('canvas_persist_rename_response', pendingPersistRenameRequests)) return;
-    if (routeCanvasToolResponse('canvas_persist_delete_response', pendingPersistDeleteRequests)) return;
-
-    // Route canvas_persist_save_response back to sidebar (bg:canvas_persist_save callers).
+    // Route canvas_persist_save_response back to sidebar (bg:canvas_persist_save callers) BEFORE bridge router.
     if (message.type === 'canvas_persist_save_response') {
       const reqId = message.payload?.request_id;
       let entry = reqId ? sidebarPersistSaveRequests.get(reqId) : null;
@@ -1225,7 +1221,11 @@ class ChannelManager {
         entry.sendResponse(message.payload || { success: false });
         return;
       }
+      // not ours — fall through to bridge router below
     }
+    if (routeCanvasToolResponse('canvas_persist_save_response', pendingPersistSaveRequests)) return;
+    if (routeCanvasToolResponse('canvas_persist_rename_response', pendingPersistRenameRequests)) return;
+    if (routeCanvasToolResponse('canvas_persist_delete_response', pendingPersistDeleteRequests)) return;
 
     // Handle canvas share responses (share/import/extend/delete/list)
     const SHARE_RESPONSE_TYPES = [
@@ -6310,7 +6310,7 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
       // Uses sidebarPersistSaveRequests (separate from bridge pendingPersistSaveRequests)
       // so both paths can co-exist without interfering.
       try {
-        const requestId = `psv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const requestId = `spsv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const sidebarTimeout = setTimeout(() => {
           sidebarPersistSaveRequests.delete(requestId);
           sendResponse({ success: false, error: { code: 'timeout', message: 'canvas.persist.save timed out' } });
