@@ -1228,7 +1228,10 @@
       position: relative;
       width: min(720px, 92vw);
       max-height: 88vh;
-      background: var(--zen-branding-bg);
+      /* Use an opaque system background; --zen-branding-bg is translucent
+         in many Zen themes and would let the page show through. */
+      background: var(--in-content-box-background, Canvas);
+      color: var(--in-content-page-color, CanvasText);
       border: 1px solid var(--zen-colors-border);
       border-radius: var(--zen-border-radius, 10px);
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
