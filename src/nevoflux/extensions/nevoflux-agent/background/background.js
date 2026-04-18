@@ -67,6 +67,9 @@ const BackgroundAPI = {
   // System commands (sidebar → agent with async response)
   SYSTEM_COMMAND: 'bg:system_command',
 
+  // Canvas persist save (sidebar pin-to-My-Canvas action)
+  CANVAS_PERSIST_SAVE: 'bg:canvas_persist_save',
+
   // EventBus (sidebar → background → agent)
   EVENTS_SUBSCRIBE: 'bg:events_subscribe',
   EVENTS_UNSUBSCRIBE: 'bg:events_unsubscribe',
@@ -196,6 +199,8 @@ const pendingPersistListRequests = new Map();
 const pendingPersistSaveRequests = new Map();
 const pendingPersistRenameRequests = new Map();
 const pendingPersistDeleteRequests = new Map();
+// Sidebar-origin persist save requests: requestId → { sendResponse, timeout }
+const sidebarPersistSaveRequests = new Map();
 // Canvas Share pending requests: requestId → bridgeId
 const pendingShareRequests = new Map();
 
@@ -1198,6 +1203,29 @@ class ChannelManager {
     if (routeCanvasToolResponse('canvas_persist_save_response', pendingPersistSaveRequests)) return;
     if (routeCanvasToolResponse('canvas_persist_rename_response', pendingPersistRenameRequests)) return;
     if (routeCanvasToolResponse('canvas_persist_delete_response', pendingPersistDeleteRequests)) return;
+
+    // Route canvas_persist_save_response back to sidebar (bg:canvas_persist_save callers).
+    if (message.type === 'canvas_persist_save_response') {
+      const reqId = message.payload?.request_id;
+      let entry = reqId ? sidebarPersistSaveRequests.get(reqId) : null;
+      if (!entry) {
+        // Fall back to the oldest pending sidebar request (matches bridge fallback pattern).
+        const next = sidebarPersistSaveRequests.entries().next();
+        if (!next.done) {
+          const [key, val] = next.value;
+          reqId && sidebarPersistSaveRequests.delete(reqId);
+          sidebarPersistSaveRequests.delete(key);
+          entry = val;
+        }
+      } else {
+        sidebarPersistSaveRequests.delete(reqId);
+      }
+      if (entry) {
+        clearTimeout(entry.timeout);
+        entry.sendResponse(message.payload || { success: false });
+        return;
+      }
+    }
 
     // Handle canvas share responses (share/import/extend/delete/list)
     const SHARE_RESPONSE_TYPES = [
@@ -6274,6 +6302,27 @@ function handleBackgroundAPI(apiType, message, sendResponse) {
         payload: { command, request_id: requestId, params: params || {} },
       });
 
+      return true; // Keep sendResponse channel open for async response
+    }
+
+    case BackgroundAPI.CANVAS_PERSIST_SAVE: {
+      // Sidebar pin-to-My-Canvas: forward canvas.persist.save to the agent.
+      // Uses sidebarPersistSaveRequests (separate from bridge pendingPersistSaveRequests)
+      // so both paths can co-exist without interfering.
+      try {
+        const requestId = `psv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const sidebarTimeout = setTimeout(() => {
+          sidebarPersistSaveRequests.delete(requestId);
+          sendResponse({ success: false, error: { code: 'timeout', message: 'canvas.persist.save timed out' } });
+        }, 15000);
+        sidebarPersistSaveRequests.set(requestId, { sendResponse, timeout: sidebarTimeout });
+        channelManager.sendToAgent({
+          type: 'canvas_persist_save',
+          payload: { request_id: requestId, ...(message.payload || {}) },
+        });
+      } catch (err) {
+        sendResponse({ success: false, error: { code: -1, message: err.message } });
+      }
       return true; // Keep sendResponse channel open for async response
     }
 
