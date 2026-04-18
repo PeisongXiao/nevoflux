@@ -37,6 +37,8 @@ pub use chat::{
     BrowserToolRequestPayload,
     // Plan proposal/response
     PlanStep, PlanProposalPayload, PlanResponse, PlanResponsePayload,
+    // Artifact wire types
+    Artifact, ArtifactStart, ArtifactDelta, ArtifactComplete,
     // Tool events & authorization
     ToolEvent, ToolEventStatus, ToolAuthRequest, AuthOption, AuthScope,
     ToolAuthResponsePayload, ThinkingEvent,
