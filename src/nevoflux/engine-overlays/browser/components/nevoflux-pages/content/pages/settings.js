@@ -2614,8 +2614,7 @@ const Settings = {
     renameBtn.className = 'mc-rename';
     renameBtn.textContent = 'Rename';
     renameBtn.addEventListener('click', () => {
-      // Stub for Task 19.
-      console.log('rename not yet implemented', item.id);
+      this._beginRename(row, item);
     });
     actions.appendChild(renameBtn);
 
@@ -2624,8 +2623,7 @@ const Settings = {
     deleteBtn.className = 'mc-delete mc-delete--danger';
     deleteBtn.textContent = 'Delete';
     deleteBtn.addEventListener('click', () => {
-      // Stub for Task 20.
-      console.log('delete not yet implemented', item.id);
+      this._confirmDelete(item);
     });
     actions.appendChild(deleteBtn);
 
@@ -2635,6 +2633,73 @@ const Settings = {
 
   _openMyCanvasTab(canvasId) {
     window.open(`nevoflux://canvas/${canvasId}`, '_blank');
+  },
+
+  _beginRename(row, item) {
+    const titleEl = row.querySelector('.my-canvas-row-title');
+    if (!titleEl) return;
+    const current = item.title || '';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'mc-rename-input';
+    input.value = current;
+    titleEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let committed = false;
+    const commit = async () => {
+      if (committed) return;
+      committed = true;
+      const next = input.value.trim();
+      if (!next || next === current) {
+        // Unchanged or empty — just refresh to restore the span.
+        this._loadMyCanvas();
+        return;
+      }
+      const resp = await NevofluxPage.sendQuery('bridge:request', {
+        type: 'canvas.persist.rename',
+        payload: { canvas_id: item.id, new_title: next },
+      });
+      const data = this._unwrapMyCanvasResponse(resp);
+      if (!data || data.success === false) {
+        const msg = data && data.error && data.error.message ? data.error.message : 'Rename failed';
+        window.alert(msg);
+      }
+      this._loadMyCanvas();
+    };
+    const cancel = () => {
+      if (committed) return;
+      committed = true;
+      this._loadMyCanvas();
+    };
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
+  },
+
+  async _confirmDelete(item) {
+    const title = item.title || 'Untitled';
+    const ok = window.confirm(
+      `Delete "${title}" from My Canvas?\n\nThis cannot be undone.`
+    );
+    if (!ok) return;
+
+    const resp = await NevofluxPage.sendQuery('bridge:request', {
+      type: 'canvas.persist.delete',
+      payload: { canvas_id: item.id },
+    });
+    const data = this._unwrapMyCanvasResponse(resp);
+    if (!data || data.success === false) {
+      const msg = data && data.error && data.error.message ? data.error.message : 'Delete failed';
+      window.alert(msg);
+      return;
+    }
+    this._loadMyCanvas();
   },
 
   _bindMyCanvasControls() {
