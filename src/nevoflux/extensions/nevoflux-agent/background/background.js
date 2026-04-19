@@ -4,6 +4,14 @@
 
 'use strict';
 
+import {
+  handleOpen as canvasVideoHandleOpen,
+  handleLoad as canvasVideoHandleLoad,
+  handleSeek as canvasVideoHandleSeek,
+  handleClose as canvasVideoHandleClose,
+  installRuntimeListener as canvasVideoInstallListener,
+} from './canvas-video-handlers.js';
+
 // Immediate debug log to verify script is loading
 console.log('[NevoFlux] Background script starting...');
 
@@ -880,7 +888,7 @@ class ChannelManager {
    * Artifact messages are intercepted and stored via ContentStore.
    * All messages are also broadcast to Sidebar.
    */
-  handleChatMessage(message) {
+  async handleChatMessage(message) {
     console.log('[NevoFlux] Chat channel received:', message.type);
 
     const msgType = message.type;
@@ -1249,6 +1257,20 @@ class ChannelManager {
       }
     }
 
+    // --- canvas.video.* push routing ---
+    if (msgType === 'canvas_video_open') {
+      return await canvasVideoHandleOpen(message.payload);
+    }
+    if (msgType === 'canvas_video_load') {
+      return await canvasVideoHandleLoad(message.payload);
+    }
+    if (msgType === 'canvas_video_seek') {
+      return await canvasVideoHandleSeek(message.payload);
+    }
+    if (msgType === 'canvas_video_close') {
+      return await canvasVideoHandleClose(message.payload);
+    }
+
     // Daemon error responses: when a canvas_share/import/extend/delete fails,
     // the daemon emits a generic { type: "error", payload: { code, message } }
     // (server.rs:1708). Without explicit handling this would silently sit until
@@ -1452,6 +1474,7 @@ class ChannelManager {
 // =============================================================================
 
 const channelManager = new ChannelManager();
+canvasVideoInstallListener((m) => channelManager.sendToAgent(m));
 
 // =============================================================================
 // Sidebar Communication
