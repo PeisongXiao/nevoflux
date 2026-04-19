@@ -2463,10 +2463,19 @@ const Settings = {
 
     const typeFilter = document.createElement('select');
     typeFilter.id = 'my-canvas-type-filter';
-    const typeAll = document.createElement('option');
-    typeAll.value = '';
-    typeAll.textContent = 'All types';
-    typeFilter.appendChild(typeAll);
+    [
+      ['', 'All types'],
+      ['text/html', 'HTML'],
+      ['text/markdown', 'Markdown'],
+      ['image/svg+xml', 'SVG'],
+      ['application/json', 'JSON'],
+      ['project', 'Project'],
+    ].forEach(([val, label]) => {
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = label;
+      typeFilter.appendChild(opt);
+    });
     toolbar.appendChild(typeFilter);
 
     const sourceFilter = document.createElement('select');
