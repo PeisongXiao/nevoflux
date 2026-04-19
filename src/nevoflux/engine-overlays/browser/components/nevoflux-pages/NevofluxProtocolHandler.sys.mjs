@@ -14,6 +14,7 @@ const BUILTIN_ROUTES = {
   import: 'chrome://nevoflux/content/pages/canvas.html',
   history: 'chrome://nevoflux/content/pages/history.html',
   plan: 'chrome://nevoflux/content/pages/plan.html',
+  render: 'chrome://nevoflux/content/pages/render.html',
 };
 
 /**
