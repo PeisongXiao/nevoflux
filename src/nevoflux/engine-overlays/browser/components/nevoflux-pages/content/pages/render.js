@@ -2,7 +2,7 @@
 // same-origin iframe with determinism patches, then listens for
 // seek commands from the daemon (via extension's bridge push).
 
-import { installPatches, setRenderTime } from './render-patches.js';
+import { installPatches, setRenderTime } from 'chrome://nevoflux/content/pages/render-patches.js';
 
 const CHUNK_SIZE = 1024 * 1024; // 1 MB PNG chunks
 
