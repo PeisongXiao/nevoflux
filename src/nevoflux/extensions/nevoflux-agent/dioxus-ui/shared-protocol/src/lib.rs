@@ -16,6 +16,7 @@ pub mod common;
 pub mod chat;
 pub mod mcp;
 pub mod events;
+pub mod canvas_video;
 
 // Re-export common types
 pub use common::*;
