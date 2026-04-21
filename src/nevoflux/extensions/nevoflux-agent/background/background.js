@@ -612,6 +612,14 @@ class NativeChannel {
 
       console.log(`[NevoFlux] ${this.displayName} channel connected`);
 
+      // Replay any EventBus subscriptions cached from prior connections.
+      // Daemon cleans up subscriptions on proxy disconnect, so we must
+      // re-send them or downstream subscribers (sidebar, bridge) stop
+      // receiving events. Only the Chat channel carries EventBus traffic.
+      if (this.name === CHANNEL_NAMES.CHAT) {
+        this.replaySubscriptions();
+      }
+
       if (this.onStatusChange) {
         this.onStatusChange(true, null);
       }
@@ -745,6 +753,35 @@ class NativeChannel {
     } catch (error) {
       console.error(`[NevoFlux] Failed to send to ${this.displayName}:`, error);
       return false;
+    }
+  }
+
+  /**
+   * Replay all tracked EventBus subscriptions to the daemon. Called after a
+   * successful (re)connect so that subscriptions survive proxy-disconnect
+   * cleanup. The daemon assigns new subscription_ids on replay, but our
+   * incoming-delivery router matches by pattern (see handleChatMessage's
+   * EVENTS_DELIVERY branch), so the locally-tracked subId stays stable and
+   * handlers don't need to change.
+   */
+  replaySubscriptions() {
+    if (!eventBusSubscriptions.size) return;
+    let n = 0;
+    for (const [, sub] of eventBusSubscriptions) {
+      if (!sub.patterns || sub.patterns.length === 0) continue;
+      this.send({
+        type: MessageTypes.EVENTS_REQUEST,
+        payload: {
+          action: 'subscribe',
+          patterns: sub.patterns,
+          replay_sticky: true,
+          buffer_size: 256,
+        },
+      });
+      n++;
+    }
+    if (n > 0) {
+      console.log(`[NevoFlux] Replayed ${n} EventBus subscriptions after (re)connect`);
     }
   }
 
