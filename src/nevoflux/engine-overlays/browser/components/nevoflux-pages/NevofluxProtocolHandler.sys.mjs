@@ -87,7 +87,27 @@ export class NevofluxProtocolHandler {
         }
         break;
 
+      case 'render':
+        // nevoflux://render/{job_id}/{composition_id?}
+        // -> render.html?job_id={job_id}&composition_id={composition_id}
+        if (pathSegments[0]) {
+          params.set('job_id', pathSegments[0]);
+        }
+        if (pathSegments[1]) {
+          params.set('composition_id', pathSegments[1]);
+        }
+        break;
+
       // home, history: no special params
+    }
+
+    // Preserve any explicit ?key=value the caller passed in — protocol-handler
+    // path mappings take precedence, but extra params (e.g. debug flags) are
+    // forwarded. Path-mapped keys win on collision.
+    for (const [k, v] of parsedURL.searchParams) {
+      if (!params.has(k)) {
+        params.set(k, v);
+      }
     }
 
     const queryString = params.toString();

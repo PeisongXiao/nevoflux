@@ -6,15 +6,36 @@
 // iframe, and forwards PNG bytes back to the daemon in 1 MB chunks.
 
 import {
-  installPatches,
+  withPatches,
   setRenderTime,
 } from 'chrome://nevoflux/content/pages/render-patches.js';
 
 const CHUNK_SIZE = 1024 * 1024; // 1 MB PNG chunks
 
-const params = new URLSearchParams(window.location.search);
-const jobId = params.get('job_id') || '';
-const compositionId = params.get('composition_id') || '';
+// window.location keeps the original nevoflux:// URL (because the protocol
+// handler sets channel.originalURI); query strings on non-http schemes are
+// unreliable, so we parse job_id / composition_id from the pathname exactly
+// like other NevoFlux pages do. Query string is used only as a fallback when
+// the page is loaded directly from its resolved chrome:// URL.
+function parseRenderParams() {
+  const loc = window.location;
+  if (loc.search) {
+    const q = new URLSearchParams(loc.search);
+    const j = q.get('job_id');
+    const c = q.get('composition_id');
+    if (j) return { jobId: j, compositionId: c || '' };
+  }
+  if (loc.protocol === 'nevoflux:') {
+    const segments = loc.pathname.replace(/^\/+/, '').split('/').filter(Boolean);
+    return {
+      jobId: segments[0] || '',
+      compositionId: segments[1] || '',
+    };
+  }
+  return { jobId: '', compositionId: '' };
+}
+
+const { jobId, compositionId } = parseRenderParams();
 
 const statusEl = document.getElementById('status');
 const iframe = document.getElementById('composition-iframe');
@@ -41,65 +62,36 @@ async function loadComposition(htmlText, widthPx, heightPx) {
   const loaded = new Promise((resolve) => {
     iframe.addEventListener('load', () => resolve(), { once: true });
   });
-  iframe.srcdoc = htmlText;
+  // Inject determinism patches as the first <script> inside the iframe's own
+  // document. Reaching into iframe.contentWindow from chrome code is blocked
+  // by the same-origin policy (srcdoc iframes run in a null-principal origin),
+  // so we pre-process the HTML instead.
+  iframe.srcdoc = withPatches(htmlText);
   await loaded;
 
-  // Install determinism patches immediately after load, before any user rAF.
-  installPatches(iframe.contentWindow);
-
-  // Wait for web fonts + any composition-declared readiness signals.
-  if (iframe.contentWindow.document.fonts) {
-    await iframe.contentWindow.document.fonts.ready;
-  }
-  const readyPromises = iframe.contentWindow.__readyPromises || [];
-  await Promise.all(readyPromises);
-
-  // Pause all timelines — compositions should declare them paused but enforce.
-  for (const tl of iframe.contentWindow.__timelines || []) {
-    if (typeof tl.pause === 'function') tl.pause();
-  }
+  // Give the iframe one rAF so its DOMContentLoaded handlers + any user
+  // bootstrap run. The composition itself is responsible for declaring
+  // timelines/GSAP tickers as paused in the patches script (which we inject).
+  await new Promise((r) => window.requestAnimationFrame(r));
+  await new Promise((r) => window.requestAnimationFrame(r));
 }
 
 async function seekFrame(t) {
+  // All per-frame orchestration inside the iframe (timelines, Three.js
+  // renderers, <video>/<audio> seeking) is driven from inside the iframe's
+  // own context — compositions hook this via the __nf_seek message below.
+  // The parent chrome page can't access iframe globals directly because of
+  // the null-principal cross-origin boundary.
   setRenderTime(iframe.contentWindow, t);
-
-  for (const tl of iframe.contentWindow.__timelines || []) {
-    if (typeof tl.seek === 'function') tl.seek(t);
-  }
-
-  for (const r of iframe.contentWindow.__threeRenderers || []) {
-    if (r && r.renderer && r.scene && r.camera) {
-      r.renderer.render(r.scene, r.camera);
-    }
-  }
-
-  // Seek <video>/<audio> (v1 allows at most one of each).
-  const medias = iframe.contentWindow.document.querySelectorAll('video, audio');
-  await Promise.all(
-    [...medias].map(
-      (m) =>
-        new Promise((res) => {
-          if (Math.abs(m.currentTime - t) < 0.001) {
-            res();
-            return;
-          }
-          const timeout = setTimeout(res, 1000);
-          m.addEventListener(
-            'seeked',
-            () => {
-              clearTimeout(timeout);
-              res();
-            },
-            { once: true }
-          );
-          m.currentTime = t;
-        })
-    )
+  iframe.contentWindow.postMessage(
+    { __nf_type: 'seek', seconds: t },
+    '*'
   );
 
-  // Double RAF so layout + paint settle before drawSnapshot.
-  await new Promise((r) => iframe.contentWindow.requestAnimationFrame(r));
-  await new Promise((r) => iframe.contentWindow.requestAnimationFrame(r));
+  // Double RAF in the parent page is enough for the compositor to pick up
+  // whatever the iframe rendered in response to the messages above.
+  await new Promise((r) => window.requestAnimationFrame(r));
+  await new Promise((r) => window.requestAnimationFrame(r));
 }
 
 async function forwardPng(frameIdx, pngBytes) {
@@ -141,6 +133,17 @@ async function runRenderLoop() {
   const totalFrames = Math.ceil(comp.duration_sec * comp.fps);
   setStatus(`rendering ${totalFrames} frames`);
 
+  // PoC gate telemetry: track drawSnapshot ms reported by the actor so the
+  // operator can read the median off this tab's console and fill the §4.6
+  // table. Kept in-page because drawMs originates in the parent actor and
+  // isn't currently plumbed back to the daemon.
+  const drawMsSamples = [];
+  const medianOf = (xs) => {
+    if (!xs.length) return NaN;
+    const sorted = xs.slice().sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+
   for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
     const t = frameIdx / comp.fps;
     await seekFrame(t);
@@ -151,12 +154,27 @@ async function runRenderLoop() {
         `drawFrame failed at frame ${frameIdx}: ${res?.error || 'unknown'}`
       );
     }
+    if (typeof res.drawMs === 'number') {
+      drawMsSamples.push(res.drawMs);
+    }
     await forwardPng(frameIdx, res.bytes);
 
     if (frameIdx % 10 === 0 || frameIdx === totalFrames - 1) {
       setStatus(`rendered ${frameIdx + 1}/${totalFrames}`);
+      const median = medianOf(drawMsSamples).toFixed(1);
+      console.log(
+        `[nevoflux.render] job=${jobId} frame=${frameIdx + 1}/${totalFrames} ` +
+          `drawMs median=${median} n=${drawMsSamples.length} ` +
+          `size=${comp.width}x${comp.height}`
+      );
     }
   }
+
+  const finalMedian = medianOf(drawMsSamples).toFixed(1);
+  console.log(
+    `[nevoflux.render] POC GATE drawSnapshot median=${finalMedian}ms ` +
+      `n=${drawMsSamples.length} at ${comp.width}x${comp.height}`
+  );
 
   setStatus(`reporting done (${totalFrames} frames)`);
   await bridge().reportDone(jobId, totalFrames);
