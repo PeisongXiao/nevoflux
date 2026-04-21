@@ -4336,3 +4336,92 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .artifact-pin-btn { transition: none; }
 }
+
+/* ============================================================
+   Render Progress Card (video skill P2)
+   ============================================================ */
+.render-progress-card {
+  margin: var(--nevo-space-sm) 0;
+  padding: var(--nevo-space-md);
+  border: 1px solid var(--nevo-border);
+  border-left: 3px solid var(--nevo-primary);
+  border-radius: var(--nevo-radius-md);
+  background: var(--nevo-surface);
+  font-size: var(--nevo-font-size-sm);
+}
+.render-progress-card.state-succeeded {
+  border-left-color: var(--nevo-success, #2f9e44);
+}
+.render-progress-card.state-failed {
+  border-left-color: var(--nevo-error, #e03131);
+}
+.render-progress-card.state-cancelled {
+  border-left-color: var(--nevo-text-muted, #868e96);
+  opacity: 0.8;
+}
+.render-progress-card.state-stalled {
+  border-left-color: var(--nevo-warning, #e67700);
+}
+.render-progress-card .card-title {
+  font-weight: 500;
+  margin-bottom: var(--nevo-space-sm);
+  color: var(--nevo-text);
+}
+.render-progress-card .progress-track {
+  height: 6px;
+  background: var(--nevo-surface-active, #d1d5db);
+  border-radius: var(--nevo-radius-full);
+  overflow: hidden;
+  margin: var(--nevo-space-xs) 0;
+}
+.render-progress-card .progress-fill {
+  height: 100%;
+  background: var(--nevo-primary);
+  transition: width 0.12s ease-out;
+}
+.render-progress-card .counter {
+  color: var(--nevo-text-secondary, inherit);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--nevo-font-size-sm);
+}
+.render-progress-card .card-actions {
+  margin-top: var(--nevo-space-sm);
+  display: flex;
+  justify-content: flex-end;
+}
+.render-progress-card .cancel-btn {
+  background: transparent;
+  border: 1px solid var(--nevo-border);
+  color: var(--nevo-text);
+  padding: var(--nevo-space-xs) var(--nevo-space-sm);
+  border-radius: var(--nevo-radius-sm);
+  cursor: pointer;
+  font-size: var(--nevo-font-size-sm);
+  transition: background-color var(--nevo-transition-fast, 0.1s ease);
+}
+.render-progress-card .cancel-btn:hover {
+  background: var(--nevo-surface-hover);
+}
+.render-progress-card .terminal-line {
+  font-family: var(--nevo-font-mono, monospace);
+  word-break: break-all;
+  padding: var(--nevo-space-xs) 0;
+}
+.render-progress-card .terminal-line.failed {
+  color: var(--nevo-error, #c92a2a);
+}
+.render-progress-card .terminal-line.cancelled {
+  color: var(--nevo-text-secondary, #495057);
+}
+.render-progress-card .path-display {
+  user-select: all;
+  font-family: var(--nevo-font-mono, monospace);
+  background: var(--nevo-code-bg, transparent);
+  color: var(--nevo-code-text, inherit);
+  padding: 2px 4px;
+  border-radius: var(--nevo-radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .render-progress-card .progress-fill { transition: none; }
+}
