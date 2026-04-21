@@ -205,6 +205,9 @@ const sidebarPersistSaveRequests = new Map();
 const pendingShareRequests = new Map();
 // Canvas Video composition fetch: requestId → bridgeId
 const pendingGetCompositionRequests = new Map();
+// Canvas Video render tabs we've already opened for a given job_id, used to
+// dedup canvas_video_open_render_tab broadcasts across retries / reconnects.
+const _openedRenderTabs = new Set();
 
 // Note: as of protocol alignment (Plan B), the daemon now echoes our `call_id`
 // in events and uses `event_type` discriminator with stdout/stderr/progress/
@@ -1203,6 +1206,24 @@ class ChannelManager {
 
     if (routeCanvasToolResponse('canvas_video_get_composition_response', pendingGetCompositionRequests)) return;
 
+    // Daemon broadcasts this after a successful canvas_video_render_start.
+    // We respond by opening the render page for that job. Dedup by job_id so
+    // repeated broadcasts (or multiple extension proxies on the same job)
+    // don't spawn duplicate tabs.
+    if (message.type === 'canvas_video_open_render_tab') {
+      const jobId = message.payload?.job_id;
+      if (jobId && !_openedRenderTabs.has(jobId)) {
+        _openedRenderTabs.add(jobId);
+        browser.tabs
+          .create({ url: `nevoflux://render/${jobId}`, active: false })
+          .catch((e) => {
+            console.error('[NevoFlux] canvas_video_open_render_tab failed:', e);
+            _openedRenderTabs.delete(jobId);
+          });
+      }
+      return;
+    }
+
     if (routeCanvasToolResponse('canvas_persist_list_response', pendingPersistListRequests)) return;
     // Route canvas_persist_save_response back to sidebar (bg:canvas_persist_save callers) BEFORE bridge router.
     if (message.type === 'canvas_persist_save_response') {
@@ -1271,6 +1292,28 @@ class ChannelManager {
           })
           .catch(() => {});
         pendingShareRequests.delete(requestId);
+        break;
+      }
+      return;
+    }
+
+    // Same pattern for canvas_video_get_composition errors. Daemon returns
+    // { type: "error", payload: { code: "CANVAS_VIDEO_ERROR", message } }
+    // when the job isn't found, which would otherwise leave the page's
+    // bridge:request hanging until the 30s timeout.
+    if (msgType === 'error' && pendingGetCompositionRequests.size > 0) {
+      for (const [requestId, bridgeId] of pendingGetCompositionRequests) {
+        const errPayload = message.payload || {};
+        browser.nevoflux
+          .bridgeRespond(bridgeId, {
+            success: false,
+            error: {
+              code: errPayload.code || 'AGENT_ERROR',
+              message: errPayload.message || 'Agent returned an error',
+            },
+          })
+          .catch(() => {});
+        pendingGetCompositionRequests.delete(requestId);
         break;
       }
       return;
@@ -6463,3 +6506,8 @@ browser.tabs.onCreated.addListener((tab) => {
 console.log('[NevoFlux] Background script initialized (Protocol v5.0 - 2-channel architecture)');
 console.log('[NevoFlux] Channels: Chat (com.nevoflux.agent), MCP (com.nevoflux.agent.mcp)');
 console.log('[NevoFlux] API namespace: bg:*');
+
+// Debug handle — lets the devtools console drive native-message smoke tests
+// (e.g. canvas_video render PoC) without having to unwind ES module scope.
+// Safe to keep shipping; it's an inert reference, not an API surface.
+globalThis.__nf_cm = channelManager;
