@@ -1,0 +1,134 @@
+// Determinism patches for the composition iframe.
+//
+// Spec: docs/superpowers/specs/2026-04-19-video-skill-design.md §4.2
+//
+// The patches must run INSIDE the iframe's own JS context — the render page is
+// chrome-privileged but the composition iframe (srcdoc) is a null-principal
+// document, which blocks any cross-origin property write from the parent
+// window. So instead of calling functions that reach into contentWindow, we
+// export the patch body as a string and prepend it to the composition HTML
+// as an inline <script>. Runtime control (setRenderTime) flows via
+// postMessage.
+
+/**
+ * JavaScript source embedded as the first <script> inside the composition
+ * iframe. Installs determinism patches on that iframe's own globals.
+ */
+export const PATCHES_SOURCE = `
+(function () {
+  // Mulberry32 seeded PRNG for Math.random.
+  var _prngS = 42 | 0;
+  Math.random = function () {
+    _prngS |= 0;
+    _prngS = (_prngS + 0x6D2B79F5) | 0;
+    var t = Math.imul(_prngS ^ (_prngS >>> 15), 1 | _prngS);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  // Timeline-driven Date.now / performance.now.
+  var BASE_WALL_CLOCK = 1700000000000;
+  window.__hfRenderTime = 0; // seconds
+  var origDate = Date;
+  var PatchedDate = function () {
+    if (arguments.length === 0) {
+      return new origDate(BASE_WALL_CLOCK + window.__hfRenderTime * 1000);
+    }
+    return new (Function.prototype.bind.apply(origDate, [null].concat(Array.prototype.slice.call(arguments))))();
+  };
+  PatchedDate.now = function () { return BASE_WALL_CLOCK + window.__hfRenderTime * 1000; };
+  PatchedDate.parse = origDate.parse;
+  PatchedDate.UTC = origDate.UTC;
+  PatchedDate.prototype = origDate.prototype;
+  // eslint-disable-next-line no-global-assign
+  Date = PatchedDate;
+  performance.now = function () { return window.__hfRenderTime * 1000; };
+
+  // Fetch whitelist.
+  var origFetch = window.fetch.bind(window);
+  window.fetch = function (url, opts) {
+    var u = typeof url === 'string' ? url : (url && url.url) || '';
+    if (u.startsWith('assets/') || u.startsWith('./assets/')) return origFetch(url, opts);
+    if (u.startsWith('https://esm.sh/')) return origFetch(url, opts);
+    return Promise.reject(new Error('fetch blocked in render: ' + u));
+  };
+
+  // GSAP ticker freeze after load (if composition uses GSAP).
+  window.addEventListener('DOMContentLoaded', function () {
+    if (window.gsap && window.gsap.ticker) {
+      window.gsap.ticker.sleep();
+      window.gsap.ticker.lagSmoothing(0);
+    }
+  });
+
+  // crypto.getRandomValues + crypto.randomUUID (deterministic via patched Math.random).
+  if (window.crypto) {
+    window.crypto.getRandomValues = function (array) {
+      for (var i = 0; i < array.length; i++) array[i] = Math.floor(Math.random() * 256);
+      return array;
+    };
+    window.crypto.randomUUID = function () {
+      var hex = function () { return Math.floor(Math.random() * 16).toString(16); };
+      var s = function (n) { var out = ''; for (var i = 0; i < n; i++) out += hex(); return out; };
+      var variantDigit = (8 + Math.floor(Math.random() * 4)).toString(16);
+      return s(8) + '-' + s(4) + '-4' + s(3) + '-' + variantDigit + s(3) + '-' + s(12);
+    };
+  }
+
+  // postMessage-driven render-time clock updates.
+  window.addEventListener('message', function (evt) {
+    var d = evt.data;
+    if (d && d.__nf_type === 'setRenderTime' && typeof d.seconds === 'number') {
+      window.__hfRenderTime = d.seconds;
+    }
+  });
+})();
+`;
+
+/**
+ * Wrap the composition's HTML by injecting the patches <script> as the very
+ * first executable element inside <head>. If the HTML has no <head> we wrap
+ * it in a minimal document so the patches still run first.
+ */
+export function withPatches(compositionHtml) {
+  const patchTag =
+    '<script>' + PATCHES_SOURCE + '</script>';
+
+  const headMatch = compositionHtml.match(/<head[^>]*>/i);
+  if (headMatch) {
+    const insertAt = headMatch.index + headMatch[0].length;
+    return (
+      compositionHtml.slice(0, insertAt) +
+      patchTag +
+      compositionHtml.slice(insertAt)
+    );
+  }
+
+  const htmlMatch = compositionHtml.match(/<html[^>]*>/i);
+  if (htmlMatch) {
+    const insertAt = htmlMatch.index + htmlMatch[0].length;
+    return (
+      compositionHtml.slice(0, insertAt) +
+      '<head>' +
+      patchTag +
+      '</head>' +
+      compositionHtml.slice(insertAt)
+    );
+  }
+
+  return (
+    '<!doctype html><html><head>' +
+    patchTag +
+    '</head><body>' +
+    compositionHtml +
+    '</body></html>'
+  );
+}
+
+/**
+ * Advance the render-time clock in the composition iframe.
+ * Uses postMessage because the iframe lives in a null-principal origin.
+ */
+export function setRenderTime(iframeWindow, seconds) {
+  iframeWindow.postMessage({ __nf_type: 'setRenderTime', seconds }, '*');
+}
