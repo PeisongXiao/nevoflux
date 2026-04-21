@@ -17,6 +17,8 @@ pub mod chat;
 pub mod mcp;
 pub mod events;
 pub mod canvas_video;
+pub mod render_progress;
+pub use render_progress::{RenderJobState, RenderProgressEvent};
 
 // Re-export common types
 pub use common::*;

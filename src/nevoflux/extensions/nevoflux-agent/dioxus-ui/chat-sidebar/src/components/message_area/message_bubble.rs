@@ -6,6 +6,7 @@
 
 use dioxus::prelude::*;
 use crate::context::use_app_context;
+use crate::components::RenderProgressCard;
 use crate::state::{Message, MessageContent, MessageRole, MessageStatus};
 use super::{ActivityFeed, DoneFeed, CodeBlock, ErrorCard, copy_text_fallback};
 
@@ -19,6 +20,25 @@ pub fn MessageBubble(
     let is_user = message.role == MessageRole::User;
     let role_class = if is_user { "user" } else { "assistant" };
     let mut is_editing = use_signal(|| false);
+    let ctx = use_app_context();
+
+    // Collect job_ids bound to this message so each bound
+    // `canvas_render_video` tool_use gets a `RenderProgressCard` below the
+    // bubble. Bindings are populated by `handle_render_progress_delivery`
+    // when a job_id first appears on the `jobs:render:*` EventBus channel,
+    // so a card only appears once progress begins streaming.
+    let render_job_ids: Vec<String> = {
+        let has_canvas_tool = message
+            .tool_calls
+            .iter()
+            .any(|tc| tc.name == "canvas_render_video");
+        if !has_canvas_tool {
+            Vec::new()
+        } else {
+            let map = ctx.message_render_job_ids.read();
+            map.get(&message.id).cloned().unwrap_or_default()
+        }
+    };
 
     // Debug: log attachment count
     tracing::info!("MessageBubble render: role={:?}, attachments={}", message.role, message.attachments.len());
@@ -163,6 +183,19 @@ pub fn MessageBubble(
                                 ActivityFeed { tool_calls: message.tool_calls.clone() }
                             } else if !is_user && message.is_live {
                                 DoneFeed {}
+                            }
+                        }
+                    }
+
+                    // Render progress cards for every `canvas_render_video`
+                    // tool_use in this message that has a bound job_id.
+                    if !render_job_ids.is_empty() {
+                        div { class: "render-progress-cards",
+                            for jid in render_job_ids.iter() {
+                                RenderProgressCard {
+                                    key: "{jid}",
+                                    job_id: jid.clone(),
+                                }
                             }
                         }
                     }

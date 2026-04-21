@@ -256,6 +256,18 @@ async fn execute_browser_tool_and_respond(
 fn handle_event_delivery(mut ctx: AppContext, delivery: shared_protocol::EventBusDelivery) {
     let topic = &delivery.event.topic;
 
+    // jobs:render:{job_id} — render progress from canvas_render_video.
+    // Deduplicate by event_id BEFORE touching any signals to avoid
+    // duplicate Dioxus keys (per architecture_eventbus_dedupe_event_id
+    // MEMORY: duplicate signal keys silently freeze the diff engine).
+    if topic.starts_with("jobs:render:") {
+        if !dedupe_event_id(&delivery.event.event_id) {
+            return;
+        }
+        handle_render_progress_delivery(ctx, delivery);
+        return;
+    }
+
     if topic.contains(":notification") {
         let title = delivery.event.payload
             .get("title")
@@ -287,6 +299,157 @@ fn handle_event_delivery(mut ctx: AppContext, delivery: shared_protocol::EventBu
         if len > 20 {
             notifications.drain(0..len - 20);
         }
+    }
+}
+
+/// Simple LRU of the last 2048 delivered event_ids to block duplicates
+/// (per architecture_eventbus_dedupe_event_id MEMORY: Dioxus diff engine
+/// panics / freezes on duplicate signal keys). Thread-local storage is
+/// safe in single-threaded WASM.
+fn dedupe_event_id(event_id: &str) -> bool {
+    use std::cell::RefCell;
+    use std::collections::{HashSet, VecDeque};
+
+    thread_local! {
+        static SEEN_QUEUE: RefCell<VecDeque<String>> =
+            RefCell::new(VecDeque::with_capacity(2048));
+        static SEEN_SET: RefCell<HashSet<String>> =
+            RefCell::new(HashSet::new());
+    }
+
+    SEEN_SET.with(|s| {
+        let mut set = s.borrow_mut();
+        if set.contains(event_id) {
+            return false;
+        }
+        SEEN_QUEUE.with(|q| {
+            let mut queue = q.borrow_mut();
+            if queue.len() == 2048 {
+                if let Some(old) = queue.pop_front() {
+                    set.remove(&old);
+                }
+            }
+            queue.push_back(event_id.to_string());
+        });
+        set.insert(event_id.to_string());
+        true
+    })
+}
+
+/// Parse a `jobs:render:{job_id}` payload into [`RenderProgressEvent`] and
+/// upsert the matching [`RenderJobEntry`] on `ctx.render_jobs`. Malformed
+/// payloads are logged to `console.warn` and dropped.
+fn handle_render_progress_delivery(
+    mut ctx: AppContext,
+    delivery: shared_protocol::EventBusDelivery,
+) {
+    use shared_protocol::{RenderJobState, RenderProgressEvent};
+
+    let parsed: Result<RenderProgressEvent, _> =
+        serde_json::from_value(delivery.event.payload.clone());
+    let event = match parsed {
+        Ok(e) => e,
+        Err(e) => {
+            web_sys::console::warn_1(
+                &format!(
+                    "[handler] malformed jobs:render payload on {}: err={} payload={}",
+                    delivery.event.topic, e, delivery.event.payload
+                )
+                .into(),
+            );
+            return;
+        }
+    };
+
+    let job_id = event.job_id().to_string();
+    let now_ms = js_sys::Date::now() as u64;
+
+    let is_new_job = {
+        let mut jobs = ctx.render_jobs.write();
+        let is_new = !jobs.contains_key(&job_id);
+        let entry = jobs
+            .entry(job_id.clone())
+            .or_insert_with(|| crate::state::RenderJobEntry::new_running(&job_id, now_ms));
+        entry.last_update_ms = now_ms;
+
+        match event {
+            RenderProgressEvent::Progress { current, total, .. } => {
+                entry.current = current;
+                entry.total = total;
+                entry.state = RenderJobState::Running;
+            }
+            RenderProgressEvent::Succeeded {
+                output_path,
+                size_bytes: _,
+                ..
+            } => {
+                entry.state = RenderJobState::Succeeded;
+                entry.output_path = Some(output_path);
+            }
+            RenderProgressEvent::Failed { error, .. } => {
+                entry.state = RenderJobState::Failed;
+                entry.error = Some(error);
+            }
+            RenderProgressEvent::Cancelled { current, total, .. } => {
+                entry.current = current;
+                entry.total = total;
+                entry.state = RenderJobState::Cancelled;
+            }
+        }
+
+        is_new
+    };
+
+    // When a new job_id appears, bind it to the most recent message that
+    // has an unclaimed `canvas_render_video` tool_call so `MessageBubble`
+    // can render a `RenderProgressCard` underneath that tool_use.
+    if is_new_job {
+        bind_job_to_message(ctx, &job_id);
+    }
+}
+
+/// Bind a newly-appeared `job_id` to the most recent message whose
+/// `canvas_render_video` tool_calls still have unclaimed slots. FIFO
+/// ordering within a single message matches the order `canvas_render_video`
+/// calls were made. See `context.rs::AppContext::message_render_job_ids`.
+fn bind_job_to_message(mut ctx: AppContext, job_id: &str) {
+    // Already bound somewhere? Don't bind again.
+    {
+        let map = ctx.message_render_job_ids.read();
+        if map.values().any(|v| v.iter().any(|j| j == job_id)) {
+            return;
+        }
+    }
+
+    // Walk messages newest-first; find one whose canvas_render_video
+    // tool_calls exceed its current claim count.
+    let target_msg_id: Option<String> = {
+        let msgs = ctx.messages.read();
+        let map = ctx.message_render_job_ids.read();
+        msgs.iter().rev().find_map(|m| {
+            let tc_count = m
+                .tool_calls
+                .iter()
+                .filter(|tc| tc.name == "canvas_render_video")
+                .count();
+            if tc_count == 0 {
+                return None;
+            }
+            let claimed = map.get(&m.id).map(|v| v.len()).unwrap_or(0);
+            if claimed < tc_count {
+                Some(m.id.clone())
+            } else {
+                None
+            }
+        })
+    };
+
+    if let Some(msg_id) = target_msg_id {
+        ctx.message_render_job_ids
+            .write()
+            .entry(msg_id)
+            .or_default()
+            .push(job_id.to_string());
     }
 }
 
