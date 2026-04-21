@@ -218,15 +218,23 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
 
                 // Subscribe to UI notification events so incoming
                 // `ui:notification:*` topics render as toasts via
-                // handler::handle_event_delivery.
+                // handler::handle_event_delivery. Also subscribe to
+                // `jobs:render:*` so render job progress/complete events
+                // flow into `ctx.render_jobs` via the same handler.
                 if let Err(e) = crate::messaging::send_events_subscribe(
-                    vec!["ui:notification:*".to_string()],
+                    vec![
+                        "ui:notification:*".to_string(),
+                        "jobs:render:*".to_string(),
+                    ],
                     false,
                     256,
                 )
                 .await
                 {
-                    tracing::warn!("EventBus subscribe to ui:notification:* failed: {}", e);
+                    tracing::warn!(
+                        "EventBus subscribe to ui:notification:*, jobs:render:* failed: {}",
+                        e
+                    );
                 }
 
                 // Resolve window-session binding
