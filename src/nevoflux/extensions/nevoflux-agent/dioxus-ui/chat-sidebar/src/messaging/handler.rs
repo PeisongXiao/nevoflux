@@ -364,35 +364,92 @@ fn handle_render_progress_delivery(
     let job_id = event.job_id().to_string();
     let now_ms = js_sys::Date::now() as u64;
 
-    let mut jobs = ctx.render_jobs.write();
-    let entry = jobs
-        .entry(job_id.clone())
-        .or_insert_with(|| crate::state::RenderJobEntry::new_running(&job_id, now_ms));
-    entry.last_update_ms = now_ms;
+    let is_new_job = {
+        let mut jobs = ctx.render_jobs.write();
+        let is_new = !jobs.contains_key(&job_id);
+        let entry = jobs
+            .entry(job_id.clone())
+            .or_insert_with(|| crate::state::RenderJobEntry::new_running(&job_id, now_ms));
+        entry.last_update_ms = now_ms;
 
-    match event {
-        RenderProgressEvent::Progress { current, total, .. } => {
-            entry.current = current;
-            entry.total = total;
-            entry.state = RenderJobState::Running;
+        match event {
+            RenderProgressEvent::Progress { current, total, .. } => {
+                entry.current = current;
+                entry.total = total;
+                entry.state = RenderJobState::Running;
+            }
+            RenderProgressEvent::Succeeded {
+                output_path,
+                size_bytes: _,
+                ..
+            } => {
+                entry.state = RenderJobState::Succeeded;
+                entry.output_path = Some(output_path);
+            }
+            RenderProgressEvent::Failed { error, .. } => {
+                entry.state = RenderJobState::Failed;
+                entry.error = Some(error);
+            }
+            RenderProgressEvent::Cancelled { current, total, .. } => {
+                entry.current = current;
+                entry.total = total;
+                entry.state = RenderJobState::Cancelled;
+            }
         }
-        RenderProgressEvent::Succeeded {
-            output_path,
-            size_bytes: _,
-            ..
-        } => {
-            entry.state = RenderJobState::Succeeded;
-            entry.output_path = Some(output_path);
+
+        is_new
+    };
+
+    // When a new job_id appears, bind it to the most recent message that
+    // has an unclaimed `canvas_render_video` tool_call so `MessageBubble`
+    // can render a `RenderProgressCard` underneath that tool_use.
+    if is_new_job {
+        bind_job_to_message(ctx, &job_id);
+    }
+}
+
+/// Bind a newly-appeared `job_id` to the most recent message whose
+/// `canvas_render_video` tool_calls still have unclaimed slots. FIFO
+/// ordering within a single message matches the order `canvas_render_video`
+/// calls were made. See `context.rs::AppContext::message_render_job_ids`.
+fn bind_job_to_message(mut ctx: AppContext, job_id: &str) {
+    // Already bound somewhere? Don't bind again.
+    {
+        let map = ctx.message_render_job_ids.read();
+        if map.values().any(|v| v.iter().any(|j| j == job_id)) {
+            return;
         }
-        RenderProgressEvent::Failed { error, .. } => {
-            entry.state = RenderJobState::Failed;
-            entry.error = Some(error);
-        }
-        RenderProgressEvent::Cancelled { current, total, .. } => {
-            entry.current = current;
-            entry.total = total;
-            entry.state = RenderJobState::Cancelled;
-        }
+    }
+
+    // Walk messages newest-first; find one whose canvas_render_video
+    // tool_calls exceed its current claim count.
+    let target_msg_id: Option<String> = {
+        let msgs = ctx.messages.read();
+        let map = ctx.message_render_job_ids.read();
+        msgs.iter().rev().find_map(|m| {
+            let tc_count = m
+                .tool_calls
+                .iter()
+                .filter(|tc| tc.name == "canvas_render_video")
+                .count();
+            if tc_count == 0 {
+                return None;
+            }
+            let claimed = map.get(&m.id).map(|v| v.len()).unwrap_or(0);
+            if claimed < tc_count {
+                Some(m.id.clone())
+            } else {
+                None
+            }
+        })
+    };
+
+    if let Some(msg_id) = target_msg_id {
+        ctx.message_render_job_ids
+            .write()
+            .entry(msg_id)
+            .or_default()
+            .push(job_id.to_string());
     }
 }
 

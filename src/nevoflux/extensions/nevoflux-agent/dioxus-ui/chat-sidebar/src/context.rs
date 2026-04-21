@@ -86,6 +86,12 @@ pub struct AppContext {
     pub event_notifications: Signal<Vec<EventNotification>>,
     /// Active render jobs keyed by job_id, populated from jobs:render:* EventBus deliveries
     pub render_jobs: Signal<std::collections::HashMap<String, crate::state::RenderJobEntry>>,
+    /// Per-message bound job_ids: message_id -> [job_id, ...]. Populated in
+    /// `handle_render_progress_delivery` when a new job_id first appears —
+    /// the newest message with an unclaimed `canvas_render_video` tool_call
+    /// claims the job_id. Used by `MessageBubble` to render one
+    /// `RenderProgressCard` under each `canvas_render_video` tool_use.
+    pub message_render_job_ids: Signal<std::collections::HashMap<String, Vec<String>>>,
     /// Whether mock mode is enabled
     pub mock_enabled: bool,
 }
@@ -122,6 +128,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
     let minimized = use_signal(|| false);
     let event_notifications = use_signal(Vec::new);
     let render_jobs = use_signal(std::collections::HashMap::new);
+    let message_render_job_ids = use_signal(std::collections::HashMap::new);
     let mut first_run = use_signal(|| false);
     let mut has_configured_provider = use_signal(|| false);
 
@@ -152,6 +159,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
         minimized,
         event_notifications,
         render_jobs,
+        message_render_job_ids,
         first_run,
         has_configured_provider,
         mock_enabled,
