@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+  <div data-composition-id="rand-comp" data-width="640" data-height="360" data-duration="5">
+    <div class="clip" data-start="0" data-duration="5" data-track-index="0" id="box"></div>
+  </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    window.__timelines["rand-comp"] = gsap.timeline({ paused: true });
+    // BAD: uses Math.random() which is non-deterministic
+    var x = Math.random() * 100;
+    document.getElementById('box').style.left = x + 'px';
+  </script>
+</body>
+</html>
