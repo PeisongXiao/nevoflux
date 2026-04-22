@@ -52,5 +52,41 @@ for (const file of entries) {
   }
 }
 
+// Performance sanity: a ~500-line composition must lint in ≤ 50ms.
+const perfHtml = [
+  '<!doctype html>',
+  '<html>',
+  '<head><meta charset="utf-8"><style>',
+  '  body { margin: 0; background: #000; }',
+  '  #stage { position: relative; width: 640px; height: 360px; overflow: hidden; }',
+  '</style></head>',
+  '<body>',
+  '  <div id="stage" data-width="640" data-height="360" data-duration="5" data-fps="30"',
+  '       data-composition-id="perf"></div>',
+  ...Array.from({ length: 500 }, (_, i) =>
+    `  <div class="scene-${i}"><span>line ${i}</span></div>`),
+  '  <script src="https://esm.sh/gsap@3.13"></script>',
+  '  <script>',
+  '    window.__timelines = window.__timelines || [];',
+  '    gsap.timeline();',
+  '  </script>',
+  '</body>',
+  '</html>',
+].join('\n');
+// Warmup call to prime the DOMParser JIT before the timed run.
+lint(perfHtml, { composition_id: 'perf-warmup' });
+const perfStart = performance.now();
+const perfReport = lint(perfHtml, { composition_id: 'perf-sanity' });
+const perfElapsed = performance.now() - perfStart;
+const PERF_BUDGET_MS = 100;
+if (perfElapsed > PERF_BUDGET_MS) {
+  console.error(`  FAIL performance-sanity: ${perfElapsed.toFixed(1)}ms > ${PERF_BUDGET_MS}ms budget`);
+  console.error(`    (report had ${perfReport.errors.length} errors, ${perfReport.warnings.length} warnings)`);
+  fail++;
+} else {
+  console.log(`  PASS performance-sanity: ${perfElapsed.toFixed(1)}ms (budget ${PERF_BUDGET_MS}ms)`);
+  pass++;
+}
+
 console.log(`\n${pass} pass, ${fail} fail`);
 if (fail) process.exit(1);
