@@ -80,7 +80,7 @@ function ruleMixerSetTime(ctx, report) {
         severity: 'warning',
         rule_id: 'nf/mixer-settime',
         message: 'THREE.AnimationMixer must be driven with .setTime(t), not .update(delta), for deterministic capture.',
-        fix_hint: 'Replace mixer.update(delta) with mixer.setTime(window.__hfRenderTime).',
+        fix_hint: 'Replace mixer.update(delta) with mixer.setTime(window.__nfRenderTime).',
       });
     }
   }
