@@ -1261,6 +1261,41 @@ class ChannelManager {
       return;
     }
 
+    // P3: daemon asks us to run the composition-linter on a composition's
+    // HTML. We dynamic-import the linter module (same code served under
+    // `lib/composition-linter/` in the extension), run it, and reply.
+    // Fire-and-forget from daemon's POV — the reply resolves the oneshot.
+    if (message.type === 'canvas_video_lint_request') {
+      const payload = message.payload || {};
+      const correlator = payload.job_correlator;
+      const html = payload.composition_html || '';
+      const composition_id = payload.composition_id;
+      (async () => {
+        let report;
+        try {
+          const mod = await import(
+            browser.runtime.getURL('lib/composition-linter/index.js')
+          );
+          report = mod.lint(html, { composition_id });
+        } catch (err) {
+          console.error('[NevoFlux] lint failed:', err);
+          report = {
+            errors: [{
+              severity: 'error',
+              rule_id: 'linter/internal',
+              message: `linter load/run failed: ${err && err.message ? err.message : String(err)}`,
+            }],
+            warnings: [], infos: [], elapsed_ms: 0,
+          };
+        }
+        channelManager.sendToAgent({
+          type: 'canvas_video_lint_result',
+          payload: { job_correlator: correlator, report },
+        });
+      })();
+      return;
+    }
+
     if (routeCanvasToolResponse('canvas_persist_list_response', pendingPersistListRequests)) return;
     // Route canvas_persist_save_response back to sidebar (bg:canvas_persist_save callers) BEFORE bridge router.
     if (message.type === 'canvas_persist_save_response') {
