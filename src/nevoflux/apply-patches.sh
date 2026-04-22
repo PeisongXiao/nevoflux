@@ -392,6 +392,19 @@ if [ -f "${ROOT_DIR}/scripts/copy_language_pack.py" ]; then
   python3 "${ROOT_DIR}/scripts/copy_language_pack.py" en-US
 fi
 
+# 17b. Mirror composition-linter from extension canonical source into
+#      chrome-pages overlay so chrome://nevoflux/content/vendor/composition-linter/
+#      resolves from render.js and canvas.js.
+LINTER_SRC="${ROOT_DIR}/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter"
+LINTER_DST="${ROOT_DIR}/src/nevoflux/engine-overlays/browser/components/nevoflux-pages/content/vendor/composition-linter"
+if [ -d "$LINTER_SRC" ]; then
+  mkdir -p "$(dirname "$LINTER_DST")"
+  rm -rf "$LINTER_DST"
+  cp -R "$LINTER_SRC" "$LINTER_DST"
+  rm -rf "$LINTER_DST/tests"
+  echo "  Mirrored composition-linter to chrome-pages vendor dir"
+fi
+
 # 17. Restore Zen git patches that were skipped by pre-import.sh
 for skip_file in $(find "${ROOT_DIR}/src" -name "*.nevoflux-skip" 2>/dev/null); do
   original="${skip_file%.nevoflux-skip}"
