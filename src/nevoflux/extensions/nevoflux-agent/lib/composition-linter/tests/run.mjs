@@ -18,6 +18,29 @@ const { lint, LINTER_VERSION } = await import('../index.js');
 
 console.log(`composition-linter tests — version ${LINTER_VERSION}`);
 
+// --- P4 single-file mode ----------------------------------------------
+const idx = process.argv.indexOf('--file');
+const singleFile = idx > -1 ? process.argv[idx + 1] : null;
+if (singleFile) {
+  const html = await readFile(singleFile, 'utf8');
+  const { basename } = await import('node:path');
+  const report = lint(html, { composition_id: basename(singleFile) });
+  const hasErrors = report.errors.length > 0;
+  console.log(`${singleFile}: ${report.errors.length} errors, ${report.warnings.length} warnings, ${report.infos.length} infos`);
+  if (hasErrors) {
+    for (const e of report.errors) {
+      console.error(`  ERROR ${e.rule_id}${e.line != null ? ' (line ' + e.line + ')' : ''}: ${e.message}`);
+    }
+  }
+  if (report.warnings.length > 0) {
+    for (const w of report.warnings) {
+      console.warn(`  WARN  ${w.rule_id}${w.line != null ? ' (line ' + w.line + ')' : ''}: ${w.message}`);
+    }
+  }
+  process.exit(hasErrors ? 1 : 0);
+}
+// --- end P4 single-file mode ------------------------------------------
+
 const fixturesDir = join(__dirname, 'fixtures');
 const entries = (await readdir(fixturesDir)).filter(f => f.endsWith('.html'));
 
