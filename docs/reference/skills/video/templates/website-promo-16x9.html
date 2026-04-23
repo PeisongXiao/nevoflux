@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<!--
+  template: website-promo-16x9
+  purpose: 模式 3 (website-to-video) 起手模板
+  duration: 20 秒（可调整到 15-30s）
+  version: 1.0 (D10 + D12 集成)
+
+  PREREQUISITES:
+  1. 已调用 extract_visual_identity(tab_id 或 URL) 拿到品牌资产
+  2. 已生成 DESIGN.md 并写入 composition VirtualFS
+  3. hero_screenshot 已存入 VirtualFS 作为 assets/hero.png
+  4. logo 已存入 VirtualFS 作为 assets/logo.png（若网站有）
+
+  STRUCTURE:
+  Scene 1 (0-4s):   Brand reveal —— logo + tagline 入场
+  [Transition at 4-4.3s: flash-through-white]
+  Scene 2 (4.3-10s): Product showcase —— 网站 hero screenshot 3D 展示
+  [Transition at 10-10.3s: crossfade]
+  Scene 3 (10.3-16s): Features —— 3 条核心特性勾选
+  [Transition at 16-16.3s: flash-through-white]
+  Scene 4 (16.3-20s): CTA —— 最终场景，logo + URL + 按钮
+
+  AGENT USAGE:
+  1. 替换所有 <<...>> 占位符为 DESIGN.md / extract_visual_identity 数据
+  2. 不要硬编码颜色——全部用 var(--primary) / var(--accent) / var(--bg-dark) 等
+  3. hero screenshot 引用 assets/hero.png（extract_visual_identity 已保存）
+  4. features 3 条从 extract_visual_identity.key_assets 或用户网站 feature list 提取
+  5. 旁白（可选）：调用 tts_synthesize_local 生成，与 composition duration 对齐
+
+  CONSTRAINTS:
+  - composition.duration 可在 15-30s 范围；不同 duration 需要相应调整 beat 时长
+  - 若用户网站主色是浅色（bg-light），Scene 1/4 切换到 light theme
+  - 中文网站：确保 font fallback 含 PingFang SC / Microsoft YaHei
+-->
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <style>
+    /* === 从 DESIGN.md 引用 === */
+    /* AGENT: 实际写入时把 DESIGN.md 的 CSS 变量复制到这里 */
+    :root {
+      --primary: #1a6b6b;       /* 从 DESIGN.md 复制 */
+      --accent: #ffcc33;
+      --bg-dark: #0b1020;
+      --bg-light: #f3f6f8;
+      --text-primary: #0b1020;
+    }
+
+    body { margin: 0; background: #000; }
+    #stage {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      /* 字体栈从 DESIGN.md Typography 节复制 */
+      font-family: 'Inter', 'PingFang SC', -apple-system, sans-serif;
+      color: var(--text-primary);
+      background: var(--bg-light);
+    }
+
+    /* === Scene 1: Brand reveal (0-4s) === */
+    .scene-brand {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 32px; padding: 80px;
+      box-sizing: border-box;
+      background: var(--bg-light);
+    }
+    .brand-logo {
+      width: 240px; height: 240px;
+      object-fit: contain;
+      /* 若网站没 logo，删掉 <img> 用文字 fallback */
+    }
+    .brand-name {
+      font-size: 140px; font-weight: 800; letter-spacing: -0.03em;
+      color: var(--primary); margin: 0; line-height: 1;
+    }
+    .brand-tagline {
+      font-size: 44px; font-weight: 400; margin: 0;
+      color: var(--text-primary); opacity: 0.8;
+      letter-spacing: 0.02em; text-align: center;
+    }
+
+    /* === Scene 2: Product showcase (4.3-10s) === */
+    .scene-showcase {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg-dark);
+      perspective: 1400px;
+    }
+    .showcase-screenshot {
+      width: 1440px; height: 810px;
+      transform: rotateY(-8deg) rotateX(4deg);
+      transform-origin: center;
+      border-radius: 12px;
+      box-shadow:
+        0 40px 120px rgba(0, 0, 0, 0.6),
+        0 0 80px rgba(26, 107, 107, 0.3);
+      overflow: hidden;
+    }
+    .showcase-screenshot img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      object-position: top;
+    }
+    .showcase-badge {
+      position: absolute; top: 100px; right: 120px;
+      padding: 16px 32px;
+      background: var(--accent);
+      color: var(--bg-dark);
+      border-radius: 999px;
+      font-size: 32px; font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+
+    /* === Scene 3: Features (10.3-16s) === */
+    .scene-features {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 56px; padding: 120px;
+      box-sizing: border-box;
+      background: var(--bg-light);
+    }
+    .features-title {
+      font-size: 88px; font-weight: 800;
+      color: var(--text-primary);
+      letter-spacing: -0.02em; margin: 0;
+    }
+    .features-list {
+      display: flex; flex-direction: column;
+      gap: 32px;
+    }
+    .feature-item {
+      display: flex; align-items: center; gap: 32px;
+      font-size: 48px; font-weight: 500;
+    }
+    .feature-check {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 40px; font-weight: 900;
+      flex-shrink: 0;
+    }
+
+    /* === Scene 4 (final): CTA (16.3-20s) === */
+    .scene-cta {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 48px; padding: 80px;
+      box-sizing: border-box;
+      background: var(--primary);
+    }
+    .cta-logo {
+      width: 160px; height: 160px;
+      object-fit: contain;
+      filter: brightness(0) invert(1);  /* logo 反白 */
+    }
+    .cta-url {
+      font-size: 96px; font-weight: 800;
+      color: #fff; letter-spacing: -0.02em;
+      font-family: 'SF Mono', 'JetBrains Mono', monospace;
+      margin: 0;
+    }
+    .cta-button {
+      padding: 28px 72px;
+      background: var(--accent);
+      color: var(--bg-dark);
+      border-radius: 999px;
+      font-size: 40px; font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    /* === Transition overlays === */
+    .flash-layer {
+      position: absolute; inset: 0;
+      background: #fff; pointer-events: none; opacity: 0;
+    }
+    .crossfade-layer {
+      position: absolute; inset: 0;
+      background: var(--bg-light); pointer-events: none; opacity: 0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="stage"
+     data-composition-id="website-promo-16x9"
+     data-start="0"
+     data-width="1920"
+     data-height="1080"
+     data-duration="20"
+     data-fps="30"
+     data-bg="#f3f6f8">
+
+  <!-- Scene 1: Brand reveal (0-4s) -->
+  <!-- AGENT: 替换 <<BRAND_NAME>> / <<BRAND_TAGLINE>> / assets/logo.png -->
+  <div class="clip scene-brand" id="scene-brand"
+       data-start="0" data-duration="4" data-track-index="1">
+    <img class="brand-logo" id="brand-logo" src="assets/logo.png" alt="logo">
+    <h1 class="brand-name" id="brand-name"><<BRAND_NAME>></h1>
+    <p class="brand-tagline" id="brand-tagline"><<BRAND_TAGLINE>></p>
+  </div>
+
+  <!-- Transition 1: flash 4-4.3s -->
+  <div class="clip flash-layer" id="flash-1"
+       data-start="4" data-duration="0.3" data-track-index="50"></div>
+
+  <!-- Scene 2: Product showcase (4.3-10s) -->
+  <!-- AGENT: assets/hero.png 来自 extract_visual_identity.hero_screenshot -->
+  <div class="clip scene-showcase" id="scene-showcase"
+       data-start="4.3" data-duration="5.7" data-track-index="1">
+    <div class="showcase-screenshot" id="showcase-screenshot">
+      <img src="assets/hero.png" alt="product">
+    </div>
+    <div class="showcase-badge" id="showcase-badge">BRAND NEW</div>
+  </div>
+
+  <!-- Transition 2: crossfade 10-10.3s -->
+  <div class="clip crossfade-layer" id="crossfade-1"
+       data-start="10" data-duration="0.3" data-track-index="50"></div>
+
+  <!-- Scene 3: Features (10.3-16s) -->
+  <!-- AGENT: 3 条 features 从 extract_visual_identity 或网站内容提取 -->
+  <div class="clip scene-features" id="scene-features"
+       data-start="10.3" data-duration="5.7" data-track-index="1">
+    <h2 class="features-title" id="features-title">核心特性</h2>
+    <div class="features-list">
+      <div class="feature-item" id="feature-1">
+        <div class="feature-check">✓</div>
+        <span><<FEATURE_1>></span>
+      </div>
+      <div class="feature-item" id="feature-2">
+        <div class="feature-check">✓</div>
+        <span><<FEATURE_2>></span>
+      </div>
+      <div class="feature-item" id="feature-3">
+        <div class="feature-check">✓</div>
+        <span><<FEATURE_3>></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transition 3: flash 16-16.3s -->
+  <div class="clip flash-layer" id="flash-2"
+       data-start="16" data-duration="0.3" data-track-index="50"></div>
+
+  <!-- Scene 4 (final): CTA (16.3-20s) -->
+  <!-- AGENT: <<BRAND_URL>> 是用户网站的主域名 -->
+  <div class="clip scene-cta" id="scene-cta"
+       data-start="16.3" data-duration="3.7" data-track-index="1">
+    <img class="cta-logo" src="assets/logo.png" alt="logo">
+    <h2 class="cta-url" id="cta-url"><<BRAND_URL>></h2>
+    <div class="cta-button" id="cta-button">立即访问</div>
+  </div>
+
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  window.__timelines = window.__timelines || [];
+  const tl = gsap.timeline({ paused: true });
+
+  // === Scene 1: Brand reveal entrances ===
+  tl.from('#brand-logo',
+    { scale: 0.6, opacity: 0, duration: 0.8, ease: 'back.out(1.6)' }, 0.2);
+  tl.from('#brand-name',
+    { y: 40, opacity: 0, duration: 0.7, ease: 'power3.out' }, 0.8);
+  tl.from('#brand-tagline',
+    { y: 20, opacity: 0, duration: 0.5, ease: 'expo.out' }, 1.3);
+
+  // === Transition 1 ===
+  tl.to('#flash-1', { opacity: 1, duration: 0.15, ease: 'power2.in' }, 4);
+  tl.to('#flash-1', { opacity: 0, duration: 0.15, ease: 'power2.out' }, 4.15);
+
+  // === Scene 2: Product showcase entrances ===
+  tl.from('#showcase-screenshot',
+    { scale: 0.7, opacity: 0, rotateY: 15, duration: 1.0, ease: 'expo.out' }, 4.4);
+  tl.from('#showcase-badge',
+    { scale: 0, rotation: -15, duration: 0.5, ease: 'back.out(2)' }, 5.2);
+  // 主屏幕缓慢呼吸（有限 repeat，禁止 -1）
+  // scene duration 5.7s, 呼吸周期 4s = 1.75 次 → repeat 1 次即可
+  tl.to('#showcase-screenshot',
+    { scale: 1.02, duration: 2, yoyo: true, repeat: 1, ease: 'sine.inOut' }, 5.5);
+
+  // === Transition 2: crossfade ===
+  tl.to('#crossfade-1', { opacity: 1, duration: 0.15, ease: 'sine.in' }, 10);
+  tl.to('#crossfade-1', { opacity: 0, duration: 0.15, ease: 'sine.out' }, 10.15);
+
+  // === Scene 3: Features entrances ===
+  tl.from('#features-title',
+    { y: 30, opacity: 0, duration: 0.5, ease: 'power3.out' }, 10.4);
+  tl.from('#feature-1',
+    { x: -40, opacity: 0, duration: 0.5, ease: 'back.out(1.6)' }, 10.9);
+  tl.from('#feature-2',
+    { x: -40, opacity: 0, duration: 0.5, ease: 'back.out(1.6)' }, 11.2);
+  tl.from('#feature-3',
+    { x: -40, opacity: 0, duration: 0.5, ease: 'back.out(1.6)' }, 11.5);
+
+  // === Transition 3 ===
+  tl.to('#flash-2', { opacity: 1, duration: 0.15, ease: 'power2.in' }, 16);
+  tl.to('#flash-2', { opacity: 0, duration: 0.15, ease: 'power2.out' }, 16.15);
+
+  // === Scene 4 (final): CTA entrances + button pulse ===
+  tl.from('#cta-url',
+    { y: 40, opacity: 0, duration: 0.6, ease: 'expo.out' }, 16.5);
+  tl.from('#cta-button',
+    { scale: 0.7, opacity: 0, duration: 0.5, ease: 'back.out(1.8)' }, 16.9);
+  // 按钮脉冲有限 repeat
+  tl.to('#cta-button',
+    { scale: 1.06, duration: 0.4, yoyo: true, repeat: 3, ease: 'sine.inOut' }, 17.5);
+
+  // 最终场景允许 fade out（可选，默认保留 CTA 停留）
+  // tl.to('#scene-cta', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 19.5);
+
+  window.__timelines.push(tl);
+</script>
+
+</body>
+</html>

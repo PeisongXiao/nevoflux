@@ -1,0 +1,117 @@
+<!--
+  component: feature-list-checkmark
+  purpose: 勾选项列表动画（3-5 个特性依次勾选，圆形对号弹入）
+  best for: 模式 3 (website-to-video) 展示网站 features
+         或模式 1 产品介绍场景的卖点展示
+
+  AGENT INTEGRATION:
+  1. 拷进 #stage 内部
+  2. 3-5 条 features——少于 3 条显单调，多于 5 条信息密度过高
+  3. 替换每条 feature 文本
+  4. data-start / data-duration 调整（每条 feature 约 0.8-1.2s stagger）
+  5. 颜色走 DESIGN.md 变量（--primary / --text-primary）
+
+  VISUAL:
+  - 垂直居中列表
+  - 每条：圆形带对号的 icon（品牌主色）+ 文字
+  - 对号从 scale:0 弹入，文字从左滑入，stagger 0.3s
+  - 完成后整体停留
+
+  CONSTRAINTS:
+  - 文字推荐 ≤ 12 字（中文）或 ≤ 25 字（英文），超长自动换行会影响节奏
+  - 3-5 条是甜蜜点；2 条显得空，6+ 条视觉疲劳
+-->
+
+<style>
+  .feature-list-check {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex; flex-direction: column;
+    gap: 32px;
+    width: 70%; max-width: 1200px;
+  }
+  .feature-list-check .feature-item {
+    display: flex; align-items: center; gap: 32px;
+    font-size: 48px; font-weight: 500;
+    color: var(--text-primary, #0b1020);
+    opacity: 0;  /* 由 GSAP 控制 */
+  }
+  .feature-list-check .feature-check {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: var(--primary, #1a6b6b);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 40px; font-weight: 900;
+    flex-shrink: 0;
+    box-shadow: 0 8px 24px rgba(26, 107, 107, 0.35);
+  }
+  .feature-list-check .feature-text {
+    flex: 1;
+  }
+</style>
+
+<!-- AGENT: 替换 text / data-start / 调整条数 -->
+<div class="clip feature-list-check"
+     id="feature-list-1"
+     data-start="0"
+     data-duration="5"
+     data-track-index="2">
+  <div class="feature-item" id="feat-item-1">
+    <div class="feature-check">✓</div>
+    <span class="feature-text">第一个核心特性</span>
+  </div>
+  <div class="feature-item" id="feat-item-2">
+    <div class="feature-check">✓</div>
+    <span class="feature-text">第二个核心特性</span>
+  </div>
+  <div class="feature-item" id="feat-item-3">
+    <div class="feature-check">✓</div>
+    <span class="feature-text">第三个核心特性</span>
+  </div>
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  const tl = gsap.timeline({ paused: true });
+
+  // 每条依次入场：stagger 0.3s
+  // 入场动作：
+  //   1. 容器从左滑入（x: -40 → 0）+ 淡入
+  //   2. 勾选圆圈同步从 scale:0 弹入
+  const startTime = 0;  // = data-start
+  const stagger = 0.3;
+
+  const items = ['#feat-item-1', '#feat-item-2', '#feat-item-3'];
+
+  items.forEach((selector, idx) => {
+    const t = startTime + idx * stagger;
+    tl.fromTo(selector,
+      { x: -40, opacity: 0 },
+      { x: 0, opacity: 1, duration: 0.5, ease: 'power3.out' },
+      t
+    );
+    tl.fromTo(`${selector} .feature-check`,
+      { scale: 0, rotation: -90 },
+      { scale: 1, rotation: 0, duration: 0.4, ease: 'back.out(2)' },
+      t + 0.15
+    );
+  });
+
+  // 不设元素级 exit——clip adapter 按 data-duration 自动隐藏
+
+  // window.__timelines.push(tl);
+</script>
+
+<!--
+  VARIANT 提示：
+  - 更严肃风（商务/B2B）：把 feature-check 背景改成 transparent + border + color
+  - 奖牌风：把 ✓ 换成数字 "1" "2" "3"
+  - 对比清单（左打叉右对号）：复制两列，左列用 ✗ + 红色背景
+
+  配合用法：
+  - 通常在 Scene 3 左右出现，前面是介绍、后面是 CTA
+  - 配合 caption-subtitle 同步旁白时，每条 feature 对应一句旁白
+-->
