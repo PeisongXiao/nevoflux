@@ -1,0 +1,5 @@
+{
+  "errors": [],
+  "warnings": ["comp/root-composition-missing-data-start", "nf/three-register"],
+  "infos": ["comp/external-script-dependency", "comp/external-script-dependency"]
+}

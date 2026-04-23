@@ -1,0 +1,5 @@
+{
+  "errors": ["nf/forbidden-apis"],
+  "warnings": ["comp/root-composition-missing-data-start"],
+  "infos": ["comp/external-script-dependency"]
+}

@@ -28,21 +28,21 @@ export const PATCHES_SOURCE = `
 
   // Timeline-driven Date.now / performance.now.
   var BASE_WALL_CLOCK = 1700000000000;
-  window.__hfRenderTime = 0; // seconds
+  window.__nfRenderTime = 0; // seconds
   var origDate = Date;
   var PatchedDate = function () {
     if (arguments.length === 0) {
-      return new origDate(BASE_WALL_CLOCK + window.__hfRenderTime * 1000);
+      return new origDate(BASE_WALL_CLOCK + window.__nfRenderTime * 1000);
     }
     return new (Function.prototype.bind.apply(origDate, [null].concat(Array.prototype.slice.call(arguments))))();
   };
-  PatchedDate.now = function () { return BASE_WALL_CLOCK + window.__hfRenderTime * 1000; };
+  PatchedDate.now = function () { return BASE_WALL_CLOCK + window.__nfRenderTime * 1000; };
   PatchedDate.parse = origDate.parse;
   PatchedDate.UTC = origDate.UTC;
   PatchedDate.prototype = origDate.prototype;
   // eslint-disable-next-line no-global-assign
   Date = PatchedDate;
-  performance.now = function () { return window.__hfRenderTime * 1000; };
+  performance.now = function () { return window.__nfRenderTime * 1000; };
 
   // Fetch whitelist.
   var origFetch = window.fetch.bind(window);
@@ -79,7 +79,7 @@ export const PATCHES_SOURCE = `
   window.addEventListener('message', function (evt) {
     var d = evt.data;
     if (d && d.__nf_type === 'setRenderTime' && typeof d.seconds === 'number') {
-      window.__hfRenderTime = d.seconds;
+      window.__nfRenderTime = d.seconds;
     }
   });
 })();
