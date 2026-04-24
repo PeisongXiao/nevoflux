@@ -1,0 +1,95 @@
+<!--
+  component: wipe-diagonal
+  purpose: 对角线 pixel-wipe 场景转场 / Diagonal pixel-wipe transition
+  best for: 场景切换（32×18 像素网格，从左上到右下 stagger）
+
+  AGENT INTEGRATION:
+  1. 放在两个场景之间 (data-track-index=10)
+  2. data-start 与前一场景 data-start + data-duration 对齐
+  3. 色块取 var(--color-primary)；如要非品牌色，用 #hex override
+
+  VISUAL:
+  - 32×18 格阵列覆盖整个 stage
+  - 每格从 scale:0 弹到 scale:1，stagger 0.015s
+  - 按 row+col 权重从左上扫到右下，持续 0.6s
+
+  CONSTRAINTS:
+  - duration 固定 0.6s（低于 0.4s 视觉不够饱满；高于 0.8s 节奏拖沓）
+  - 网格尺寸固定 32×18（其他分辨率下比例会变形）
+  - 只用于 16:9 stage；9:16 请用 wipe-vertical（未提供）
+
+  attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See
+    /ai/project/nevoflux/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter/LICENSE-NOTICE.md
+-->
+
+<style>
+  .wipe-diagonal {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: grid;
+    grid-template-columns: repeat(32, 1fr);
+    grid-template-rows: repeat(18, 1fr);
+    pointer-events: none;
+    z-index: 10;
+    background: transparent;
+  }
+  .wipe-diagonal .pixel {
+    background: var(--color-primary, #1a6b6b);
+    transform-origin: center center;
+  }
+</style>
+
+<!-- AGENT: 修改 data-start 对齐前一场景结束时间 -->
+<div class="clip wipe-diagonal"
+     data-start="3.0"
+     data-duration="0.6"
+     data-track-index="10">
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  const COLS = 32;
+  const ROWS = 18;
+  const container = document.querySelector('.wipe-diagonal');
+
+  // Build pixel grid
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const px = document.createElement('div');
+      px.className = 'pixel';
+      // stagger delay weight: normalised (row+col) across the full grid
+      px.dataset.staggerIndex = r + c;
+      container.appendChild(px);
+    }
+  }
+
+  const pixels = container.querySelectorAll('.pixel');
+
+  // Build stagger delays weighted by (row+col): top-left → bottom-right sweep
+  // Total stagger budget = 0.6s × 0.85 ≈ 0.51s  (leaves room for per-cell duration)
+  const maxIndex = (ROWS - 1) + (COLS - 1); // 49
+  const staggerBudget = 0.51;
+  const cellDuration = 0.25;
+  const ease = 'power2.out';
+
+  const tl = gsap.timeline({ paused: true });
+
+  // Set initial state: pixels invisible (scale 0)
+  tl.set(pixels, { scale: 0 });
+
+  // Sweep in: each pixel scales from 0 → 1, staggered by (row+col) weight
+  pixels.forEach((px) => {
+    const idx = Number(px.dataset.staggerIndex);
+    const delay = (idx / maxIndex) * staggerBudget;
+    tl.to(px, {
+      scale: 1,
+      duration: cellDuration,
+      ease,
+    }, delay);
+  });
+
+  window.__timelines = window.__timelines || [];
+  window.__timelines.push(tl);
+</script>
