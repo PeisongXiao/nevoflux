@@ -19,17 +19,16 @@ triggers:
   - "product intro video"
   - "release announcement video"
   - "视频介绍"
-allowed_tools:
-  - canvas_create_composition
-  - canvas_lint_composition
-  - canvas_render_video
-  - editArtifact
-  - readArtifact
-  - skill_read
-  - extract_visual_identity
-  - tts_synthesize_local
-  - tts_synthesize_api
-  - tts_transcribe
+# NOTE: allowed_tools is deliberately left empty (same as the other shipped
+# skills — app, skill-creator). The daemon's built-in tool check in
+# server.rs::BUILTIN_TOOLS doesn't currently include canvas_video_* or
+# the artifact tools, so a non-empty list here would cause the skill to
+# fail load. Once BUILTIN_TOOLS is expanded (or the check rewired against
+# the agent's own tool registry), we can restore the explicit list with
+# canvas_create_composition / canvas_lint_composition / canvas_render_video
+# plus (when they ship) extract_visual_identity and tts_synthesize_* in
+# Week 8-11.
+allowed_tools: []
 snippets: []
 ---
 
