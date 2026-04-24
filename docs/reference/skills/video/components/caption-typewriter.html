@@ -1,0 +1,117 @@
+<!--
+  component: caption-typewriter
+  purpose: 逐字符打字机效果 / Character-by-character typewriter reveal
+  best for: 复古风 / 终端风 / warm-grain 场景 / tech docs
+
+  AGENT INTEGRATION:
+  1. 单行字幕（换行请用 caption-animated-overlay）
+  2. 文本建议 ≤ 60 字符（过长则 duration 难以控制）
+  3. easing 必须 linear（step-timing 感）
+
+  VISUAL: chars reveal one-at-a-time via width clip; cursor blinks then fades.
+
+  CONSTRAINTS:
+  - easing 固定 linear（steps-timing 感）
+  - 单行固定宽度；多行请用 caption-animated-overlay
+  - 文本 ≤ 60 字符
+
+  attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See LICENSE-NOTICE.md.
+-->
+
+<style>
+  .caption-typewriter {
+    position: absolute;
+    bottom: var(--aspect-safe_bottom, 160px);
+    left: 0;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    pointer-events: none;
+  }
+  .caption-typewriter-text {
+    font-family: var(--typography-body-family, 'JetBrains Mono, Noto Sans Mono, monospace');
+    font-size: 52px;
+    font-weight: 500;
+    color: var(--color-foreground, #f5f5f7);
+    white-space: nowrap;
+    overflow: hidden;
+    width: 0;
+    margin: 0;
+    line-height: 1.3;
+  }
+  .caption-typewriter-cursor {
+    display: inline-block;
+    width: 3px;
+    height: 58px;
+    background: var(--color-accent, #1a6b6b);
+    margin-left: 4px;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+    opacity: 0;
+  }
+</style>
+
+<!-- AGENT: set data-start / data-duration to match TTS clip;
+     replace text inside <p class="caption-typewriter-text">;
+     0.05s per character — set data-duration = char_count * 0.05 + 0.5 hold -->
+<div class="clip caption-typewriter"
+     data-start="1.0"
+     data-duration="4.5"
+     data-track-index="20">
+  <p class="caption-typewriter-text">Initializing NevoFlux agent…</p>
+  <span class="caption-typewriter-cursor"></span>
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  const container = document.querySelector('.caption-typewriter');
+  const textEl    = container.querySelector('.caption-typewriter-text');
+  const cursor    = container.querySelector('.caption-typewriter-cursor');
+
+  const charCount  = textEl.textContent.length;
+  const CHAR_DUR   = 0.05;                   // seconds per character
+  const typeDur    = charCount * CHAR_DUR;
+  const duration   = parseFloat(container.dataset.duration ?? String(typeDur + 0.5));
+  const BLINK_RATE = 0.5;                    // 2 cycles/sec
+  const FADE_OUT   = 0.3;
+
+  // Full width the text would occupy at 100%; measure via a clone.
+  const probe = textEl.cloneNode(true);
+  probe.style.cssText = 'position:absolute;visibility:hidden;width:auto;overflow:visible';
+  container.appendChild(probe);
+  const fullWidth = probe.scrollWidth;
+  container.removeChild(probe);
+
+  const tl = gsap.timeline({ paused: true });
+
+  // 1. Cursor fades in before typing starts
+  tl.to(cursor, { opacity: 1, duration: 0.1, ease: 'none' }, 0);
+
+  // 2. Cursor blinks while typing (2 cycles/sec via repeated yoyo tweens)
+  tl.to(cursor, {
+    opacity: 0,
+    duration: BLINK_RATE,
+    ease: 'steps(1)',
+    repeat: Math.ceil(typeDur / BLINK_RATE) * 2,
+    yoyo: true,
+  }, 0);
+
+  // 3. Typewriter: width 0 → full, linear so each step feels equal
+  tl.to(textEl, {
+    width: fullWidth,
+    duration: typeDur,
+    ease: 'none',
+  }, 0);
+
+  // 4. After typing completes — cursor fades out
+  tl.to(cursor, { opacity: 0, duration: FADE_OUT, ease: 'power1.in' }, typeDur);
+
+  // 5. Hold, then fade entire container out
+  const holdEnd = Math.max(typeDur + FADE_OUT, duration - FADE_OUT);
+  tl.to(container, { opacity: 0, duration: FADE_OUT, ease: 'power2.in' }, holdEnd);
+
+  window.__timelines = window.__timelines || [];
+  window.__timelines.push(tl);
+</script>
