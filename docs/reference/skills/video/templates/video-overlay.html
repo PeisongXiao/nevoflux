@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<!--
+  template: video-overlay
+  purpose: 在已有视频上叠加字幕/标注/水印 / Overlay template for mode-2 video-enhancement
+  best for: 模式 2（已有视频素材 + 品牌叠加）
+
+  AGENT INTEGRATION:
+  1. Replace {{base_video_src}} with assets/<filename>.mp4
+  2. Replace {{duration}} (default 20s) — must not exceed base video length
+  3. <video> stays muted — nf/single-audio: unmuted <video> = 1 audio source
+  4. Overlay track-index ≥ 5; watermark uses 50
+
+  VISUAL:
+  - Layer 0: base video, fullscreen, muted background
+  - Layer 5: scene-title (lower-third, 0.5–4.5s) — fade-in + accent rule draw
+  - Layer 5: lower-third name card (8–14s) — slide-in from left
+  - Layer 50: watermark pill (full duration) — fade-in/hold/fade-out
+
+  CONSTRAINTS:
+  - No <audio>, no TTS narration (nf/single-audio mutex)
+  - data-duration must not exceed base video length
+
+  attribution: Ported from HyperFrames overlay-montage-prod (Apache 2.0, v0.4.4).
+    Motifs: persistent_overlays.html (watermark fade), intro_outro.html (rule draw),
+    reveal1.html (slide-in lower-third).
+-->
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <style>
+    /* === Design tokens === */
+    :root {
+      --color-bg:         var(--color-background,  #000);
+      --color-fg:         var(--color-foreground,  #fff);
+      --color-surface:    var(--color-surface,     rgba(0,0,0,.55));
+      --color-accent:     var(--color-primary,     #e63946);
+      --font-hero:        var(--typography-hero-family,  'Inter', system-ui, sans-serif);
+      --font-body:        var(--typography-body-family,  'Inter', system-ui, sans-serif);
+      --fw-hero:          var(--typography-hero-weight,  700);
+      --fw-body:          var(--typography-body-weight,  500);
+      --sp-sm:  var(--spacing-sm,  8px);
+      --sp-md:  var(--spacing-md, 12px);
+      --sp-lg:  var(--spacing-lg, 16px);
+      --sp-xl:  var(--spacing-xl, 24px);
+      --r-md:   var(--rounded-md,  8px);
+      --safe-top:    var(--aspect-safe_top,    60px);
+      --safe-bottom: var(--aspect-safe_bottom, 100px);
+      --safe-sides:  var(--aspect-safe_sides,   80px);
+    }
+
+    body { margin: 0; background: var(--color-bg); overflow: hidden; font-family: var(--font-body); }
+
+    #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+
+    /* Base video — fullscreen background, no data-start (renderer controls currentTime) */
+    .base-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+    /* Overlay 1: scene title + accent rule — lower-third, motif: intro_outro rule-draw */
+    .overlay-title-block {
+      position: absolute;
+      left: var(--safe-sides);
+      bottom: calc(var(--safe-bottom) + 60px);
+      display: flex; flex-direction: column; align-items: flex-start;
+      opacity: 0;
+    }
+    .overlay-title-text {
+      font-family: var(--font-hero); font-weight: var(--fw-hero);
+      font-size: 72px; line-height: 1.1; letter-spacing: -.02em;
+      color: var(--color-fg); text-shadow: 0 2px 12px rgba(0,0,0,.6);
+    }
+    .overlay-title-rule {
+      width: 0%; height: 3px; background: var(--color-accent);
+      border-radius: 2px; margin-top: var(--sp-sm);
+    }
+
+    /* Overlay 2: watermark pill — top-right, motif: persistent_overlays fade */
+    .overlay-watermark {
+      position: absolute; top: var(--safe-top); right: var(--safe-sides);
+      font-family: var(--font-body); font-weight: var(--fw-body);
+      font-size: 28px; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--color-fg); background: var(--color-surface);
+      border: 1px solid rgba(255,255,255,.22); border-radius: var(--r-md);
+      padding: var(--sp-sm) var(--sp-lg); backdrop-filter: blur(4px);
+      opacity: 0;
+    }
+
+    /* Overlay 3: lower-third bar — slide-in from left, motif: reveal1 */
+    .overlay-lower-third {
+      position: absolute; left: 0; bottom: var(--safe-bottom);
+      display: flex; align-items: center; gap: var(--sp-md);
+      background: var(--color-surface); border-left: 6px solid var(--color-accent);
+      padding: var(--sp-md) var(--sp-xl);
+      transform: translateX(-100%); opacity: 0;
+    }
+    .lt-label { font-family: var(--font-body); font-weight: var(--fw-body); font-size: 22px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-accent); }
+    .lt-name  { font-family: var(--font-hero); font-weight: var(--fw-hero); font-size: 38px; line-height: 1.1; color: var(--color-fg); }
+    .lt-sub   { font-family: var(--font-body); font-weight: 400; font-size: 24px; color: rgba(255,255,255,.75); }
+
+    @media (prefers-reduced-motion: reduce) {
+      .overlay-title-block, .overlay-watermark, .overlay-lower-third { transition: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="stage"
+     data-composition-id="video-overlay"
+     data-width="1920" data-height="1080"
+     data-duration="20" data-fps="30"
+     data-bg="#000" data-start="0">
+
+  <!-- Base video — muted background layer; no data-start (not a timed clip) -->
+  <!-- AGENT: set src="{{base_video_src}}" -->
+  <video id="base-video" class="base-video"
+         src="assets/base-video.mp4"
+         muted preload="auto"></video>
+
+  <!-- Overlay 1: scene title (0.5s → 4.5s) — AGENT: replace text -->
+  <div id="overlay-title" class="clip overlay-title-block"
+       data-start="0.5" data-duration="4" data-track-index="5">
+    <div class="overlay-title-text">标题文本 / Scene Title</div>
+    <div id="title-rule" class="overlay-title-rule"></div>
+  </div>
+
+  <!-- Overlay 2: watermark (0s → 20s) — AGENT: replace BRAND -->
+  <div id="overlay-watermark" class="clip overlay-watermark"
+       data-start="0" data-duration="20" data-track-index="50">
+    BRAND
+  </div>
+
+  <!-- Overlay 3: lower-third (8s → 14s) — AGENT: fill label/name/title; adjust timing -->
+  <div id="overlay-lower-third" class="clip overlay-lower-third"
+       data-start="8" data-duration="6" data-track-index="5">
+    <div class="lt-label">嘉宾 / Guest</div>
+    <div class="lt-name">姓名 / Name</div>
+    <div class="lt-sub">职位 / Title</div>
+  </div>
+
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  window.__timelines = window.__timelines || [];
+
+  const tl = gsap.timeline({ paused: true });
+
+  // Overlay 1: scene title (0.5s–4.5s)
+  // Motif: intro_outro — title fade-in 0.6s + accent rule draws on 0.5s; exit fade-out 0.4s.
+  tl.fromTo('#overlay-title',
+    { opacity: 0, y: 16 },
+    { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' },
+    0.5,
+  );
+  tl.fromTo('#title-rule',
+    { width: '0%' },
+    { width: '100%', duration: 0.5, ease: 'power1.out' },
+    0.9,
+  );
+  tl.to('#overlay-title',
+    { opacity: 0, y: -8, duration: 0.4, ease: 'power2.in' },
+    4.1,
+  );
+
+  // Overlay 2: watermark (0s–20s)
+  // Motif: persistent_overlays — power2.inOut fade-in 0.8s at t=0.3; fade-out 0.8s at t=19.
+  tl.fromTo('#overlay-watermark',
+    { opacity: 0 },
+    { opacity: 1, duration: 0.8, ease: 'power2.inOut' },
+    0.3,
+  );
+  tl.to('#overlay-watermark',
+    { opacity: 0, duration: 0.8, ease: 'power2.inOut' },
+    19.0,
+  );
+
+  // Overlay 3: lower-third (8s–14s)
+  // Motif: reveal1 — slide in translateX(-100%→0) + opacity 0.5s; slide out 0.4s.
+  tl.fromTo('#overlay-lower-third',
+    { x: '-100%', opacity: 0 },
+    { x: '0%', opacity: 1, duration: 0.5, ease: 'power2.out' },
+    8.0,
+  );
+  tl.to('#overlay-lower-third',
+    { x: '-100%', opacity: 0, duration: 0.4, ease: 'power2.in' },
+    13.6,
+  );
+
+  window.__timelines.push(tl);
+</script>
+
+</body>
+</html>
