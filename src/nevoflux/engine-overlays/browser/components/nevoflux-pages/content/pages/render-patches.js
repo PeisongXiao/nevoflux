@@ -75,11 +75,25 @@ export const PATCHES_SOURCE = `
     };
   }
 
-  // postMessage-driven render-time clock updates.
+  // postMessage-driven render-time clock updates + timeline seek bridge.
+  //
+  // Render.js sends two messages per frame: 'setRenderTime' (advances the
+  // patched clock so Date.now/performance.now/Math.random are deterministic)
+  // and 'seek' (advances every paused GSAP timeline registered in
+  // window.__timelines). Without the seek bridge, compositions whose
+  // elements start at opacity:0 (the standard fromTo pattern in our
+  // /video templates) capture as 900 identical t=0 frames — i.e., a
+  // 76KB all-black 30-second MP4.
   window.addEventListener('message', function (evt) {
     var d = evt.data;
-    if (d && d.__nf_type === 'setRenderTime' && typeof d.seconds === 'number') {
+    if (!d || typeof d.seconds !== 'number') return;
+    if (d.__nf_type === 'setRenderTime') {
       window.__nfRenderTime = d.seconds;
+    } else if (d.__nf_type === 'seek') {
+      var tls = window.__timelines || [];
+      for (var i = 0; i < tls.length; i++) {
+        try { tls[i].seek(d.seconds); } catch (_) {}
+      }
     }
   });
 })();
