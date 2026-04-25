@@ -95,9 +95,9 @@ export const PATCHES_SOURCE = `
       window.__nfSeekLastT = d.seconds;
       window.__nfSeekTlCount = tls.length;
 
-      // Clip visibility windowing. Templates ship with `.clip { visibility:
-      // hidden }` so non-active scenes don't bleed in during render. Each
-      // .clip carries `data-start` (seconds) and `data-duration` (seconds);
+      // Clip visibility windowing. Templates ship with .clip { visibility:
+      // hidden } so non-active scenes don't bleed in during render. Each
+      // .clip carries data-start (seconds) and data-duration (seconds);
       // a clip is on iff start <= t < start + duration. Without this every
       // scene container stays hidden -> 76KB all-black MP4 even with the
       // seek bridge wired.
@@ -153,10 +153,14 @@ export const PATCHES_SOURCE = `
     } catch (_) {}
   }
   function _waitForTimelines() {
-    var start = performance.now();
+    // Use a setTimeout-counted budget instead of performance.now() because
+    // we just patched performance.now() to return __nfRenderTime * 1000
+    // (always 0 here) -- the patched clock would make timeout impossible.
+    var ticks = 0;
+    var maxTicks = 100; // 100 * 50ms = 5s safety budget
     function poll() {
       var tls = window.__timelines || [];
-      if (tls.length > 0 || performance.now() - start > 5000) {
+      if (tls.length > 0 || ticks++ >= maxTicks) {
         _signalReady();
         return;
       }
