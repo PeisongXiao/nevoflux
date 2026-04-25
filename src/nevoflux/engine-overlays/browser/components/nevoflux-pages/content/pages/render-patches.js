@@ -94,6 +94,22 @@ export const PATCHES_SOURCE = `
       window.__nfSeekCalls = (window.__nfSeekCalls || 0) + 1;
       window.__nfSeekLastT = d.seconds;
       window.__nfSeekTlCount = tls.length;
+
+      // Clip visibility windowing. Templates ship with `.clip { visibility:
+      // hidden }` so non-active scenes don't bleed in during render. Each
+      // .clip carries `data-start` (seconds) and `data-duration` (seconds);
+      // a clip is on iff start <= t < start + duration. Without this every
+      // scene container stays hidden -> 76KB all-black MP4 even with the
+      // seek bridge wired.
+      var clips = document.querySelectorAll('.clip');
+      for (var c = 0; c < clips.length; c++) {
+        var el = clips[c];
+        var s = parseFloat(el.dataset.start || '0');
+        var du = parseFloat(el.dataset.duration);
+        if (!isFinite(du)) du = Infinity;
+        el.style.visibility = (d.seconds >= s && d.seconds < s + du) ? 'visible' : 'hidden';
+      }
+
       for (var i = 0; i < tls.length; i++) {
         try { tls[i].seek(d.seconds); } catch (_) {}
       }
@@ -103,11 +119,12 @@ export const PATCHES_SOURCE = `
           __nf_type: 'seekAck',
           t: d.seconds,
           tlCount: tls.length,
+          clipCount: clips.length,
           callNo: window.__nfSeekCalls,
         }, '*');
       } catch (_) {}
       if (window.__nfSeekCalls === 1) {
-        console.log('[render-patches] first seek t=' + d.seconds + ' tls=' + tls.length);
+        console.log('[render-patches] first seek t=' + d.seconds + ' tls=' + tls.length + ' clips=' + clips.length);
       }
     }
   });
