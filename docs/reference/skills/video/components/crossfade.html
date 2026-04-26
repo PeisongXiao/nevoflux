@@ -1,0 +1,74 @@
+<!--
+  component: crossfade
+  purpose: 柔和淡入淡出场景转场 / Two-layer crossfade transition
+  best for: 情绪片段 / 文档片段 / cinematic 风
+
+  AGENT INTEGRATION:
+  1. 填充 .crossfade-from 与 .crossfade-to（img / video / div 均可）
+  2. 放在两个场景之间 (data-track-index=10)
+  3. 时长固定 0.8s，from-layer opacity 1→0，to-layer opacity 0→1
+
+  VISUAL:
+  - from-layer fades out linear over 0.8s
+  - to-layer fades in linear over 0.8s (synchronized)
+  - both layers fully cover stage (position: absolute; inset: 0)
+
+  CONSTRAINTS:
+  - duration 固定 0.8s
+  - from/to layer 必须完全覆盖 stage
+  - 无 attribution line（原创，无 HF 源）
+-->
+
+<style>
+  .crossfade {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .crossfade-layer {
+    position: absolute;
+    inset: 0;
+  }
+
+  .crossfade-from {
+    opacity: 1;
+  }
+
+  .crossfade-to {
+    opacity: 0;
+  }
+</style>
+
+<!-- AGENT: 填充 crossfade-from 与 crossfade-to 的内容（img/video/div），时长 0.8s -->
+<div class="clip crossfade"
+     data-start="0"
+     data-duration="0.8"
+     data-track-index="10">
+  <div class="crossfade-layer crossfade-from" data-role="from"></div>
+  <div class="crossfade-layer crossfade-to" data-role="to"></div>
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  const tl = gsap.timeline({ paused: true });
+
+  // Fade out from-layer: opacity 1 → 0 over 0.8s linear
+  tl.to(
+    '.crossfade .crossfade-from',
+    { opacity: 0, duration: 0.8, ease: 'none', overwrite: 'auto' },
+    0
+  );
+
+  // Fade in to-layer: opacity 0 → 1 over 0.8s linear (synchronized)
+  tl.to(
+    '.crossfade .crossfade-to',
+    { opacity: 1, duration: 0.8, ease: 'none', overwrite: 'auto' },
+    0
+  );
+
+  window.__timelines = window.__timelines || [];
+  window.__timelines.push(tl);
+</script>

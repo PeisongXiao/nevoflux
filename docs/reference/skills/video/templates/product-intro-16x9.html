@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<!--
+  template: product-intro-16x9
+  purpose: 16:9 横屏产品介绍（3 场景）/ Horizontal product intro (3 scenes)
+  best for: B2B 产品视频、网站头图视频、发布预热
+
+  AGENT INTEGRATION:
+  1. duration 推荐 25-35s；短内容（<15s）用 tiktok-hook 模板
+  2. scene-canvas 内置 3 个 feature slot（替换 <<FEATURE_N_*>> 占位符）
+     可选截图：将 <img src="assets/screenshot.png"> 放入 .feature-card 内
+  3. DESIGN.md colors/typography 全套 CSS 变量生效；覆盖 :root 变量即可
+  4. scene 1 + scene 3 各固定 2s；中间段落 duration = total - 4s（默认 30s → 26s）
+
+  VISUAL:
+  - 固定 1920×1080；每 scene 覆盖 100% stage，黑色/深色背景
+  - Scene 1 (0-2s): 品牌 logo 碎片从四角汇聚 + 品牌名淡入
+  - Scene 2 (2-28s): 深色网格画布，3 列 feature callout 卡片依次弹入
+  - Scene 3 (28-30s): logo 从右侧滑入 + 品牌语 + CTA URL 胶囊
+
+  AGENT USAGE:
+  1. <<BRAND_NAME>>      — 品牌/产品名（Scene 1 + Scene 3）
+  2. <<CANVAS_EYEBROW>>  — Scene 2 小标题（如 "Why <<BRAND_NAME>>"）
+  3. <<CANVAS_HEADLINE>> — Scene 2 大标题
+  4. <<FEATURE_N_ICON>>  — 3 个 emoji 图标（如 "⚡"、"🔒"、"🚀"）
+  5. <<FEATURE_N_TITLE>> — 3 条特性标题
+  6. <<FEATURE_N_DESC>>  — 3 条特性描述（各 1 句）
+  7. <<TAGLINE>>         — Scene 3 品牌语
+  8. <<CTA_URL>>         — Scene 3 URL 胶囊（如 "yourproduct.com"）
+
+  CONSTRAINTS:
+  - 固定 1920×1080；竖屏请用 tiktok-hook
+  - scene 1 / scene 3 各 2s；仅调整 scene-canvas 的 data-duration / data-start
+  - feature 固定 3 条（少则偏空，多则失去简洁）
+  - 禁止无限循环（禁用 repeat: negative-one）
+  - data-composition-id 必须存在（linter 要求）
+
+  attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See
+    /ai/project/nevoflux/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter/LICENSE-NOTICE.md
+-->
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <style>
+    /* Brand layer is provided by the daemon-injected <style data-nf-* > block
+       at the top of <head>. DO NOT redeclare --color-* with self-referencing
+       var() here — that's a cyclic reference per CSS spec and silently
+       invalidates the property, blanking every consumer rule. Instead, use
+       var(--color-X, #fallback) inline at every consumer site so the
+       template still previews sensibly when opened standalone. */
+    :root {
+      --color-surface:    #1e1e1e;
+      --color-border:     rgba(255, 255, 255, 0.12);
+
+      --font-hero:        var(--typography-hero-family,  'Inter', 'PingFang SC', -apple-system, sans-serif);
+      --font-body:        var(--typography-body-family,  'Inter', 'PingFang SC', -apple-system, sans-serif);
+      --font-weight-hero: var(--typography-hero-weight,  800);
+
+      --space-sm:         var(--spacing-sm,   8px);
+      --space-md:         var(--spacing-md,   16px);
+      --space-lg:         var(--spacing-lg,   32px);
+      --space-xl:         var(--spacing-xl,   64px);
+      --radius-md:        var(--rounded-md,   12px);
+
+      --ease-entrance:    var(--motion-ease_entrance,   power4.out);
+      --ease-default:     var(--motion-ease_default,    power2.out);
+      --stagger:          var(--motion-stagger_default, 0.12);
+
+      --safe-top:         var(--aspect-safe_top,    80px);
+      --safe-bottom:      var(--aspect-safe_bottom, 80px);
+      --safe-sides:       var(--aspect-safe_sides,  120px);
+    }
+
+    body { margin: 0; background: #000; overflow: hidden; font-family: var(--font-body); }
+
+    #stage {
+      position: relative;
+      width: 1920px; height: 1080px;
+      overflow: hidden;
+      background: var(--color-background, #0a0a0f);
+    }
+
+    /* Clip utility — runtime controls visibility */
+    .clip { visibility: hidden; }
+
+    /* Scenes — full-stage panels */
+    .scene {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      box-sizing: border-box;
+    }
+
+    /* ── Scene 1: Logo Intro ── */
+    .scene-logo-intro { background: var(--color-background, #0a0a0f); flex-direction: column; gap: 40px; }
+
+    .logo-intro-wrap { position: relative; width: 200px; height: 300px; }
+
+    .logo-piece { transform-origin: center center; opacity: 0; }
+
+    .logo-ring {
+      position: absolute; top: 50%; left: 50%;
+      width: 500px; height: 500px;
+      margin: -250px 0 0 -250px;
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.6);
+      pointer-events: none; opacity: 0;
+    }
+
+    .intro-brand-name {
+      font-family: var(--font-hero); font-weight: var(--font-weight-hero);
+      font-size: 96px; letter-spacing: -0.03em;
+      color: var(--color-foreground, #ffffff); margin: 0; opacity: 0; text-align: center;
+    }
+
+    /* ── Scene 2: Product Canvas ── */
+    .scene-canvas {
+      /* Drive from --color-background so DESIGN.md controls every scene
+         uniformly. See product-intro-9x16.html for rationale. */
+      background: var(--color-background, #0a0a0f);
+      flex-direction: column; justify-content: center;
+      padding: var(--safe-top) var(--safe-sides) var(--safe-bottom);
+    }
+
+    .canvas-dot-grid {
+      position: absolute; inset: 0;
+      background-image: radial-gradient(#2c2c2c 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+    }
+
+    .canvas-header {
+      position: relative;
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      margin-bottom: 80px; opacity: 0;
+    }
+
+    .canvas-eyebrow {
+      font-family: var(--font-body); font-size: 28px; font-weight: 600;
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-primary, #a259ff);
+    }
+
+    .canvas-headline {
+      font-family: var(--font-hero); font-weight: var(--font-weight-hero);
+      font-size: 88px; letter-spacing: -0.03em;
+      color: var(--color-foreground, #ffffff); margin: 0; text-align: center;
+    }
+
+    .features-grid {
+      position: relative;
+      display: flex; flex-direction: row; gap: 48px;
+      width: 100%; max-width: 1560px;
+    }
+
+    .feature-card {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 48px 40px;
+      display: flex; flex-direction: column; gap: 20px;
+      opacity: 0;
+    }
+
+    .feature-icon-wrap {
+      width: 64px; height: 64px; border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .feature-card:nth-child(1) .feature-icon-wrap { background: color-mix(in srgb, var(--color-primary, #a259ff)   20%, transparent); }
+    .feature-card:nth-child(2) .feature-icon-wrap { background: color-mix(in srgb, var(--color-secondary, #1abcfe) 20%, transparent); }
+    .feature-card:nth-child(3) .feature-icon-wrap { background: color-mix(in srgb, var(--color-accent, #0acf83)    20%, transparent); }
+
+    .feature-icon { font-size: 32px; line-height: 1; }
+
+    .feature-title {
+      font-family: var(--font-hero); font-weight: var(--font-weight-hero);
+      font-size: 40px; letter-spacing: -0.02em; color: var(--color-foreground, #ffffff); margin: 0;
+    }
+
+    .feature-desc {
+      font-family: var(--font-body); font-size: 28px; line-height: 1.5;
+      color: rgba(255, 255, 255, 0.6); margin: 0;
+    }
+
+    /* ── Scene 3: Logo Outro ── */
+    .scene-logo-outro { background: var(--color-background, #0a0a0f); flex-direction: column; gap: 48px; }
+
+    .outro-logo-wrap { width: 200px; height: 300px; position: relative; }
+
+    .outro-piece { transform-origin: center center; opacity: 0; }
+
+    .outro-glow {
+      position: absolute; top: 50%; left: 50%;
+      width: 500px; height: 500px; margin: -250px 0 0 -250px;
+      border-radius: 50%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--color-primary, #a259ff) 30%, transparent) 0%, transparent 70%);
+      pointer-events: none; opacity: 0;
+    }
+
+    .outro-text-group { display: flex; flex-direction: column; align-items: center; gap: 32px; }
+
+    .outro-tagline {
+      font-family: var(--font-hero); font-weight: 500;
+      font-size: 52px; letter-spacing: -0.01em;
+      color: var(--color-foreground, #ffffff); text-align: center; margin: 0; opacity: 0;
+    }
+
+    .outro-cta-pill {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 999px; padding: 16px 48px;
+      font-family: var(--font-body); font-size: 32px; font-weight: 600;
+      letter-spacing: 0.03em; color: rgba(255, 255, 255, 0.7); opacity: 0;
+    }
+
+    /* ── Flash transition overlay ── */
+    .flash-overlay {
+      position: absolute; inset: 0;
+      background: #fff; pointer-events: none; opacity: 0; z-index: 99;
+    }
+  </style>
+</head>
+<body>
+
+<div id="stage"
+     data-composition-id="product-intro-16x9"
+     data-width="1920"
+     data-height="1080"
+     data-duration="30"
+     data-fps="30"
+     data-bg="#0a0a0f"
+     data-start="0">
+
+  <!-- Scene 1 (0 – 2s): Logo reveal — pieces converge from corners. -->
+  <!-- AGENT: replace <<BRAND_NAME>> -->
+  <div class="scene scene-logo-intro clip" id="scene-logo-intro"
+       data-start="0" data-duration="2" data-track-index="1">
+
+    <div class="logo-intro-wrap" id="logo-intro-wrap">
+      <svg viewBox="0 0 160 240" width="160" height="240" aria-hidden="true">
+        <path id="lp-tl" class="logo-piece"
+          d="M 0 40 C 0 17.9 17.9 0 40 0 L 80 0 L 80 80 L 40 80 C 17.9 80 0 62.1 0 40 Z"
+          fill="var(--color-primary, #a259ff)" />
+        <path id="lp-tr" class="logo-piece"
+          d="M 80 0 L 120 0 C 142.1 0 160 17.9 160 40 C 160 62.1 142.1 80 120 80 L 80 80 L 80 0 Z"
+          fill="var(--color-secondary, #1abcfe)" />
+        <path id="lp-ml" class="logo-piece"
+          d="M 0 120 C 0 97.9 17.9 80 40 80 L 80 80 L 80 160 L 40 160 C 17.9 160 0 142.1 0 120 Z"
+          fill="var(--color-accent, #0acf83)" />
+        <circle id="lp-mr" class="logo-piece" cx="120" cy="120" r="40"
+          fill="var(--color-secondary, #1abcfe)" />
+        <path id="lp-bl" class="logo-piece"
+          d="M 0 200 C 0 177.9 17.9 160 40 160 L 80 160 L 80 200 C 80 222.1 62.1 240 40 240 C 17.9 240 0 222.1 0 200 Z"
+          fill="var(--color-accent, #0acf83)" />
+      </svg>
+      <div class="logo-ring" id="logo-ring"></div>
+    </div>
+
+    <h1 class="intro-brand-name" id="intro-brand-name"><<BRAND_NAME>></h1>
+  </div>
+
+  <!-- Flash 1→2 — peak at 2.0s (the cut moment); see 9x16 sibling for
+       the rationale on why a flash that peaks before the cut feels like
+       an awkward extra "white blip" rather than a clean transition. -->
+  <div class="flash-overlay clip" id="flash-1"
+       data-start="1.88" data-duration="0.24" data-track-index="50"></div>
+
+  <!-- Scene 2 (2 – 28s): Product canvas — 3 feature callout cards side-by-side. -->
+  <!-- AGENT: replace <<CANVAS_EYEBROW>>, <<CANVAS_HEADLINE>>, and all <<FEATURE_N_*>> -->
+  <div class="scene scene-canvas clip" id="scene-canvas"
+       data-start="2" data-duration="26" data-track-index="1">
+
+    <div class="canvas-dot-grid" aria-hidden="true"></div>
+
+    <div class="canvas-header" id="canvas-header">
+      <span class="canvas-eyebrow"><<CANVAS_EYEBROW>></span>
+      <h2 class="canvas-headline"><<CANVAS_HEADLINE>></h2>
+    </div>
+
+    <div class="features-grid" id="features-grid">
+      <!-- Feature 1 — AGENT: replace <<FEATURE_1_ICON>>, <<FEATURE_1_TITLE>>, <<FEATURE_1_DESC>> -->
+      <div class="feature-card" id="feature-card-1">
+        <div class="feature-icon-wrap"><span class="feature-icon"><<FEATURE_1_ICON>></span></div>
+        <h3 class="feature-title"><<FEATURE_1_TITLE>></h3>
+        <p class="feature-desc"><<FEATURE_1_DESC>></p>
+      </div>
+      <!-- Feature 2 — AGENT: replace <<FEATURE_2_ICON>>, <<FEATURE_2_TITLE>>, <<FEATURE_2_DESC>> -->
+      <div class="feature-card" id="feature-card-2">
+        <div class="feature-icon-wrap"><span class="feature-icon"><<FEATURE_2_ICON>></span></div>
+        <h3 class="feature-title"><<FEATURE_2_TITLE>></h3>
+        <p class="feature-desc"><<FEATURE_2_DESC>></p>
+      </div>
+      <!-- Feature 3 — AGENT: replace <<FEATURE_3_ICON>>, <<FEATURE_3_TITLE>>, <<FEATURE_3_DESC>> -->
+      <div class="feature-card" id="feature-card-3">
+        <div class="feature-icon-wrap"><span class="feature-icon"><<FEATURE_3_ICON>></span></div>
+        <h3 class="feature-title"><<FEATURE_3_TITLE>></h3>
+        <p class="feature-desc"><<FEATURE_3_DESC>></p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Flash 2→3 — peak at 28.0s (the cut moment); see flash-1 comment. -->
+  <div class="flash-overlay clip" id="flash-2"
+       data-start="27.88" data-duration="0.24" data-track-index="50"></div>
+
+  <!-- Scene 3 (28 – 30s): Logo outro — pieces slide from right + tagline + CTA. -->
+  <!-- AGENT: replace <<TAGLINE>>, <<CTA_URL>> -->
+  <div class="scene scene-logo-outro clip" id="scene-logo-outro"
+       data-start="28" data-duration="2" data-track-index="1">
+
+    <div class="outro-logo-wrap" id="outro-logo-wrap">
+      <div class="outro-glow" id="outro-glow" aria-hidden="true"></div>
+      <svg viewBox="0 0 160 240" width="160" height="240" aria-hidden="true">
+        <path id="op-tl" class="outro-piece"
+          d="M 0 40 C 0 17.9 17.9 0 40 0 L 80 0 L 80 80 L 40 80 C 17.9 80 0 62.1 0 40 Z"
+          fill="var(--color-primary, #a259ff)" />
+        <path id="op-tr" class="outro-piece"
+          d="M 80 0 L 120 0 C 142.1 0 160 17.9 160 40 C 160 62.1 142.1 80 120 80 L 80 80 L 80 0 Z"
+          fill="var(--color-secondary, #1abcfe)" />
+        <path id="op-ml" class="outro-piece"
+          d="M 0 120 C 0 97.9 17.9 80 40 80 L 80 80 L 80 160 L 40 160 C 17.9 160 0 142.1 0 120 Z"
+          fill="var(--color-accent, #0acf83)" />
+        <circle id="op-mr" class="outro-piece" cx="120" cy="120" r="40"
+          fill="var(--color-secondary, #1abcfe)" />
+        <path id="op-bl" class="outro-piece"
+          d="M 0 200 C 0 177.9 17.9 160 40 160 L 80 160 L 80 200 C 80 222.1 62.1 240 40 240 C 17.9 240 0 222.1 0 200 Z"
+          fill="var(--color-accent, #0acf83)" />
+      </svg>
+    </div>
+
+    <div class="outro-text-group">
+      <p class="outro-tagline" id="outro-tagline"><<TAGLINE>></p>
+      <div class="outro-cta-pill" id="outro-cta-pill"><<CTA_URL>></div>
+    </div>
+
+  </div>
+
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  window.__timelines = window.__timelines || [];
+
+  // Single master timeline — 0-30s, all 3 scenes.
+  // All position tweens use fromTo so GSAP owns the full transform state.
+  const tl = gsap.timeline({ paused: true });
+
+  // ── Scene 1 (0 – 2s): Logo assembly ──────────────────────────────────────
+  // 5 logo pieces fly from viewport corners to center (stagger 0.05s each).
+  // Collision at ~0.7s: ring expands, logo micro-pulses, brand name fades up.
+  const pieceData = [
+    { id: '#lp-tl', x: -960, y: -540 },
+    { id: '#lp-tr', x:  960, y: -540 },
+    { id: '#lp-ml', x: -960, y:    0 },
+    { id: '#lp-mr', x:  960, y:    0 },
+    { id: '#lp-bl', x: -960, y:  540 },
+  ];
+  pieceData.forEach(({ id, x, y }, i) => {
+    tl.fromTo(id,
+      { x, y, opacity: 0 },
+      { x: 0, y: 0, opacity: 1, duration: 0.55, ease: 'back.out(1.1)' },
+      i * 0.05,
+    );
+  });
+
+  // Ring pulse
+  tl.fromTo('#logo-ring',
+    { scale: 0.2, opacity: 0.8 },
+    { scale: 3,   opacity: 0,   duration: 0.5, ease: 'power2.out' },
+    0.70,
+  );
+
+  // Logo micro-pulse (spring in → return). Use fromTo for the first hop
+  // and `to` for the return — back-to-back fromTo on the same target
+  // double-immediateRenders at construction time, the LATER one wins for
+  // the t=0 set, and when the earlier one activates GSAP snaps the
+  // element to its `from` state, producing a visible flicker right when
+  // the scene becomes visible. `to()` skips the immediateRender and just
+  // continues from whatever value the previous tween left.
+  tl.fromTo('#logo-intro-wrap',
+    { scale: 1 },
+    { scale: 1.06, duration: 0.12, ease: 'power2.out' },
+    0.72,
+  );
+  tl.to('#logo-intro-wrap',
+    { scale: 1, duration: 0.14, ease: 'power2.in' },
+    0.84,
+  );
+
+  // Brand name fades up
+  tl.fromTo('#intro-brand-name',
+    { y: 20, opacity: 0 },
+    { y:  0, opacity: 1, duration: 0.4, ease: 'power3.out' },
+    0.90,
+  );
+
+  // Flash 1→2 — yoyo peak at t=2.0 (cut moment). yoyo+repeat:1 means
+  // forward 0.12s + backward 0.12s = total 0.24s, peak at start+0.12.
+  // So position=1.88 puts the peak at exactly 2.0 where the scene-1→
+  // scene-2 clip swap happens, properly masking the transition.
+  tl.fromTo('#flash-1',
+    { opacity: 0 },
+    { opacity: 1, duration: 0.12, yoyo: true, repeat: 1, ease: 'power2.inOut' },
+    1.88,
+  );
+
+  // ── Scene 2 (2 – 28s): Product canvas ────────────────────────────────────
+  // Header slides up, then 3 feature cards stagger in with back.out spring.
+  // Cards get 3 rounds of scale-highlight cycling (each card ~2.4s window).
+
+  tl.fromTo('#canvas-header',
+    { y: 40, opacity: 0 },
+    { y:  0, opacity: 1, duration: 0.6, ease: 'power3.out' },
+    2.20,
+  );
+
+  ['#feature-card-1', '#feature-card-2', '#feature-card-3'].forEach((id, i) => {
+    tl.fromTo(id,
+      { y: 60, opacity: 0 },
+      { y:  0, opacity: 1, duration: 0.55, ease: 'back.out(1.5)' },
+      2.60 + i * 0.15,
+    );
+  });
+
+  // Feature highlight cycle — 3 cards × 3 rounds (finite, ~2.4s per beat).
+  // Use `to` (no immediateRender) instead of fromTo so each pulse picks
+  // up the card's current scale. See the 9x16 variant for the full
+  // rationale.
+  [
+    '#feature-card-1', '#feature-card-2', '#feature-card-3',
+    '#feature-card-1', '#feature-card-2', '#feature-card-3',
+    '#feature-card-1', '#feature-card-2', '#feature-card-3',
+  ].forEach((id, i) => {
+    const t = 3.60 + i * 2.40;
+    tl.to(id,
+      { scale: 1.02, duration: 0.30, ease: 'power2.out' },
+      t,
+    );
+    tl.to(id,
+      { scale: 1, duration: 0.30, ease: 'power2.in' },
+      t + 0.30,
+    );
+  });
+
+  // Canvas exit — slide left before flash. Use `to` (not fromTo) to
+  // avoid the dual-immediateRender flicker on canvas-header (entry
+  // fromTo at 2.20 + exit fromTo at 27.20 would race at t=0).
+  tl.to('#canvas-header',
+    { x: -80, opacity: 0, duration: 0.35, ease: 'power2.in' },
+    27.20,
+  );
+  tl.to('#features-grid',
+    { x: -80, opacity: 0, duration: 0.35, ease: 'power2.in' },
+    27.30,
+  );
+
+  // Flash 2→3 — yoyo peak at t=28.0 (cut moment). See flash-1 comment.
+  tl.fromTo('#flash-2',
+    { opacity: 0 },
+    { opacity: 1, duration: 0.12, yoyo: true, repeat: 1, ease: 'power2.inOut' },
+    27.88,
+  );
+
+  // ── Scene 3 (28 – 30s): Logo outro + CTA ─────────────────────────────────
+  // Pieces slide in from right with 0.08s ripple stagger.
+  // Glow bloom + logo pulse, then tagline and CTA pill fade up.
+
+  ['#op-tl', '#op-tr', '#op-ml', '#op-mr', '#op-bl'].forEach((id, i) => {
+    tl.fromTo(id,
+      { x: 1920, opacity: 0 },
+      { x:    0, opacity: 1, duration: 0.55, ease: 'power4.out' },
+      28.10 + i * 0.08,
+    );
+  });
+
+  // Glow bloom — most visible flicker case in the unfixed version: the
+  // second fromTo's t=0 immediateRender left the glow at op:1,scale:1.2,
+  // so when scene-3 became visible at 28.0 the glow was already lit; at
+  // 28.55 it snapped down to op:0,scale:0.5 before re-blooming, producing
+  // an obvious "flash" at scene start. Use `to` for the second hop.
+  tl.fromTo('#outro-glow',
+    { opacity: 0, scale: 0.5 },
+    { opacity: 1, scale: 1.2, duration: 0.35, ease: 'power2.out' },
+    28.55,
+  );
+  tl.to('#outro-glow',
+    { opacity: 0, scale: 2.0, duration: 0.80, ease: 'power2.out' },
+    28.90,
+  );
+
+  // Logo pulse — second hop is `to`, not fromTo (see comments above).
+  tl.fromTo('#outro-logo-wrap',
+    { scale: 1 },
+    { scale: 1.06, duration: 0.2, ease: 'back.out(1.7)' },
+    28.60,
+  );
+  tl.to('#outro-logo-wrap',
+    { scale: 1, duration: 0.2, ease: 'power2.inOut' },
+    28.80,
+  );
+
+  // Tagline + CTA pill
+  tl.fromTo('#outro-tagline',
+    { y: 20, opacity: 0 },
+    { y:  0, opacity: 1, duration: 0.45, ease: 'power3.out' },
+    28.75,
+  );
+  tl.fromTo('#outro-cta-pill',
+    { y: 16, opacity: 0 },
+    { y:  0, opacity: 1, duration: 0.40, ease: 'power3.out' },
+    29.00,
+  );
+
+  window.__timelines.push(tl);
+
+  // Auto-play in preview mode (no render driver present)
+  if (typeof window.__nfRenderTime === 'undefined') tl.play();
+</script>
+
+</body>
+</html>

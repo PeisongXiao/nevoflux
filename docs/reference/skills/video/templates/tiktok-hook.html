@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<!--
+  template: tiktok-hook
+  purpose: 9:16 TikTok/Reels 开场 hook / TikTok-style vertical hook
+  best for: 小红书/抖音/TikTok 前 3 秒吸睛开场
+
+  AGENT INTEGRATION:
+  1. scene-1 是主 hook 文案（问题或痛点，单行或 1-2 词）
+  2. scene-2 展开 1-2 个具体 beat
+  3. scene-3 是 CTA（"link in bio" / 品牌名 / 动作指引）
+  4. 节奏紧凑，每 scene ≤ 2.5s
+  5. 配合 DESIGN.md motion.tone = "energetic" 使用
+
+  VISUAL:
+  - 纵向 1080×1920，每 scene 覆盖 100% stage
+  - 每 scene 有独立饱和色背景（DESIGN.md palette 轮转）
+  - 大字号（黑体），scale/opacity 弹入
+  - scene-3 CTA 固定在底部三分之一区域
+
+  AGENT USAGE:
+  1. 替换 <<HOOK_WORD>> — 主钩子词（1–2 词，全大写冲击力更强）
+  2. 替换 <<HEADLINE_LINE_1>> / <<HEADLINE_LINE_2>> — 支撑 beat（1–2 句）
+  3. 替换 <<CTA_TEXT>> — CTA 文案（如 "link in bio" / 品牌名）
+  4. 颜色全部走 CSS 变量，不要硬编码
+
+  CONSTRAINTS:
+  - 固定 9:16 竖屏，width=1080 height=1920
+  - #stage data-composition-id 必须存在（linter 要求）
+  - 首场景需在 data-start=0 出现文字（避免空白起始帧）
+  - fps 30 / duration 6s
+  - 禁止 repeat: -1（无限循环破坏帧捕获）
+
+  attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See
+    /ai/project/nevoflux/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter/LICENSE-NOTICE.md
+-->
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <style>
+    /* === Design tokens — agent injects DESIGN.md values here === */
+    :root {
+      /* Colors — rotate from DESIGN.md palette per scene */
+      --color-scene1-bg:  var(--color-primary,   #e63946);
+      --color-scene2-bg:  var(--color-secondary,  #023e8a);
+      --color-scene3-bg:  var(--color-accent,     #f4a261);
+
+      /* Foreground always white for saturation-pop backgrounds */
+      --color-fg:         var(--color-foreground, #ffffff);
+
+      /* Typography */
+      --font-hero:        var(--typography-hero-family, 'Inter', 'PingFang SC', -apple-system, sans-serif);
+      --font-weight-hero: var(--typography-hero-weight, 900);
+
+      /* Spacing */
+      --pad-h:            var(--spacing-lg, 64px);
+
+      /* Safe-area margins (portrait, 9:16) */
+      --safe-top:         var(--aspect-safe_top,    120px);
+      --safe-bottom:      var(--aspect-safe_bottom, 200px);
+      --safe-sides:       var(--aspect-safe_sides,  48px);
+
+      /* Motion */
+      --ease-entrance:    var(--motion-ease_entrance, power4.out);
+      --ease-default:     var(--motion-ease_default,  power2.out);
+    }
+
+    body {
+      margin: 0;
+      background: #000;
+      overflow: hidden;
+      font-family: var(--font-hero);
+    }
+
+    /* ── Stage ── */
+    #stage {
+      position: relative;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+    }
+
+    /* ── Scenes ── */
+    .scene {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: var(--pad-h) var(--safe-sides);
+      box-sizing: border-box;
+    }
+
+    .scene-1 { background: var(--color-scene1-bg); }
+    .scene-2 { background: var(--color-scene2-bg); }
+    .scene-3 {
+      background: var(--color-scene3-bg);
+      /* CTA anchored to bottom third */
+      justify-content: flex-end;
+      padding-bottom: calc(var(--safe-bottom) + 80px);
+    }
+
+    /* ── Typography ── */
+    .hook-word {
+      font-family: var(--font-hero);
+      font-weight: var(--font-weight-hero);
+      font-size: 220px;
+      line-height: 0.92;
+      letter-spacing: -0.04em;
+      text-align: center;
+      color: var(--color-fg);
+      text-transform: uppercase;
+      /* Initial state: GSAP drives from here */
+      opacity: 0;
+    }
+
+    .headline-block {
+      text-align: center;
+      color: var(--color-fg);
+    }
+
+    .headline-line {
+      font-family: var(--font-hero);
+      font-weight: var(--font-weight-hero);
+      font-size: 108px;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      display: block;
+      opacity: 0;
+    }
+
+    .headline-line + .headline-line {
+      margin-top: 12px;
+    }
+
+    .cta-pill {
+      font-family: var(--font-hero);
+      font-weight: var(--font-weight-hero);
+      font-size: 84px;
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+      color: var(--color-fg);
+      text-align: center;
+      background: rgba(0, 0, 0, 0.22);
+      border: 4px solid rgba(255, 255, 255, 0.55);
+      border-radius: 999px;
+      padding: 28px 72px;
+      white-space: nowrap;
+      opacity: 0;
+    }
+
+    /* ── Transition flash overlay ── */
+    .flash-overlay {
+      position: absolute;
+      inset: 0;
+      background: #fff;
+      pointer-events: none;
+      opacity: 0;
+      z-index: 99;
+    }
+  </style>
+</head>
+<body>
+
+<div id="stage"
+     data-composition-id="tiktok-hook"
+     data-width="1080"
+     data-height="1920"
+     data-duration="6"
+     data-fps="30"
+     data-bg="#000"
+     data-start="0">
+
+  <!-- Scene 1 (0 → 1.5s): big single-word hook with flash-in -->
+  <!-- AGENT: replace <<HOOK_WORD>> with 1–2 all-caps words (e.g. "WAIT." / "WRONG.") -->
+  <div class="scene scene-1 clip"
+       id="scene-1"
+       data-start="0"
+       data-duration="1.5"
+       data-track-index="1">
+    <div class="hook-word" id="hook-word">WAIT.</div>
+  </div>
+
+  <!-- Flash transition 1 → 2 at 1.4s -->
+  <div class="flash-overlay clip"
+       id="flash-1"
+       data-start="1.4"
+       data-duration="0.2"
+       data-track-index="50"></div>
+
+  <!-- Scene 2 (1.5 → 4.0s): supporting 1-2 beat headline with bouncy reveal -->
+  <!-- AGENT: replace <<HEADLINE_LINE_1>> and <<HEADLINE_LINE_2>>             -->
+  <!--        remove the second .headline-line if you only need one beat      -->
+  <div class="scene scene-2 clip"
+       id="scene-2"
+       data-start="1.5"
+       data-duration="2.5"
+       data-track-index="1">
+    <div class="headline-block">
+      <span class="headline-line" id="headline-l1"><<HEADLINE_LINE_1>></span>
+      <span class="headline-line" id="headline-l2"><<HEADLINE_LINE_2>></span>
+    </div>
+  </div>
+
+  <!-- Flash transition 2 → 3 at 3.9s -->
+  <div class="flash-overlay clip"
+       id="flash-2"
+       data-start="3.9"
+       data-duration="0.2"
+       data-track-index="50"></div>
+
+  <!-- Scene 3 (4.0 → 6.0s): CTA pinned at bottom third -->
+  <!-- AGENT: replace <<CTA_TEXT>> (e.g. "Link in bio ↑" / "Follow now") -->
+  <div class="scene scene-3 clip"
+       id="scene-3"
+       data-start="4.0"
+       data-duration="2.0"
+       data-track-index="1">
+    <div class="cta-pill" id="cta-pill"><<CTA_TEXT>></div>
+  </div>
+
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  window.__timelines = window.__timelines || [];
+
+  // ── Scene 1 timeline (0 – 1.5s): flash-in via power4.out ──────────────────
+  // Hook word: scale 1.4 → 1.0, opacity 0 → 1 in 0.4s, hold.
+  const tl1 = gsap.timeline({ paused: true });
+  tl1.fromTo('#hook-word',
+    { scale: 1.4, opacity: 0 },
+    { scale: 1.0, opacity: 1, duration: 0.4, ease: 'power4.out' },
+    0,
+  );
+  // ── Flash 1 (1.4 – 1.6s): white flash through-cut ─────────────────────────
+  // Single yoyo fromTo — one selector, one tween: opacity 0 → 1 → 0.
+  // yoyo + repeat: 1 produces two cycles of 0.1s each = 0.2s total.
+  tl1.fromTo('#flash-1',
+    { opacity: 0 },
+    { opacity: 1, duration: 0.1, yoyo: true, repeat: 1, ease: 'power2.inOut' },
+    1.4,
+  );
+
+  // ── Scene 2 (1.5 – 4.0s): bouncy reveal ──────────────────────────────────
+  // Line 1: scale 0.6 → 1, back.out(2), 0.5s
+  // Line 2: scale 0.6 → 1, back.out(2), staggered 0.25s
+  tl1.fromTo('#headline-l1',
+    { scale: 0.6, opacity: 0 },
+    { scale: 1.0, opacity: 1, duration: 0.5, ease: 'back.out(2)' },
+    1.6,
+  );
+  tl1.fromTo('#headline-l2',
+    { scale: 0.6, opacity: 0 },
+    { scale: 1.0, opacity: 1, duration: 0.5, ease: 'back.out(2)' },
+    1.85,
+  );
+
+  // ── Flash 2 (3.9 – 4.1s): white flash through-cut ─────────────────────────
+  // Single yoyo fromTo — same pattern as flash-1.
+  tl1.fromTo('#flash-2',
+    { opacity: 0 },
+    { opacity: 1, duration: 0.1, yoyo: true, repeat: 1, ease: 'power2.inOut' },
+    3.9,
+  );
+
+  // ── Scene 3 (4.0 – 6.0s): CTA slide-up ───────────────────────────────────
+  // CTA pill: y 60 → 0, opacity 0 → 1, power2.out, 0.4s — single tween.
+  tl1.fromTo('#cta-pill',
+    { y: 60, opacity: 0 },
+    { y: 0, opacity: 1, duration: 0.4, ease: 'power2.out' },
+    4.1,
+  );
+
+  window.__timelines.push(tl1);
+
+  // Auto-play in preview mode (no render driver present)
+  if (typeof window.__nfRenderTime === 'undefined') tl1.play();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!--
+  component: screenshot-reveal
+  purpose: 网站截图 3D 倾斜展示（website 模式主视觉）
+  best for: 模式 3 (website-to-video) Scene 2 的网站 hero 展示
+
+  AGENT INTEGRATION:
+  1. 拷进 #stage 内部
+  2. 确认 assets/hero.png 已存在（来自 extract_visual_identity.hero_screenshot）
+  3. 调整 data-start / data-duration 匹配 scene 时间
+  4. 可选：替换顶部 badge 文本（"BRAND NEW" / "LIVE" / 品牌词）
+
+  VISUAL:
+  - 网站截图倾斜 -8° 横轴 + 4° 纵轴，perspective 透视
+  - 光泽扫过一次（类似 Apple 产品介绍的"金属光"）
+  - 底部投影 + 品牌色 glow
+  - 右上角 badge 弹入
+
+  CONSTRAINTS:
+  - CSS 3D（perspective + rotateY）——不是 Three.js，不需要 __threeRenderers
+  - 截图图片是静态的，不依赖 WebGL capture 问题
+-->
+
+<style>
+  .screenshot-reveal {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    perspective: 1400px;
+    width: 1440px; height: 810px;
+    pointer-events: none;
+  }
+  .screenshot-reveal .screen {
+    position: relative;
+    width: 100%; height: 100%;
+    transform: rotateY(-8deg) rotateX(4deg);
+    transform-origin: center;
+    border-radius: 12px;
+    box-shadow:
+      0 40px 120px rgba(0, 0, 0, 0.6),
+      0 0 80px var(--primary, rgba(26, 107, 107, 0.3));
+    overflow: hidden;
+    background: #000;
+  }
+  .screenshot-reveal .screen img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    object-position: top;
+    display: block;
+  }
+  .screenshot-reveal .gloss {
+    position: absolute;
+    top: 0; left: -50%;
+    width: 40%; height: 100%;
+    background: linear-gradient(
+      105deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.4) 50%,
+      transparent 70%
+    );
+    pointer-events: none;
+    mix-blend-mode: overlay;
+    opacity: 0;
+  }
+  .screenshot-reveal .badge {
+    position: absolute;
+    top: -40px; right: -40px;
+    padding: 16px 32px;
+    background: var(--accent, #ffcc33);
+    color: var(--bg-dark, #0b1020);
+    border-radius: 999px;
+    font-size: 32px; font-weight: 800;
+    letter-spacing: 0.04em;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+</style>
+
+<!-- AGENT: 修改 data-start / data-duration / badge 文本 / assets 路径 -->
+<div class="clip screenshot-reveal"
+     id="screenshot-reveal-1"
+     data-start="4.3"
+     data-duration="5.7"
+     data-track-index="1">
+  <div class="screen">
+    <img src="assets/hero.png" alt="website screenshot">
+    <div class="gloss"></div>
+  </div>
+  <div class="badge">LIVE</div>
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  const tl = gsap.timeline({ paused: true });
+
+  // 屏幕从缩小旋转状态入场
+  tl.from('#screenshot-reveal-1 .screen',
+    { scale: 0.7, opacity: 0, rotateY: 20, duration: 1.0, ease: 'expo.out' },
+    4.3  // = data-start
+  );
+
+  // 光泽扫过：从左 (-50%) 到右 (150%)
+  tl.fromTo('#screenshot-reveal-1 .gloss',
+    { left: '-50%', opacity: 0 },
+    { left: '150%', opacity: 1, duration: 1.2, ease: 'power1.inOut' },
+    5.3
+  );
+  tl.to('#screenshot-reveal-1 .gloss',
+    { opacity: 0, duration: 0.3, ease: 'power1.out' },
+    6.2
+  );
+
+  // Badge 弹入
+  tl.from('#screenshot-reveal-1 .badge',
+    { scale: 0, rotation: -20, opacity: 0, duration: 0.5, ease: 'back.out(2)' },
+    4.9
+  );
+  // Badge 轻微脉冲（有限 repeat，禁止 -1）
+  // scene duration 5.7s, 脉冲周期 1s, 从 6.0s 开始 → 可容纳 3 次
+  tl.to('#screenshot-reveal-1 .badge',
+    { scale: 1.08, duration: 0.5, yoyo: true, repeat: 3, ease: 'sine.inOut' },
+    6.0
+  );
+
+  // window.__timelines.push(tl);  // 合并进主 timeline 时不 push
+</script>
+
+<!--
+  VARIANT 提示：
+  - 直正屏幕（不倾斜）：删掉 .screen 的 rotateY/rotateX
+  - 双屏对比：复制整块，一个偏左 rotateY:-12、一个偏右 rotateY:12
+  - 手机 mockup：width/height 改 540×1170，border-radius 改 48px
+
+  数据提供方：
+  这个 component 依赖 extract_visual_identity 返回的 hero_screenshot。
+  如果没调 extract_visual_identity（手动模式），用户需要自行上传截图。
+-->

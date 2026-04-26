@@ -1,0 +1,219 @@
+<!--
+  component: data-chart-bar-race
+  purpose: 横向条形图 race / Horizontal bar chart race (top-N)
+  best for: 排名 / 市场份额 / 年度对比
+
+  AGENT INTEGRATION:
+  1. 修改 <script> 里的 DATA 数组（最多 6 条，value 单位统一）
+  2. 修改 <h3> 标题
+  3. data-duration 建议 4-6s（过短看不清 value tween）
+
+  VISUAL: bars grow horizontally with stagger; value labels count up; title at top.
+
+  CONSTRAINTS:
+  - DATA 最多 6 条（超过视觉过载）
+  - value 必须正数；混合正负会破坏 layout
+  - data-duration ≥ 3s（短于 3s value tween 来不及）
+
+  attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See
+    /ai/project/nevoflux/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter/LICENSE-NOTICE.md
+-->
+
+<style>
+  .data-chart-bar-race {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 80%; max-width: 1400px;
+    pointer-events: none;
+  }
+  .data-chart-bar-race-inner {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg, 24px);
+  }
+  .data-chart-bar-race-title {
+    font-family: var(--typography-hero-family, 'Inter, sans-serif');
+    font-weight: var(--typography-hero-weight, 700);
+    font-size: 52px;
+    color: var(--color-foreground, #f5f5f7);
+    margin: 0;
+    line-height: 1.1;
+    opacity: 0;
+  }
+  .data-chart-bar-race-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md, 16px);
+  }
+  .data-chart-bar-race-rows li {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 8px);
+    opacity: 0;
+  }
+  .data-chart-bar-race-rows .bar-label {
+    font-family: var(--typography-body-family, 'Noto Sans SC', sans-serif);
+    font-size: 28px;
+    font-weight: 500;
+    color: var(--color-foreground, #f5f5f7);
+    width: 220px;
+    flex-shrink: 0;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .data-chart-bar-race-rows .bar-track {
+    flex: 1;
+    height: 48px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: var(--rounded-sm, 4px);
+    overflow: hidden;
+    position: relative;
+  }
+  .data-chart-bar-race-rows .bar-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: var(--rounded-sm, 4px);
+  }
+  .data-chart-bar-race-rows .bar-value {
+    font-family: var(--typography-body-family, 'Noto Sans SC', sans-serif);
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--color-foreground, #f5f5f7);
+    width: 100px;
+    flex-shrink: 0;
+    text-align: left;
+  }
+</style>
+
+<!-- AGENT: 修改 DATA 数组 + <h3> 标题；调整 data-start / data-duration -->
+<div class="clip data-chart-bar-race"
+     id="data-chart-bar-race-1"
+     data-start="1.0"
+     data-duration="5.0"
+     data-track-index="2">
+  <div class="data-chart-bar-race-inner">
+    <h3 class="data-chart-bar-race-title">排名 / Ranking</h3>
+    <ul class="data-chart-bar-race-rows">
+      <!-- rows injected by script from DATA array -->
+    </ul>
+  </div>
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  // AGENT: edit DATA (max 6 entries, positive values, consistent unit)
+  const DATA = [
+    { label: 'GPT-4o',  value: 42 },
+    { label: 'Claude',  value: 38 },
+    { label: 'Gemini',  value: 27 },
+    { label: 'Llama',   value: 21 },
+  ];
+
+  // Bar color cycle (3-color, repeating for rows 4-6)
+  const BAR_COLORS = [
+    'var(--color-primary, #1a6b6b)',
+    'var(--color-secondary, #4a7a7a)',
+    'var(--color-accent, #ff8c42)',
+  ];
+
+  const STAGGER = parseFloat(
+    getComputedStyle(document.documentElement)
+      .getPropertyValue('--motion-stagger_default').trim()
+  ) || 0.2;
+
+  const clip  = document.querySelector('#data-chart-bar-race-1');
+  const rowsEl = clip.querySelector('.data-chart-bar-race-rows');
+
+  // Sort descending by value (top-to-bottom = highest first)
+  const sorted = [...DATA].sort((a, b) => b.value - a.value);
+  const maxVal = sorted[0].value;
+
+  // Build row elements
+  sorted.forEach((entry, idx) => {
+    const pct = (entry.value / maxVal) * 100;
+    const color = BAR_COLORS[idx % BAR_COLORS.length];
+
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <span class="bar-label">${entry.label}</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="background:${color};"></div>
+      </div>
+      <span class="bar-value">0</span>
+    `;
+    li.dataset.targetPct = pct;
+    li.dataset.targetVal = entry.value;
+    rowsEl.appendChild(li);
+  });
+
+  // Build GSAP timeline
+  const tl = gsap.timeline({ paused: true });
+
+  // 1. Title fades in
+  tl.to('#data-chart-bar-race-1 .data-chart-bar-race-title',
+    { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' },
+    0
+  );
+
+  // 2. Each row enters + bar grows + value counts up, staggered
+  const rows = rowsEl.querySelectorAll('li');
+  rows.forEach((li, idx) => {
+    const barFill  = li.querySelector('.bar-fill');
+    const valLabel = li.querySelector('.bar-value');
+    const targetPct = parseFloat(li.dataset.targetPct);
+    const targetVal = parseFloat(li.dataset.targetVal);
+    const rowStart  = 0.3 + idx * STAGGER;
+
+    // Row fade-in + slide from left
+    tl.fromTo(li,
+      { x: -32, opacity: 0 },
+      { x: 0, opacity: 1, duration: 0.35, ease: 'power3.out' },
+      rowStart
+    );
+
+    // Bar grow (width 0% → target%)
+    tl.to(barFill,
+      { width: targetPct + '%', duration: 1.0, ease: 'power2.out' },
+      rowStart + 0.1
+    );
+
+    // Value label count-up
+    const counter = { val: 0 };
+    tl.to(counter,
+      {
+        val: targetVal,
+        duration: 1.0,
+        ease: 'power2.out',
+        onUpdate() {
+          valLabel.textContent = Math.round(counter.val);
+        },
+        onComplete() {
+          valLabel.textContent = Math.round(targetVal);
+        },
+      },
+      rowStart + 0.1
+    );
+  });
+
+  window.__timelines = window.__timelines || [];
+  window.__timelines.push(tl);
+</script>
+
+<!--
+  VARIANT 提示：
+  - 带单位后缀：把 valLabel.textContent 改为 Math.round(counter.val) + '%'
+  - 水平渐变条：bar-fill 改 background: linear-gradient(to right, color1, color2)
+  - 带排名 badge：在 bar-label 前加 <span class="rank">#1</span>（按 idx+1）
+  - 竖排布局：改 bar-track height 为 flex-column 固定高度，width 改 height 动画
+
+  配合用法：
+  - 通常出现在 Scene 2-3；前 1s 可叠加 caption-subtitle 旁白
+  - data-track-index="2" 位于背景之上，字幕之下（track 20）
+-->

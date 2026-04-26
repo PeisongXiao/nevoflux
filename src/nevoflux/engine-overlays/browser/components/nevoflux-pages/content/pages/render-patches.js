@@ -75,13 +75,104 @@ export const PATCHES_SOURCE = `
     };
   }
 
-  // postMessage-driven render-time clock updates.
+  // postMessage-driven render-time clock updates + timeline seek bridge.
+  //
+  // Render.js sends two messages per frame: 'setRenderTime' (advances the
+  // patched clock so Date.now/performance.now/Math.random are deterministic)
+  // and 'seek' (advances every paused GSAP timeline registered in
+  // window.__timelines). Without the seek bridge, compositions whose
+  // elements start at opacity:0 (the standard fromTo pattern in our
+  // /video templates) capture as 900 identical t=0 frames — i.e., a
+  // 76KB all-black 30-second MP4.
   window.addEventListener('message', function (evt) {
     var d = evt.data;
-    if (d && d.__nf_type === 'setRenderTime' && typeof d.seconds === 'number') {
+    if (!d || typeof d.seconds !== 'number') return;
+    if (d.__nf_type === 'setRenderTime') {
       window.__nfRenderTime = d.seconds;
+    } else if (d.__nf_type === 'seek') {
+      var tls = window.__timelines || [];
+      window.__nfSeekCalls = (window.__nfSeekCalls || 0) + 1;
+      window.__nfSeekLastT = d.seconds;
+      window.__nfSeekTlCount = tls.length;
+
+      // Clip visibility windowing. Templates ship with .clip { visibility:
+      // hidden } so non-active scenes don't bleed in during render. Each
+      // .clip carries data-start (seconds) and data-duration (seconds);
+      // a clip is on iff start <= t < start + duration. Without this every
+      // scene container stays hidden -> 76KB all-black MP4 even with the
+      // seek bridge wired.
+      var clips = document.querySelectorAll('.clip');
+      for (var c = 0; c < clips.length; c++) {
+        var el = clips[c];
+        var s = parseFloat(el.dataset.start || '0');
+        var du = parseFloat(el.dataset.duration);
+        if (!isFinite(du)) du = Infinity;
+        el.style.visibility = (d.seconds >= s && d.seconds < s + du) ? 'visible' : 'hidden';
+      }
+
+      for (var i = 0; i < tls.length; i++) {
+        try { tls[i].seek(d.seconds); } catch (_) {}
+      }
+      // Ack back to parent so render.js can verify delivery + capture state.
+      try {
+        parent.postMessage({
+          __nf_type: 'seekAck',
+          t: d.seconds,
+          tlCount: tls.length,
+          clipCount: clips.length,
+          callNo: window.__nfSeekCalls,
+        }, '*');
+      } catch (_) {}
+      if (window.__nfSeekCalls === 1) {
+        console.log('[render-patches] first seek t=' + d.seconds + ' tls=' + tls.length + ' clips=' + clips.length);
+      }
     }
   });
+
+  // ── Composition-ready signal ──────────────────────────────────────────
+  //
+  // Render.js' iframe-load event resolves when the HTML is parsed + classic
+  // scripts done, but composition modules import GSAP from
+  // https://esm.sh/gsap (cross-origin ESM) which can finish AFTER load. If
+  // render starts iterating frames while __timelines is still empty, every
+  // tl.seek loop iterates 0 times and the 900 captured frames stay at
+  // initial opacity:0 state — the all-black-MP4 symptom.
+  //
+  // Wait until __timelines has at least one entry, OR a 5s safety budget
+  // expires, then post 'iframeReady' to parent. Render.js blocks on this
+  // before the frame loop.
+  function _signalReady() {
+    var tls = window.__timelines || [];
+    var threes = window.__threeRenderers || [];
+    try {
+      parent.postMessage({
+        __nf_type: 'iframeReady',
+        tlCount: tls.length,
+        threeCount: threes.length,
+      }, '*');
+    } catch (_) {}
+  }
+  function _waitForTimelines() {
+    // Use a setTimeout-counted budget instead of performance.now() because
+    // we just patched performance.now() to return __nfRenderTime * 1000
+    // (always 0 here) -- the patched clock would make timeout impossible.
+    var ticks = 0;
+    var maxTicks = 100; // 100 * 50ms = 5s safety budget
+    function poll() {
+      var tls = window.__timelines || [];
+      if (tls.length > 0 || ticks++ >= maxTicks) {
+        _signalReady();
+        return;
+      }
+      setTimeout(poll, 50);
+    }
+    poll();
+  }
+  if (document.readyState === 'complete') {
+    _waitForTimelines();
+  } else {
+    window.addEventListener('load', _waitForTimelines);
+  }
 })();
 `;
 
@@ -94,7 +185,16 @@ export function withPatches(compositionHtml) {
   const patchTag =
     '<script>' + PATCHES_SOURCE + '</script>';
 
-  const headMatch = compositionHtml.match(/<head[^>]*>/i);
+  // The `\b` word boundary is critical: without it, `<head[^>]*>` greedily
+  // matches `<HEADLINE_LINE_1>` inside template HTML comments (e.g. the
+  // tiktok-hook AGENT USAGE block) because `<HEAD` + `LINE_1` + `>` satisfies
+  // the pattern. That caused the determinism patches (setRenderTime / seek
+  // bridge / clip windowing) to be injected mid-comment instead of after
+  // the real <head>, leaving the patches script un-executed. Symptom:
+  // render had no scene visibility windowing → all .clip elements remained
+  // visible simultaneously → the last DOM scene (#scene-3, accent color)
+  // covered the others, producing a single-color MP4.
+  const headMatch = compositionHtml.match(/<head\b[^>]*>/i);
   if (headMatch) {
     const insertAt = headMatch.index + headMatch[0].length;
     return (
@@ -104,7 +204,7 @@ export function withPatches(compositionHtml) {
     );
   }
 
-  const htmlMatch = compositionHtml.match(/<html[^>]*>/i);
+  const htmlMatch = compositionHtml.match(/<html\b[^>]*>/i);
   if (htmlMatch) {
     const insertAt = htmlMatch.index + htmlMatch[0].length;
     return (

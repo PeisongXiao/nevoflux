@@ -1,0 +1,191 @@
+<!--
+  component: data-chart-line
+  purpose: 线性趋势图 / Single-series line chart with draw-on
+  best for: 时间序列 / 增长曲线 / 指标走势
+
+  AGENT INTEGRATION:
+  1. 修改 <script> 里的 DATA（6-12 个点；x 等距整数，y 数值 0-100）
+  2. 修改 <h3> 标题
+  3. data-duration 3-5s 合理（line draw 占 2s，points pop 占 1.5s，hold 剩余）
+
+  VISUAL: line strokes on with power2.out, circles pop at each vertex with
+  back.out(1.7) stagger, axis labels fade at end.
+
+  CONSTRAINTS:
+  - DATA 6-12 点（少于 6 信息弱；多于 12 密度过高）
+  - y 范围 0-100（chart 自动 scale 到 viewBox 高度）
+  - 不支持多系列（单条 line）
+
+  attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See
+    /ai/project/nevoflux/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter/LICENSE-NOTICE.md
+-->
+
+<style>
+  .data-chart-line {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 85%; max-width: 1600px;
+    pointer-events: none;
+  }
+  .data-chart-line-inner { display: flex; flex-direction: column; gap: var(--spacing-lg, 24px); }
+  .data-chart-line-title {
+    font-family: var(--typography-hero-family, 'Inter, sans-serif');
+    font-weight: var(--typography-hero-weight, 700);
+    font-size: 52px; color: var(--color-foreground, #f5f5f7);
+    margin: 0; line-height: 1.1; opacity: 0;
+  }
+  .data-chart-line-svg { width: 100%; overflow: visible; }
+  .data-chart-line-svg .dcl-grid-line { stroke: rgba(245,245,247,.12); stroke-width: 1; }
+  .data-chart-line-svg .dcl-baseline  { stroke: rgba(245,245,247,.30); stroke-width: 1.5; }
+  .data-chart-line-svg .dcl-polyline  {
+    fill: none; stroke: var(--color-primary, #1a6b6b);
+    stroke-width: 5; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .data-chart-line-svg .dcl-circle      { fill: var(--color-accent, #ff8c42); opacity: 0; }
+  .data-chart-line-svg .dcl-axis-label  {
+    font-family: var(--typography-body-family, 'Noto Sans SC', sans-serif);
+    font-size: 26px; fill: var(--color-foreground, #f5f5f7);
+    text-anchor: middle; opacity: 0;
+  }
+  .data-chart-line-svg .dcl-value-label {
+    font-family: var(--typography-body-family, 'Noto Sans SC', sans-serif);
+    font-size: 22px; font-weight: 600; fill: var(--color-accent, #ff8c42);
+    text-anchor: middle; opacity: 0;
+  }
+</style>
+
+<!-- AGENT: 修改 DATA 数组 + <h3> 标题；调整 data-start / data-duration -->
+<div class="clip data-chart-line"
+     id="data-chart-line-1"
+     data-start="1.0"
+     data-duration="5.0"
+     data-track-index="2">
+  <div class="data-chart-line-inner">
+    <h3 class="data-chart-line-title">月度增长</h3>
+    <svg class="data-chart-line-svg" viewBox="0 0 1920 720" preserveAspectRatio="xMidYMid meet">
+      <!-- path + circles + axis labels built dynamically from DATA -->
+    </svg>
+  </div>
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  // AGENT: edit DATA (6-12 points; x ordinal integers, y value 0-100)
+  const DATA = [
+    { x: 0, y: 20, label: 'Jan' },
+    { x: 1, y: 35, label: 'Feb' },
+    { x: 2, y: 42, label: 'Mar' },
+    { x: 3, y: 38, label: 'Apr' },
+    { x: 4, y: 55, label: 'May' },
+    { x: 5, y: 68, label: 'Jun' },
+    { x: 6, y: 72, label: 'Jul' },
+  ];
+
+  // Chart geometry (viewBox 1920 × 720)
+  const PL = 80, PR = 80, PT = 60, PB = 100;
+  const VW = 1920, VH = 720;
+  const CW = VW - PL - PR, CH = VH - PT - PB;
+  const BASE_Y = PT + CH;
+  const n = DATA.length;
+
+  const STAGGER = parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--motion-stagger_default').trim()
+  ) || 0.15;
+
+  const svg = document.querySelector('#data-chart-line-1 .data-chart-line-svg');
+  const ns  = 'http://www.w3.org/2000/svg';
+
+  const scaleX = xi => PL + (xi / (n - 1)) * CW;
+  const scaleY = yi => BASE_Y - (yi / 100) * CH;
+
+  // Grid lines at 25 / 50 / 75 / 100
+  const gridG = document.createElementNS(ns, 'g');
+  [25, 50, 75, 100].forEach(tick => {
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', PL); line.setAttribute('x2', PL + CW);
+    line.setAttribute('y1', scaleY(tick)); line.setAttribute('y2', scaleY(tick));
+    line.setAttribute('class', 'dcl-grid-line'); line.style.opacity = '0';
+    gridG.appendChild(line);
+  });
+  svg.appendChild(gridG);
+
+  // Baseline
+  const baseline = document.createElementNS(ns, 'line');
+  baseline.setAttribute('x1', PL); baseline.setAttribute('y1', BASE_Y);
+  baseline.setAttribute('x2', PL + CW); baseline.setAttribute('y2', BASE_Y);
+  baseline.setAttribute('class', 'dcl-baseline');
+  svg.appendChild(baseline);
+
+  // Polyline with stroke-dasharray draw-on
+  const pts = DATA.map(d => `${scaleX(d.x)},${scaleY(d.y)}`).join(' ');
+  const polyline = document.createElementNS(ns, 'polyline');
+  polyline.setAttribute('points', pts);
+  polyline.setAttribute('class', 'dcl-polyline');
+  svg.appendChild(polyline);
+  const totalLen = polyline.getTotalLength();
+  polyline.style.strokeDasharray = totalLen;
+  polyline.style.strokeDashoffset = totalLen;
+
+  // Circles + labels per point
+  const circles = [], axisLabels = [], valueLabels = [];
+  DATA.forEach(d => {
+    const cx = scaleX(d.x), cy = scaleY(d.y);
+
+    const circle = document.createElementNS(ns, 'circle');
+    circle.setAttribute('cx', cx); circle.setAttribute('cy', cy);
+    circle.setAttribute('r', '14'); circle.setAttribute('class', 'dcl-circle');
+    svg.appendChild(circle); circles.push(circle);
+
+    const axLabel = document.createElementNS(ns, 'text');
+    axLabel.setAttribute('x', cx); axLabel.setAttribute('y', BASE_Y + 46);
+    axLabel.setAttribute('class', 'dcl-axis-label'); axLabel.textContent = d.label;
+    svg.appendChild(axLabel); axisLabels.push(axLabel);
+
+    const vLabel = document.createElementNS(ns, 'text');
+    vLabel.setAttribute('x', cx); vLabel.setAttribute('y', cy - 22);
+    vLabel.setAttribute('class', 'dcl-value-label'); vLabel.textContent = d.y;
+    svg.appendChild(vLabel); valueLabels.push(vLabel);
+  });
+
+  // ── GSAP Timeline ──────────────────────────────────────────────────────
+  const tl = gsap.timeline({ paused: true });
+
+  // Title
+  tl.to('#data-chart-line-1 .data-chart-line-title',
+    { opacity: 1, duration: 0.4, ease: 'power2.out' }, 0);
+
+  // Grid
+  tl.to(gridG.querySelectorAll('.dcl-grid-line'),
+    { opacity: 1, duration: 0.3, stagger: 0.08, ease: 'power2.out' }, 0.2);
+
+  // Polyline draw-on
+  tl.to(polyline, { strokeDashoffset: 0, duration: 2.0, ease: 'power2.out' }, 0.5);
+
+  // Circles pop in synced to draw progress
+  circles.forEach((circle, idx) => {
+    tl.fromTo(circle,
+      { attr: { r: 0 }, opacity: 0 },
+      { attr: { r: 14 }, opacity: 1, duration: 0.35, ease: 'back.out(1.7)' },
+      0.5 + (idx / (n - 1)) * 2.0);
+  });
+
+  // Axis + value labels after line completes
+  tl.to(axisLabels,  { opacity: 1, duration: 0.25, stagger: STAGGER, ease: 'power2.out' }, 2.6);
+  tl.to(valueLabels, { opacity: 1, duration: 0.25, stagger: STAGGER, ease: 'power2.out' }, 2.9);
+
+  window.__timelines = window.__timelines || [];
+  window.__timelines.push(tl);
+</script>
+
+<!--
+  VARIANT 提示：
+  - 带单位：vLabel.textContent = d.y + '%'
+  - 填充面积：polyline 下叠加 <polygon> 闭合到 BASE_Y，opacity: 0.15
+  - 渐变线条：stroke: url(#dcl-grad) + <defs><linearGradient>
+
+  配合用法：
+  - 通常出现在 Scene 2-3；前 0.5s 可叠加 caption-subtitle 旁白
+  - data-track-index="2" 位于背景之上，字幕之下（track 20）
+-->

@@ -18,6 +18,29 @@ const { lint, LINTER_VERSION } = await import('../index.js');
 
 console.log(`composition-linter tests — version ${LINTER_VERSION}`);
 
+// --- P4 single-file mode ----------------------------------------------
+const idx = process.argv.indexOf('--file');
+const singleFile = idx > -1 ? process.argv[idx + 1] : null;
+if (singleFile) {
+  const html = await readFile(singleFile, 'utf8');
+  const { basename } = await import('node:path');
+  const report = lint(html, { composition_id: basename(singleFile) });
+  const hasErrors = report.errors.length > 0;
+  console.log(`${singleFile}: ${report.errors.length} errors, ${report.warnings.length} warnings, ${report.infos.length} infos`);
+  if (hasErrors) {
+    for (const e of report.errors) {
+      console.error(`  ERROR ${e.rule_id}${e.line != null ? ' (line ' + e.line + ')' : ''}: ${e.message}`);
+    }
+  }
+  if (report.warnings.length > 0) {
+    for (const w of report.warnings) {
+      console.warn(`  WARN  ${w.rule_id}${w.line != null ? ' (line ' + w.line + ')' : ''}: ${w.message}`);
+    }
+  }
+  process.exit(hasErrors ? 1 : 0);
+}
+// --- end P4 single-file mode ------------------------------------------
+
 const fixturesDir = join(__dirname, 'fixtures');
 const entries = (await readdir(fixturesDir)).filter(f => f.endsWith('.html'));
 
@@ -86,6 +109,46 @@ if (perfElapsed > PERF_BUDGET_MS) {
 } else {
   console.log(`  PASS performance-sanity: ${perfElapsed.toFixed(1)}ms (budget ${PERF_BUDGET_MS}ms)`);
   pass++;
+}
+
+// --- Strict-mode test: narrowed warnings escalate to errors ---------------
+// Two GSAP tweens both target ".box" and animate the same property `x`
+// without overwrite:"auto". Default mode → comp/overlapping-gsap-tweens
+// emits a warning. Strict mode (daemon path) → same rule emits an error.
+const narrowedHtml = `<!doctype html>
+<html><head><style>
+.scene { position: relative; width: 640px; height: 360px; }
+.clip { position: absolute; visibility: hidden; }
+</style></head><body>
+<div id="stage" data-width="640" data-height="360" data-duration="5" data-fps="30"
+     data-composition-id="strict-fixture"></div>
+<div class="scene clip" data-start="0" data-duration="5">
+  <div class="box">a</div>
+</div>
+<script src="https://esm.sh/gsap@3.13"></script>
+<script>
+const tl = gsap.timeline();
+window.__timelines = window.__timelines || {};
+window.__timelines["strict-fixture"] = tl;
+tl.to(".box", { x: 100, duration: 1 });
+tl.to(".box", { x: 200, duration: 1 });
+</script></body></html>`;
+
+const ruleIds = (issues) => issues.map(i => i.rule_id);
+const lenient = lint(narrowedHtml, { composition_id: 'strict-fixture' });
+const strict  = lint(narrowedHtml, { composition_id: 'strict-fixture', strict: true });
+const lenientWarn = ruleIds(lenient.warnings).includes('comp/overlapping-gsap-tweens');
+const lenientErr  = ruleIds(lenient.errors).includes('comp/overlapping-gsap-tweens');
+const strictErr   = ruleIds(strict.errors).includes('comp/overlapping-gsap-tweens');
+const strictWarn  = ruleIds(strict.warnings).includes('comp/overlapping-gsap-tweens');
+if (lenientWarn && !lenientErr && strictErr && !strictWarn) {
+  console.log('  PASS strict-mode-escalates-narrowed-warnings');
+  pass++;
+} else {
+  console.error('  FAIL strict-mode-escalates-narrowed-warnings');
+  console.error(`    lenient: errors=${ruleIds(lenient.errors)}, warnings=${ruleIds(lenient.warnings)}`);
+  console.error(`    strict : errors=${ruleIds(strict.errors)}, warnings=${ruleIds(strict.warnings)}`);
+  fail++;
 }
 
 console.log(`\n${pass} pass, ${fail} fail`);

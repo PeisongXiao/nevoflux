@@ -1,0 +1,123 @@
+<!--
+  component: lower-third-corporate
+  purpose: 商务风下三分之一身份字幕 / Corporate lower-third identification band
+  best for: 人物介绍 / 采访嘉宾 / 产品发言人
+
+  AGENT INTEGRATION:
+  1. 填姓名（hero weight）+ 职位/公司（body）
+  2. 颜色走 DESIGN.md primary/secondary
+  3. data-duration 典型 3-5s
+  4. track-index=15（上于字幕 20，下于水印 50）
+
+  VISUAL: colored band slides in from left (0.5s), holds, slides out. Strong
+  slab serif or sans depending on typography.hero.
+
+  CONSTRAINTS:
+  - 姓名 ≤ 20 字符；职位 ≤ 40
+  - 固定左下角，safe_sides + safe_bottom 对齐
+
+  attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See
+    /ai/project/nevoflux/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter/LICENSE-NOTICE.md
+-->
+
+<style>
+  .lower-third-corporate {
+    position: absolute;
+    left: var(--aspect-safe_sides, 80px);
+    bottom: var(--aspect-safe_bottom, 160px);
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .lower-third-corporate .lower-third-corporate-band {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--spacing-md, 16px);
+    background: var(--color-primary, #1a6b6b);
+    border-left: 6px solid var(--color-secondary, #4a7a7a);
+    border-radius: var(--rounded-sm, 2px);
+    padding: var(--spacing-md, 16px) var(--spacing-lg, 24px);
+    min-width: 480px;
+  }
+  .lower-third-corporate .lower-third-corporate-name {
+    font-family: var(--typography-hero-family, 'Inter, sans-serif');
+    font-weight: var(--typography-hero-weight, 700);
+    font-size: 52px;
+    color: var(--color-foreground, #f5f5f7);
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 700px;
+  }
+  .lower-third-corporate .lower-third-corporate-title {
+    font-family: var(--typography-body-family, 'Noto Sans SC', sans-serif);
+    font-weight: 400;
+    font-size: 32px;
+    color: var(--color-foreground, #f5f5f7);
+    opacity: 0.85;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 700px;
+  }
+</style>
+
+<!-- AGENT: 替换姓名 / 职位文本；调整 data-start / data-duration -->
+<div class="clip lower-third-corporate"
+     id="lower-third-corporate-1"
+     data-start="2.0"
+     data-duration="4.0"
+     data-track-index="15">
+  <div class="lower-third-corporate-band">
+    <div class="lower-third-corporate-name">姓名 / Name</div>
+    <div class="lower-third-corporate-title">职位 · Company</div>
+  </div>
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  const clip = document.querySelector('#lower-third-corporate-1');
+  const band = clip.querySelector('.lower-third-corporate-band');
+  const duration = parseFloat(clip.dataset.duration ?? '4');
+
+  const SLIDE_DUR = 0.5;
+  const ease_in  = 'power3.out';
+  const ease_out = 'power2.in';
+  // Hold time: total duration minus slide-in and slide-out
+  const hold = Math.max(0, duration - SLIDE_DUR * 2);
+
+  const tl = gsap.timeline({ paused: true });
+
+  // Slide in from left
+  tl.fromTo(band,
+    { x: -600, opacity: 0 },
+    { x: 0, opacity: 1, duration: SLIDE_DUR, ease: ease_in }
+  );
+
+  // Hold
+  tl.to(band, { x: 0, opacity: 1, duration: hold });
+
+  // Slide out to left
+  tl.to(band,
+    { x: -600, opacity: 0, duration: SLIDE_DUR, ease: ease_out }
+  );
+
+  window.__timelines = window.__timelines || [];
+  window.__timelines.push(tl);
+</script>
+
+<!--
+  VARIANT 提示：
+  - 双行变单行：删掉 lower-third-corporate-title 节点
+  - 右侧对齐版：把 left 改 right + translateX mirror
+  - 深色版：--color-primary 改 #0b1020，--color-foreground 改 #f5f5f7
+  - 带 logo：在 band 内部 flex-row 左侧加 <img> icon
+
+  配合用法：
+  - 人物出现后 0.5s 入场，离场前 0.5s 退出
+  - 配合 caption-subtitle 同步旁白：lower-third 在字幕层下（track 15 < 20）
+  - 典型 data-duration: 3s（快节奏）~ 5s（正式访谈）
+-->

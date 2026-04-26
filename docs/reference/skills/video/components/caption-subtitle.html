@@ -1,0 +1,81 @@
+<!--
+  component: caption-subtitle
+  purpose: 单行字幕 / Single-line subtitle caption
+  best for: TTS 旁白配字 / 配音同步标题
+
+  AGENT INTEGRATION:
+  1. 与 TTS clip 的 data-start 对齐（caption 晚 50ms 进场更自然）
+  2. 文本 ≤ 25 中文字符 / 40 英文字符
+  3. 多行请用 caption-animated-overlay
+
+  VISUAL:
+  - 底部 safe_zone 对齐，水平居中
+  - 淡入 0.25s，hold，淡出 0.25s
+  - 文字白色，底色半透明黑色胶囊
+
+  CONSTRAINTS:
+  - 单行（换行就改用 caption-animated-overlay）
+  - data-duration ≥ 1.0s（小于 1s 看不清）
+  - data-track-index 固定 20（文字层）
+
+  attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See
+    /ai/project/nevoflux/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter/LICENSE-NOTICE.md
+-->
+
+<style>
+  .caption-subtitle {
+    position: absolute;
+    bottom: var(--aspect-safe_bottom, 160px);
+    left: 0;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    pointer-events: none;
+    opacity: 0;
+  }
+  .caption-subtitle .caption-subtitle-text {
+    font-family: var(--typography-body-family, 'Noto Sans SC', sans-serif);
+    font-weight: var(--typography-body-weight, 500);
+    font-size: 52px;
+    color: var(--color-foreground, #fff);
+    background: var(--color-background, rgba(0, 0, 0, 0.55));
+    padding: 14px 36px;
+    border-radius: 999px;
+    white-space: nowrap;
+    max-width: 1600px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0;
+    line-height: 1.3;
+  }
+</style>
+
+<!-- AGENT: 修改 data-start / data-duration 对齐 TTS clip；替换字幕文本 -->
+<div class="clip caption-subtitle"
+     data-start="1.0"
+     data-duration="3.0"
+     data-track-index="20">
+  <p class="caption-subtitle-text">字幕文本 / Subtitle text here</p>
+</div>
+
+<script type="module">
+  import { gsap } from 'https://esm.sh/gsap@3.13';
+
+  const container = document.querySelector('.caption-subtitle');
+  const duration = parseFloat(container.dataset.duration ?? '3');
+  const ease = 'power2.out';
+
+  const FADE = 0.25;
+  const hold = Math.max(0, duration - FADE * 2);
+
+  const tl = gsap.timeline({ paused: true });
+
+  tl.set(container, { opacity: 0 });
+  tl.to(container, { opacity: 1, duration: FADE, ease });
+  tl.to(container, { opacity: 1, duration: hold });
+  tl.to(container, { opacity: 0, duration: FADE, ease });
+
+  window.__timelines = window.__timelines || [];
+  window.__timelines.push(tl);
+</script>
