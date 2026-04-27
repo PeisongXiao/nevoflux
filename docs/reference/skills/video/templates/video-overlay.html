@@ -19,6 +19,11 @@
   CONSTRAINTS:
   - No <audio>, no TTS narration (nf/single-audio mutex)
   - data-duration must not exceed base video length
+  - **Skip ambient decoratives** (snippets/ambient-decoratives.md): the
+    base video already provides visual depth; layering radial glows /
+    ghost text on top would compete with the source content. Only the
+    overlay-specific motion (rule draw, slide-in, watermark fade) is
+    decorative here.
 
   attribution: Ported from HyperFrames overlay-montage-prod (Apache 2.0, v0.4.4).
     Motifs: persistent_overlays.html (watermark fade), intro_outro.html (rule draw),

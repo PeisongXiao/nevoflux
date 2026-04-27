@@ -19,6 +19,10 @@
   - The renderer instance must be pushed to window.__threeRenderers.
   - Fixed 1920×1080 / 30fps / 10s.
   - No AnimationMixer (if used, mixer.setTime is required).
+  - **Skip HTML ambient decoratives** (snippets/ambient-decoratives.md):
+    same reason as logo-3d-reveal — WebGL owns the surface. Add ambient
+    motion inside the Three.js scene (PointsMaterial dust, distant
+    background mesh) instead of as HTML divs.
 -->
 <html lang="en">
 <head>

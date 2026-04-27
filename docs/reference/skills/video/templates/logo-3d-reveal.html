@@ -21,6 +21,13 @@
   - The renderer instance must be pushed to window.__threeRenderers.
   - No AnimationMixer; use GSAP for any animation (compatible with the render-time clock).
   - Fixed 1920×1080 / 30fps / 6s.
+  - **Skip HTML ambient decoratives** (snippets/ambient-decoratives.md):
+    the WebGL canvas owns the entire visible surface; HTML divs layered
+    above it either get covered by the canvas or, if z-indexed above,
+    obscure the 3D content. If you need ambient motion, add it INSIDE the
+    Three.js scene (extra Mesh with low-opacity material at distance,
+    PointsMaterial dust particles, a SphereGeometry skybox with slow
+    rotation) — drive its motion via GSAP into the same shared time clock.
 
   attribution: original; the Three.js pattern follows canvas-render-determinism-spec.md.
 -->

@@ -183,6 +183,31 @@
       position: absolute; inset: 0;
       background: var(--color-foreground, #f3f6f8); pointer-events: none; opacity: 0;
     }
+
+    /*
+     * ── Ambient decoratives (snippets/ambient-decoratives.md) ──
+     * Per-scene radial glows derived from DESIGN.md tokens. Without
+     * these, scene-features (5.7s) and scene-cta (3.7s) feel sparse
+     * during the entrance stagger window. Each scene gets one glow
+     * plus subtle motion that fits its window.
+     */
+    .ambient-layer { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+    .ambient-glow-primary {
+      background: radial-gradient(
+        circle at 30% 50%,
+        color-mix(in oklab, var(--color-primary, #1a6b6b) 35%, transparent),
+        transparent 60%
+      );
+      mix-blend-mode: screen;
+    }
+    .ambient-glow-accent {
+      background: radial-gradient(
+        circle at 75% 50%,
+        color-mix(in oklab, var(--color-accent, #ffcc33) 28%, transparent),
+        transparent 60%
+      );
+      mix-blend-mode: screen;
+    }
   </style>
 </head>
 <body>
@@ -200,6 +225,7 @@
   <!-- AGENT: replace <<BRAND_NAME>> / <<BRAND_TAGLINE>> / assets/logo.png -->
   <div class="clip scene-brand" id="scene-brand"
        data-start="0" data-duration="4" data-track-index="1">
+    <div class="ambient-layer ambient-glow-primary" id="brand-glow"></div>
     <img class="brand-logo" id="brand-logo" src="assets/logo.png" alt="logo">
     <h1 class="brand-name" id="brand-name"><<BRAND_NAME>></h1>
     <p class="brand-tagline" id="brand-tagline"><<BRAND_TAGLINE>></p>
@@ -213,6 +239,7 @@
   <!-- AGENT: assets/hero.png comes from extract_visual_identity.hero_screenshot -->
   <div class="clip scene-showcase" id="scene-showcase"
        data-start="4.3" data-duration="5.7" data-track-index="1">
+    <div class="ambient-layer ambient-glow-accent" id="showcase-glow"></div>
     <div class="showcase-screenshot" id="showcase-screenshot">
       <img src="assets/hero.png" alt="product">
     </div>
@@ -227,6 +254,7 @@
   <!-- AGENT: 3 features extracted from extract_visual_identity or the site's feature list -->
   <div class="clip scene-features" id="scene-features"
        data-start="10.3" data-duration="5.7" data-track-index="1">
+    <div class="ambient-layer ambient-glow-primary" id="features-glow"></div>
     <h2 class="features-title" id="features-title"><<FEATURES_TITLE>></h2>
     <div class="features-list">
       <div class="feature-item" id="feature-1">
@@ -252,6 +280,7 @@
   <!-- AGENT: <<BRAND_URL>> is the user's primary domain -->
   <div class="clip scene-cta" id="scene-cta"
        data-start="16.3" data-duration="3.7" data-track-index="1">
+    <div class="ambient-layer ambient-glow-accent" id="cta-glow"></div>
     <img class="cta-logo" src="assets/logo.png" alt="logo">
     <h2 class="cta-url" id="cta-url"><<BRAND_URL>></h2>
     <div class="cta-button" id="cta-button"><<CTA_LABEL>></div>
@@ -316,6 +345,31 @@
 
   // Final scene may fade out (optional; default keeps the CTA pinned).
   // tl.to('#scene-cta', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 19.5);
+
+  // ── Ambient decoratives ─────────────────────────────────────────────────
+  // Per-scene radial glows breathe across each scene's window. Bounded
+  // yoyo cycles fit the scene length cleanly (no infinite loops).
+  // See snippets/ambient-decoratives.md.
+  tl.fromTo('#brand-glow',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.06, opacity: 1.0, duration: 4.0, ease: 'sine.inOut' },
+    0,
+  );
+  tl.fromTo('#showcase-glow',
+    { scale: 1.0, opacity: 0.4 },
+    { scale: 1.05, opacity: 0.95, duration: 5.7, ease: 'sine.inOut' },
+    4.3,
+  );
+  tl.fromTo('#features-glow',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.06, opacity: 1.0, duration: 5.7, ease: 'sine.inOut' },
+    10.3,
+  );
+  tl.fromTo('#cta-glow',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.05, opacity: 1.0, duration: 3.7, ease: 'sine.inOut' },
+    16.3,
+  );
 
   window.__timelines.push(tl);
 

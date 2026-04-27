@@ -217,6 +217,31 @@
       position: absolute; inset: 0;
       background: #fff; pointer-events: none; opacity: 0; z-index: 99;
     }
+
+    /*
+     * ── Ambient decoratives (snippets/ambient-decoratives.md) ──
+     * Same pattern as the 9:16 sibling: per-scene radial glow + a
+     * second offset glow on scene-canvas (16s+ window). Horizontal
+     * positioning differs — we anchor glows at left/right thirds
+     * rather than top/bottom.
+     */
+    .ambient-layer { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+    .ambient-glow {
+      background: radial-gradient(
+        circle at 30% 50%,
+        color-mix(in oklab, var(--color-primary, #a259ff) 32%, transparent),
+        transparent 60%
+      );
+      mix-blend-mode: screen;
+    }
+    .ambient-glow-right {
+      background: radial-gradient(
+        circle at 75% 50%,
+        color-mix(in oklab, var(--color-accent, #0acf83) 28%, transparent),
+        transparent 60%
+      );
+      mix-blend-mode: screen;
+    }
   </style>
 </head>
 <body>
@@ -234,6 +259,8 @@
   <!-- AGENT: replace <<BRAND_NAME>> -->
   <div class="scene scene-logo-intro clip" id="scene-logo-intro"
        data-start="0" data-duration="2" data-track-index="1">
+
+    <div class="ambient-layer ambient-glow" id="intro-glow"></div>
 
     <div class="logo-intro-wrap" id="logo-intro-wrap">
       <svg viewBox="0 0 160 240" width="160" height="240" aria-hidden="true">
@@ -269,7 +296,9 @@
   <div class="scene scene-canvas clip" id="scene-canvas"
        data-start="2" data-duration="26" data-track-index="1">
 
-    <div class="canvas-dot-grid" aria-hidden="true"></div>
+    <div class="canvas-dot-grid" id="canvas-dot-grid" aria-hidden="true"></div>
+    <div class="ambient-layer ambient-glow" id="canvas-glow-left"></div>
+    <div class="ambient-layer ambient-glow-right" id="canvas-glow-right"></div>
 
     <div class="canvas-header" id="canvas-header">
       <span class="canvas-eyebrow"><<CANVAS_EYEBROW>></span>
@@ -307,6 +336,8 @@
   <!-- AGENT: replace <<TAGLINE>>, <<CTA_URL>> -->
   <div class="scene scene-logo-outro clip" id="scene-logo-outro"
        data-start="28" data-duration="2" data-track-index="1">
+
+    <div class="ambient-layer ambient-glow-right" id="outro-ambient-glow"></div>
 
     <div class="outro-logo-wrap" id="outro-logo-wrap">
       <div class="outro-glow" id="outro-glow" aria-hidden="true"></div>
@@ -510,6 +541,42 @@
     { y: 16, opacity: 0 },
     { y:  0, opacity: 1, duration: 0.40, ease: 'power3.out' },
     29.00,
+  );
+
+  // ── Ambient decoratives ─────────────────────────────────────────────────
+  // Per-scene radial glows that breathe over each scene's window. The
+  // 26-second canvas scene gets two offset glows (left + right) so the
+  // long stagger window doesn't read as static, plus a horizontal drift
+  // on the dot-grid. See snippets/ambient-decoratives.md.
+  tl.fromTo('#intro-glow',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.08, opacity: 1.0, duration: 2.0, ease: 'sine.inOut' },
+    0,
+  );
+  // Canvas scene 26s — 4 cycles of 6.5s on each glow, offset by 2s for
+  // a subtle parallax feel.
+  tl.fromTo('#canvas-glow-left',
+    { scale: 1.0, opacity: 0.4 },
+    { scale: 1.06, opacity: 0.95, duration: 6.5, ease: 'sine.inOut',
+      yoyo: true, repeat: 3 },
+    2.0,
+  );
+  tl.fromTo('#canvas-glow-right',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.04, opacity: 0.9, duration: 5.5, ease: 'sine.inOut',
+      yoyo: true, repeat: 3 },
+    4.0,
+  );
+  tl.fromTo('#canvas-dot-grid',
+    { backgroundPosition: '0px 0px' },
+    { backgroundPosition: '28px 0px', duration: 13.0, ease: 'sine.inOut',
+      yoyo: true, repeat: 1 },
+    2.0,
+  );
+  tl.fromTo('#outro-ambient-glow',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.06, opacity: 1.0, duration: 2.0, ease: 'sine.inOut' },
+    28.0,
   );
 
   window.__timelines.push(tl);

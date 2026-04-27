@@ -1335,6 +1335,50 @@ class ChannelManager {
       return;
     }
 
+    // Visual layout + WCAG contrast audit (canvas_inspect_layout). Daemon
+    // broadcasts the request with composition HTML + stage size; we render
+    // it in a hidden iframe, seek the timeline at sample timestamps, and
+    // report bbox / contrast issues. Same fire-and-forget pattern as lint.
+    if (message.type === 'canvas_video_inspect_request') {
+      const payload = message.payload || {};
+      const correlator = payload.job_correlator;
+      (async () => {
+        let report;
+        try {
+          const mod = await import(
+            browser.runtime.getURL('lib/canvas-inspect/inspect.mjs')
+          );
+          report = await mod.inspect({
+            html: payload.composition_html || '',
+            stage_w: payload.stage_w || 1920,
+            stage_h: payload.stage_h || 1080,
+            frames: payload.frames || 8,
+            at: Array.isArray(payload.at) ? payload.at : [],
+          });
+        } catch (err) {
+          console.error('[NevoFlux] inspect failed:', err);
+          report = {
+            frames_checked: 0,
+            stage_w: payload.stage_w || 1920,
+            stage_h: payload.stage_h || 1080,
+            issues: [{
+              t: 0, kind: 'internal',
+              selector: ':root',
+              stage_w: payload.stage_w || 1920,
+              stage_h: payload.stage_h || 1080,
+              fix_hint: 'inspect load/run failed: ' + (err && err.message ? err.message : String(err)),
+            }],
+            elapsed_ms: 0,
+          };
+        }
+        channelManager.sendToAgent({
+          type: 'canvas_video_inspect_result',
+          payload: { job_correlator: correlator, report },
+        });
+      })();
+      return;
+    }
+
     if (routeCanvasToolResponse('canvas_persist_list_response', pendingPersistListRequests)) return;
     // Route canvas_persist_save_response back to sidebar (bg:canvas_persist_save callers) BEFORE bridge router.
     if (message.type === 'canvas_persist_save_response') {

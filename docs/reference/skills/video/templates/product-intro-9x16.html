@@ -68,6 +68,36 @@
       --safe-sides:       var(--aspect-safe_sides,  80px);
     }
 
+    /*
+     * ── Ambient decoratives (snippets/ambient-decoratives.md) ──
+     * Each scene gets a radial accent glow that breathes; scene-canvas
+     * also has a slow parallax drift on the existing dot-grid. Without
+     * these the 16s middle scene reads as static during the long
+     * stagger window.
+     */
+    .ambient-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .ambient-glow {
+      background: radial-gradient(
+        circle at 50% 30%,
+        color-mix(in oklab, var(--color-primary, #a259ff) 35%, transparent),
+        transparent 65%
+      );
+      mix-blend-mode: screen;
+    }
+    .ambient-glow-bottom {
+      background: radial-gradient(
+        circle at 50% 80%,
+        color-mix(in oklab, var(--color-accent, #0acf83) 28%, transparent),
+        transparent 60%
+      );
+      mix-blend-mode: screen;
+    }
+
     body { margin: 0; background: #000; overflow: hidden; font-family: var(--font-body); }
 
     #stage {
@@ -245,6 +275,8 @@
   <div class="scene scene-logo-intro clip" id="scene-logo-intro"
        data-start="0" data-duration="2" data-track-index="1">
 
+    <div class="ambient-layer ambient-glow" id="intro-glow"></div>
+
     <div class="logo-intro-wrap" id="logo-intro-wrap">
       <svg viewBox="0 0 160 240" width="160" height="240" aria-hidden="true">
         <path id="lp-tl" class="logo-piece"
@@ -281,7 +313,9 @@
   <div class="scene scene-canvas clip" id="scene-canvas"
        data-start="2" data-duration="16" data-track-index="1">
 
-    <div class="canvas-dot-grid" aria-hidden="true"></div>
+    <div class="canvas-dot-grid" id="canvas-dot-grid" aria-hidden="true"></div>
+    <div class="ambient-layer ambient-glow" id="canvas-glow-top"></div>
+    <div class="ambient-layer ambient-glow-bottom" id="canvas-glow-bottom"></div>
 
     <div class="canvas-header" id="canvas-header">
       <span class="canvas-eyebrow"><<CANVAS_EYEBROW>></span>
@@ -325,6 +359,8 @@
   <!-- AGENT: replace <<TAGLINE>>, <<CTA_URL>> -->
   <div class="scene scene-logo-outro clip" id="scene-logo-outro"
        data-start="18" data-duration="2" data-track-index="1">
+
+    <div class="ambient-layer ambient-glow" id="outro-ambient-glow"></div>
 
     <div class="outro-logo-wrap" id="outro-logo-wrap">
       <div class="outro-glow" id="outro-glow" aria-hidden="true"></div>
@@ -538,6 +574,41 @@
     { y: 18, opacity: 0 },
     { y:  0, opacity: 1, duration: 0.40, ease: 'power3.out' },
     19.00,
+  );
+
+  // ── Ambient decoratives ─────────────────────────────────────────────────
+  // Scene-level glows breathe across each scene's window. Scene-canvas
+  // (16s) gets two glows yoyo'd at different cadences so the long stagger
+  // doesn't read static, plus a slow parallax drift on the dot-grid.
+  // See snippets/ambient-decoratives.md for the rule set.
+  tl.fromTo('#intro-glow',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.08, opacity: 1.0, duration: 2.0, ease: 'sine.inOut' },
+    0,
+  );
+  tl.fromTo('#canvas-glow-top',
+    { scale: 1.0, opacity: 0.4 },
+    { scale: 1.08, opacity: 0.95, duration: 4.0, ease: 'sine.inOut',
+      yoyo: true, repeat: 3 },
+    2.0,
+  );
+  tl.fromTo('#canvas-glow-bottom',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.05, opacity: 0.9, duration: 5.0, ease: 'sine.inOut',
+      yoyo: true, repeat: 2 },
+    2.5,
+  );
+  // Dot-grid slow drift — 16s scene, two full cycles of 8s.
+  tl.fromTo('#canvas-dot-grid',
+    { backgroundPosition: '0px 0px' },
+    { backgroundPosition: '28px 28px', duration: 8.0, ease: 'sine.inOut',
+      yoyo: true, repeat: 1 },
+    2.0,
+  );
+  tl.fromTo('#outro-ambient-glow',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.06, opacity: 1.0, duration: 2.0, ease: 'sine.inOut' },
+    18.0,
   );
 
   window.__timelines.push(tl);
