@@ -1,30 +1,30 @@
 <!DOCTYPE html>
 <!--
   template: logo-3d-reveal
-  purpose: Three.js 3D logo 揭幕（minimal 版本）/ Minimal Three.js 3D logo reveal
-  best for: 品牌片头、logo 展示
+  purpose: Minimal Three.js 3D logo reveal.
+  best for: brand intro stings, logo showcases.
 
   AGENT INTEGRATION:
-  1. 替换 BoxGeometry 为用户 logo geometry（ExtrudeGeometry / TextGeometry / 自定义）
-  2. material.color 由 CSS var --color-primary 驱动
-  3. camera.position.z 调节远近（默认 4 → 2.5 dolly）
-  4. data-duration 推荐 4-8s
+  1. Replace BoxGeometry with the user's logo geometry (ExtrudeGeometry / TextGeometry / custom).
+  2. material.color is driven by the CSS var --color-primary.
+  3. Tune depth via camera.position.z (default dolly: 4 → 2.5).
+  4. Recommended data-duration: 4-8s.
 
   VISUAL:
-  - 1920×1080 黑背景
-  - Lit BoxGeometry 居中，2s dolly-in 从 z:4 → z:2.5
-  - 3s hold with slow rotation.y 2π
-  - 1s scale:1.2 + fade-out
+  - 1920×1080 on black background.
+  - Lit BoxGeometry centered, 2s dolly-in from z:4 → z:2.5.
+  - 3s hold with slow rotation.y 2π.
+  - 1s scale:1.2 + fade-out.
 
   CONSTRAINTS:
-  - WebGLRenderer 必须 preserveDrawingBuffer: true
-  - renderer 必须 push 到 window.__threeRenderers
-  - 不用 AnimationMixer；如需动画用 GSAP（兼容 render time clock）
-  - 固定 1920×1080 / 30fps / 6s
+  - WebGLRenderer must enable preserveDrawingBuffer: true.
+  - The renderer instance must be pushed to window.__threeRenderers.
+  - No AnimationMixer; use GSAP for any animation (compatible with the render-time clock).
+  - Fixed 1920×1080 / 30fps / 6s.
 
-  attribution: 无（原创；Three.js 模式遵循 canvas-render-determinism-spec.md）
+  attribution: original; the Three.js pattern follows canvas-render-determinism-spec.md.
 -->
-<html lang="zh">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <script src="https://esm.sh/three@0.160"></script>

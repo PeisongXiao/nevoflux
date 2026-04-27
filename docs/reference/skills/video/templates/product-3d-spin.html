@@ -1,26 +1,26 @@
 <!DOCTYPE html>
 <!--
   template: product-3d-spin
-  purpose: Three.js 产品 3D 旋转展示 / Minimal Three.js 3D product spin
-  best for: 产品 360° 展示、logo 悬停
+  purpose: Minimal Three.js 3D product spin.
+  best for: product 360° showcase, logo hover-spin.
 
   AGENT INTEGRATION:
-  1. IcosahedronGeometry 是占位；用户用 GLTFLoader 加载真实产品 .glb 替换
-  2. rotation.y 每 10s 两圈；需要慢速调 duration 比例即可
-  3. material.color 由 CSS var --color-primary 驱动
+  1. IcosahedronGeometry is a placeholder; load the real product .glb via GLTFLoader.
+  2. rotation.y completes two full turns per 10s; tweak the duration ratio for a slower spin.
+  3. material.color is driven by the CSS var --color-primary.
 
   VISUAL:
-  - 1920×1080 黑背景
-  - 居中 IcosahedronGeometry，20 面缓慢旋转
-  - 3-point lighting (ambient + key + rim)
+  - 1920×1080 on black background.
+  - Centered IcosahedronGeometry, 20-face slow rotation.
+  - 3-point lighting (ambient + key + rim).
 
   CONSTRAINTS:
-  - WebGLRenderer 必须 preserveDrawingBuffer: true
-  - renderer 必须 push 到 window.__threeRenderers
-  - 固定 1920×1080 / 30fps / 10s
-  - 无 AnimationMixer（若用必须 mixer.setTime）
+  - WebGLRenderer must enable preserveDrawingBuffer: true.
+  - The renderer instance must be pushed to window.__threeRenderers.
+  - Fixed 1920×1080 / 30fps / 10s.
+  - No AnimationMixer (if used, mixer.setTime is required).
 -->
-<html lang="zh">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <script src="https://esm.sh/three@0.160"></script>

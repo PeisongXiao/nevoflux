@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   template: video-overlay
-  purpose: 在已有视频上叠加字幕/标注/水印 / Overlay template for mode-2 video-enhancement
-  best for: 模式 2（已有视频素材 + 品牌叠加）
+  purpose: Overlay template for mode-2 video-enhancement (subtitles / annotations / watermark on existing video).
+  best for: Mode 2 (user-supplied base video + branding overlay).
 
   AGENT INTEGRATION:
   1. Replace {{base_video_src}} with assets/<filename>.mp4
@@ -24,7 +24,7 @@
     Motifs: persistent_overlays.html (watermark fade), intro_outro.html (rule draw),
     reveal1.html (slide-in lower-third).
 -->
-<html lang="zh">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <style>
@@ -119,7 +119,7 @@
   <!-- Overlay 1: scene title (0.5s → 4.5s) — AGENT: replace text -->
   <div id="overlay-title" class="clip overlay-title-block"
        data-start="0.5" data-duration="4" data-track-index="5">
-    <div class="overlay-title-text">标题文本 / Scene Title</div>
+    <div class="overlay-title-text">Scene Title</div>
     <div id="title-rule" class="overlay-title-rule"></div>
   </div>
 
@@ -132,9 +132,9 @@
   <!-- Overlay 3: lower-third (8s → 14s) — AGENT: fill label/name/title; adjust timing -->
   <div id="overlay-lower-third" class="clip overlay-lower-third"
        data-start="8" data-duration="6" data-track-index="5">
-    <div class="lt-label">嘉宾 / Guest</div>
-    <div class="lt-name">姓名 / Name</div>
-    <div class="lt-sub">职位 / Title</div>
+    <div class="lt-label">Guest</div>
+    <div class="lt-name">Name</div>
+    <div class="lt-sub">Title</div>
   </div>
 
 </div>

@@ -1,39 +1,39 @@
 <!DOCTYPE html>
 <!--
   template: tiktok-hook
-  purpose: 9:16 TikTok/Reels 开场 hook / TikTok-style vertical hook
-  best for: 小红书/抖音/TikTok 前 3 秒吸睛开场
+  purpose: TikTok-style vertical 9:16 opening hook.
+  best for: first-3-second attention grab on TikTok / Douyin / Reels / Xiaohongshu.
 
   AGENT INTEGRATION:
-  1. scene-1 是主 hook 文案（问题或痛点，单行或 1-2 词）
-  2. scene-2 展开 1-2 个具体 beat
-  3. scene-3 是 CTA（"link in bio" / 品牌名 / 动作指引）
-  4. 节奏紧凑，每 scene ≤ 2.5s
-  5. 配合 DESIGN.md motion.tone = "energetic" 使用
+  1. scene-1 holds the main hook line (a question or pain point, single line or 1-2 words).
+  2. scene-2 expands with 1-2 concrete beats.
+  3. scene-3 is the CTA ("link in bio" / brand name / action prompt).
+  4. Keep the pace tight: each scene ≤ 2.5s.
+  5. Pair with DESIGN.md motion.tone = "energetic".
 
   VISUAL:
-  - 纵向 1080×1920，每 scene 覆盖 100% stage
-  - 每 scene 有独立饱和色背景（DESIGN.md palette 轮转）
-  - 大字号（黑体），scale/opacity 弹入
-  - scene-3 CTA 固定在底部三分之一区域
+  - 1080×1920 portrait; each scene covers 100% of the stage.
+  - Each scene has its own saturated background colour (rotating through the DESIGN.md palette).
+  - Large bold type, scale/opacity pop-in.
+  - scene-3 CTA pinned to the bottom third of the frame.
 
   AGENT USAGE:
-  1. 替换 <<HOOK_WORD>> — 主钩子词（1–2 词，全大写冲击力更强）
-  2. 替换 <<HEADLINE_LINE_1>> / <<HEADLINE_LINE_2>> — 支撑 beat（1–2 句）
-  3. 替换 <<CTA_TEXT>> — CTA 文案（如 "link in bio" / 品牌名）
-  4. 颜色全部走 CSS 变量，不要硬编码
+  1. Replace <<HOOK_WORD>> — the main hook word (1-2 words; ALL CAPS hits harder).
+  2. Replace <<HEADLINE_LINE_1>> / <<HEADLINE_LINE_2>> — supporting beat (1-2 sentences).
+  3. Replace <<CTA_TEXT>> — CTA copy (e.g. "link in bio" / brand name).
+  4. All colours go through CSS variables — never hardcode.
 
   CONSTRAINTS:
-  - 固定 9:16 竖屏，width=1080 height=1920
-  - #stage data-composition-id 必须存在（linter 要求）
-  - 首场景需在 data-start=0 出现文字（避免空白起始帧）
-  - fps 30 / duration 6s
-  - 禁止 repeat: -1（无限循环破坏帧捕获）
+  - Fixed 9:16 portrait, width=1080 height=1920.
+  - #stage data-composition-id is mandatory (linter requirement).
+  - First scene must show text at data-start=0 (avoid an empty opening frame).
+  - fps 30 / duration 6s.
+  - No repeat: -1 (infinite loops break frame capture).
 
   attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See
     /ai/project/nevoflux/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter/LICENSE-NOTICE.md
 -->
-<html lang="zh">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <style>

@@ -1,43 +1,43 @@
 <!DOCTYPE html>
 <!--
   template: product-intro-16x9
-  purpose: 16:9 横屏产品介绍（3 场景）/ Horizontal product intro (3 scenes)
-  best for: B2B 产品视频、网站头图视频、发布预热
+  purpose: Horizontal product intro (16:9, 3 scenes).
+  best for: B2B product videos, website hero videos, launch teasers.
 
   AGENT INTEGRATION:
-  1. duration 推荐 25-35s；短内容（<15s）用 tiktok-hook 模板
-  2. scene-canvas 内置 3 个 feature slot（替换 <<FEATURE_N_*>> 占位符）
-     可选截图：将 <img src="assets/screenshot.png"> 放入 .feature-card 内
-  3. DESIGN.md colors/typography 全套 CSS 变量生效；覆盖 :root 变量即可
-  4. scene 1 + scene 3 各固定 2s；中间段落 duration = total - 4s（默认 30s → 26s）
+  1. Recommended duration: 25-35s. For shorter content (<15s) use the tiktok-hook template.
+  2. scene-canvas has 3 built-in feature slots (replace the <<FEATURE_N_*>> placeholders).
+     Optional screenshot: drop <img src="assets/screenshot.png"> inside a .feature-card.
+  3. The full DESIGN.md colors/typography token set is wired to CSS vars; override :root to retheme.
+  4. scene 1 + scene 3 are fixed at 2s each; middle scene duration = total - 4s (default 30s → 26s).
 
   VISUAL:
-  - 固定 1920×1080；每 scene 覆盖 100% stage，黑色/深色背景
-  - Scene 1 (0-2s): 品牌 logo 碎片从四角汇聚 + 品牌名淡入
-  - Scene 2 (2-28s): 深色网格画布，3 列 feature callout 卡片依次弹入
-  - Scene 3 (28-30s): logo 从右侧滑入 + 品牌语 + CTA URL 胶囊
+  - Fixed 1920×1080; each scene covers 100% of the stage on a dark background.
+  - Scene 1 (0-2s): brand logo shards converge from the corners + brand name fade-in.
+  - Scene 2 (2-28s): dark grid canvas, 3-column feature-callout cards pop in sequentially.
+  - Scene 3 (28-30s): logo slides in from the right + tagline + CTA URL pill.
 
   AGENT USAGE:
-  1. <<BRAND_NAME>>      — 品牌/产品名（Scene 1 + Scene 3）
-  2. <<CANVAS_EYEBROW>>  — Scene 2 小标题（如 "Why <<BRAND_NAME>>"）
-  3. <<CANVAS_HEADLINE>> — Scene 2 大标题
-  4. <<FEATURE_N_ICON>>  — 3 个 emoji 图标（如 "⚡"、"🔒"、"🚀"）
-  5. <<FEATURE_N_TITLE>> — 3 条特性标题
-  6. <<FEATURE_N_DESC>>  — 3 条特性描述（各 1 句）
-  7. <<TAGLINE>>         — Scene 3 品牌语
-  8. <<CTA_URL>>         — Scene 3 URL 胶囊（如 "yourproduct.com"）
+  1. <<BRAND_NAME>>      — brand / product name (Scene 1 + Scene 3).
+  2. <<CANVAS_EYEBROW>>  — Scene 2 eyebrow (e.g. "Why <<BRAND_NAME>>").
+  3. <<CANVAS_HEADLINE>> — Scene 2 headline.
+  4. <<FEATURE_N_ICON>>  — 3 emoji icons (e.g. "⚡", "🔒", "🚀").
+  5. <<FEATURE_N_TITLE>> — 3 feature titles.
+  6. <<FEATURE_N_DESC>>  — 3 feature descriptions (one sentence each).
+  7. <<TAGLINE>>         — Scene 3 tagline.
+  8. <<CTA_URL>>         — Scene 3 URL pill (e.g. "yourproduct.com").
 
   CONSTRAINTS:
-  - 固定 1920×1080；竖屏请用 tiktok-hook
-  - scene 1 / scene 3 各 2s；仅调整 scene-canvas 的 data-duration / data-start
-  - feature 固定 3 条（少则偏空，多则失去简洁）
-  - 禁止无限循环（禁用 repeat: negative-one）
-  - data-composition-id 必须存在（linter 要求）
+  - Fixed 1920×1080; for portrait, use tiktok-hook instead.
+  - scene 1 / scene 3 are fixed at 2s; only tune scene-canvas's data-duration / data-start.
+  - Always 3 feature cards (fewer feels sparse, more loses focus).
+  - No infinite loops (do not use repeat: -1).
+  - data-composition-id is mandatory (linter requirement).
 
   attribution: Ported from HyperFrames (Apache 2.0, v0.4.4). See
     /ai/project/nevoflux/src/nevoflux/extensions/nevoflux-agent/lib/composition-linter/LICENSE-NOTICE.md
 -->
-<html lang="zh">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <style>
