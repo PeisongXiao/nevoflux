@@ -65,8 +65,9 @@ Otherwise             → Mode 1 (generate from scratch)
 
 Check in order:
 1. **DESIGN.md in context?** → Use it, skip questions.
-2. **Explicit style keyword from user?** → Map via `reference/vocabulary.md` §1 → confirm in 2 sentences.
-3. **Neither** → Ask 3 questions: mood (explosive/cinematic/fluid/technical/warm) + canvas (light/dark) + brand reference. Echo understanding back; wait for confirmation before coding.
+2. **Named style from user** (e.g. "Swiss Pulse", "Velvet Standard", "dark and techy") → match against `reference/visual-styles.md` (8 named styles grounded in real graphic design traditions: Swiss Pulse, Velvet Standard, Deconstructed, Maximalist Type, Data Drift, Soft Signal, Folk Frequency, Shadow Cut). Generate a minimal DESIGN.md from that style's palette + GSAP signature + suggested transition.
+3. **Mood keyword from user** ("explosive", "warm", "cinematic", "luxury", "technical") → map via `reference/vocabulary.md` §1, then pick a palette from `reference/palettes/` (9 ready palettes: bold-energetic, warm-editorial, dark-premium, clean-corporate, nature-earth, neon-electric, pastel-soft, jewel-rich, monochrome). Confirm in 2 sentences.
+4. **Neither** → Ask 3 questions: mood (explosive/cinematic/fluid/technical/warm) + canvas (light/dark) + brand reference. Echo understanding back; wait for confirmation before coding.
 
 *Exception — Mode 2:* visual identity comes from source video; only ask overlay color + font style.
 
@@ -198,7 +199,12 @@ Core disciplines (each one-line with linter rule_id where enforced):
 | `snippets/scene-transition-ironrules.md` | Scene container + transition track rules |
 | `snippets/three-js-rules.md` | Required patterns for Three.js templates |
 | `snippets/determinism-rules.md` | Top-level rules for reproducible renders |
-| `snippets/tts-workflow.md` | When/how to use TTS narration (roadmap: Week 9-11) |
+| `snippets/tts-workflow.md` | When/how to use TTS narration (status + workflow) |
+| `snippets/auto-captions.md` | Caption emission contract + lint guarantees |
+| `snippets/ambient-decoratives.md` | **Background decorative layer rules — 2-5 ambient decoratives per scene; biggest delta between AI-generic and intentional design** |
+| `scripts/animation-map.mjs` | **Static GSAP timeline analyzer.** Run `node scripts/animation-map.mjs <comp.html>` to see per-tween summary, stagger detection, dead-zone report (>1s gaps), pacing flags (fast/slow), and an ASCII Gantt. Catches choreography problems the linter misses. |
+| `reference/visual-styles.md` | 8 named visual identities (Swiss Pulse, Velvet Standard, Deconstructed, Maximalist Type, Data Drift, Soft Signal, Folk Frequency, Shadow Cut) — palette + GSAP signature + transition pairing |
+| `reference/palettes/` | 9 ready palettes (bold-energetic, warm-editorial, dark-premium, clean-corporate, nature-earth, neon-electric, pastel-soft, jewel-rich, monochrome) for direct DESIGN.md `## Colors` use |
 
 ## Templates & Components
 

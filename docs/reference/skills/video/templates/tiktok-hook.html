@@ -158,6 +158,54 @@
       opacity: 0;
       z-index: 99;
     }
+
+    /*
+     * ── Ambient decoratives ──
+     *
+     * Two persistent layers per scene to break the "AI-generic flat
+     * background" tell:
+     *  - radial accent glow that breathes (scale + opacity oscillation)
+     *  - ghost-text reflection of the hero word that drifts vertically
+     *
+     * Both pull colour from DESIGN.md tokens, sit beneath the content
+     * (track-index 1 vs scene's track-index 1, but z-index lower), and
+     * use bounded GSAP repeats — never -1.
+     *
+     * See snippets/ambient-decoratives.md for the full rule set.
+     */
+    .ambient-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .ambient-glow {
+      background: radial-gradient(
+        circle at 50% 50%,
+        color-mix(in oklab, var(--color-fg) 18%, transparent),
+        transparent 65%
+      );
+      mix-blend-mode: overlay;
+    }
+    .ambient-ghost {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-hero);
+      font-weight: var(--font-weight-hero);
+      font-size: 460px;
+      line-height: 0.9;
+      letter-spacing: -0.06em;
+      color: var(--color-fg);
+      opacity: 0.06;
+      text-transform: uppercase;
+      /* GSAP pulls this further; this is the static baseline. */
+    }
+    .scene > .scene-content {
+      position: relative;
+      z-index: 1;
+      display: contents; /* lets existing flex layout pass through */
+    }
   </style>
 </head>
 <body>
@@ -178,6 +226,8 @@
        data-start="0"
        data-duration="1.5"
        data-track-index="1">
+    <div class="ambient-layer ambient-glow" id="s1-glow"></div>
+    <div class="ambient-layer ambient-ghost" id="s1-ghost">!</div>
     <div class="hook-word" id="hook-word">WAIT.</div>
   </div>
 
@@ -196,6 +246,8 @@
        data-start="1.5"
        data-duration="2.5"
        data-track-index="1">
+    <div class="ambient-layer ambient-glow" id="s2-glow"></div>
+    <div class="ambient-layer ambient-ghost" id="s2-ghost">?</div>
     <div class="headline-block">
       <span class="headline-line" id="headline-l1"><<HEADLINE_LINE_1>></span>
       <span class="headline-line" id="headline-l2"><<HEADLINE_LINE_2>></span>
@@ -216,6 +268,8 @@
        data-start="4.0"
        data-duration="2.0"
        data-track-index="1">
+    <div class="ambient-layer ambient-glow" id="s3-glow"></div>
+    <div class="ambient-layer ambient-ghost" id="s3-ghost">↑</div>
     <div class="cta-pill" id="cta-pill"><<CTA_TEXT>></div>
   </div>
 
@@ -271,6 +325,47 @@
     { y: 60, opacity: 0 },
     { y: 0, opacity: 1, duration: 0.4, ease: 'power2.out' },
     4.1,
+  );
+
+  // ── Ambient decoratives ─────────────────────────────────────────────────
+  // Each scene's glow + ghost-text gets a slow breathing motion so the
+  // background never reads as static. Cycles are tuned to fit each
+  // scene's window with finite repeats only.
+  // See snippets/ambient-decoratives.md.
+  //
+  // Scene 1 glow: 1.0 → 1.08 scale + 0.6 → 1.0 opacity over 1.5s (one cycle).
+  tl1.fromTo('#s1-glow',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.08, opacity: 1.0, duration: 1.5, ease: 'sine.inOut' },
+    0,
+  );
+  tl1.fromTo('#s1-ghost',
+    { y: 30, opacity: 0 },
+    { y: 0, opacity: 1, duration: 1.5, ease: 'sine.out' },
+    0,
+  );
+  // Scene 2 glow: 1.0 → 1.05 over 2.5s (single drift through the scene).
+  tl1.fromTo('#s2-glow',
+    { scale: 1.0, opacity: 0.4 },
+    { scale: 1.05, opacity: 0.95, duration: 2.5, ease: 'sine.inOut' },
+    1.5,
+  );
+  tl1.fromTo('#s2-ghost',
+    { y: -20, opacity: 0 },
+    { y: 20, opacity: 1, duration: 2.5, ease: 'sine.inOut' },
+    1.5,
+  );
+  // Scene 3 glow: pulsing CTA backdrop. Two yoyo cycles fit in 2.0s.
+  tl1.fromTo('#s3-glow',
+    { scale: 1.0, opacity: 0.5 },
+    { scale: 1.06, opacity: 1.0, duration: 1.0, ease: 'sine.inOut',
+      yoyo: true, repeat: 1 },
+    4.0,
+  );
+  tl1.fromTo('#s3-ghost',
+    { y: 30, opacity: 0 },
+    { y: 0, opacity: 1, duration: 1.0, ease: 'power2.out' },
+    4.0,
   );
 
   window.__timelines.push(tl1);
