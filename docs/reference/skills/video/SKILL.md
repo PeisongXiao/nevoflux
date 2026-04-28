@@ -97,6 +97,41 @@ After the composition exists you can iterate:
 
 Key Mode 3 components: `components/screenshot-reveal.html`, `components/feature-list-checkmark.html`. The VI extraction skips the VIG questionnaire — just echo back `name` / `colors.primary` / `typography.hero.family` to the user for confirmation. Template: `reference/DESIGN-template.md`; extensions: `reference/design-md-video-extension.md`.
 
+## Image Asset Gate (IAG) — MANDATORY when user provides any image
+
+**If the user's request involves an image they provided** (uploaded file, URL, "this picture", clipboard paste, "do a video of <THIS>"), the FIRST canvas tool you call MUST be `canvas_attach_asset`. Not `canvas_create_composition` first, not `browser_edit_artifact` first — `canvas_attach_asset` first.
+
+```
+1. canvas_attach_asset({ composition_id, source: { url|data_b64 }, name: "hero.png" })
+   → returns { path: "assets/hero.png", mime_type, size_bytes }
+2. Reference the returned path in HTML: <img src="assets/hero.png">
+```
+
+**Banned patterns (silently break the render):**
+- ❌ `<img src="https://example.com/the-image.jpg">` — render tab can't fetch external URLs
+- ❌ `<img src="data:image/png;base64,iVBOR...">` — bloats artifact, breaks lint, can't be reused
+- ❌ Writing `<img src="assets/foo.png">` BEFORE calling `canvas_attach_asset` — file doesn't exist, render shows broken image
+- ❌ Calling `canvas_attach_asset` AFTER `browser_edit_artifact` finishes editing index.html — Canvas Editor's write-back used to clobber assets (now defended at the daemon, but order still matters for reasoning)
+
+**Why it's strict:** the renderer loads composition HTML in a sandbox iframe with no origin. Only `assets/*` paths backed by entries in the composition's `files` map get inlined as `data:` URIs. Anything else 404s.
+
+**Mode 3 exception:** `canvas_create_from_visual_identity` already attaches the extracted hero screenshot internally — no separate `canvas_attach_asset` needed for that one image. Additional images still go through the IAG.
+
+## Template-vs-custom decision (read before calling create_composition)
+
+The 7 shipped templates are **opinionated** — pre-baked scenes for specific creative briefs (TikTok hook, product reel, website promo, 3D logo reveal). They have their own placeholder copy slots (`<<HOOK_WORD>>`, `<<FEATURE_N_TITLE>>`), scene timing, and ambient decoratives.
+
+Use `template`:
+- User says "TikTok hook" / "product intro" / "website promo" — match a template's brief.
+- User asks for one of the named visual styles in `reference/visual-styles.md`.
+
+Use `html` (custom):
+- User says "make a video of this image" / "animate this picture" / "video about X" without naming a style.
+- User's main content is a single image they provided.
+- User wants minimal / clean / non-template-y output.
+
+**Defaulting to a template when the user didn't ask for one is a known failure mode** — the output looks like the template (its scenes, its decoratives, its rhythm), not what the user described. Better to ship a clean custom HTML composition that's actually about their content.
+
 ## DESIGN.md Workflow
 
 `DESIGN.md` lives in composition VirtualFS — persistent brand identity across sessions.
