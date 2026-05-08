@@ -64,6 +64,26 @@ pub fn MessageList() -> Element {
         });
     });
 
+    // Snapshot iteration rows for active loops in this session so we can
+    // render IterationCards inline with the message stream (spec §2.6).
+    // Bound iteration cards to the current session_id; the deque caps at 20
+    // per loop (see LoopState::push_or_update_iteration).
+    let active_session_id = ctx.session.read().id.clone();
+    let loop_iter_rows: Vec<(String, crate::state::IterationRow)> = ctx
+        .loops
+        .read()
+        .values()
+        .filter(|s| s.session_id == active_session_id)
+        .flat_map(|s| {
+            let lid = s.loop_id.clone();
+            // Iterations are stored most-recent first; reverse to oldest-first
+            // so they read top-to-bottom in the chat stream.
+            let mut rows: Vec<_> = s.iterations.iter().cloned().collect();
+            rows.reverse();
+            rows.into_iter().map(move |r| (lid.clone(), r))
+        })
+        .collect();
+
     rsx! {
         div { class: "message-list",
             // Historical messages
@@ -85,6 +105,15 @@ pub fn MessageList() -> Element {
                         is_last_user: last_user_index == Some(index),
                         message_index: index,
                     }
+                }
+            }
+
+            // /loop iteration cards for active loops in this session
+            for (lid, row) in loop_iter_rows.iter() {
+                crate::components::loop_ui::IterationCard {
+                    key: "{lid}-{row.sequence_number}",
+                    loop_id: lid.clone(),
+                    row: row.clone(),
                 }
             }
 
