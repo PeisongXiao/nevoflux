@@ -18,6 +18,7 @@ venv/
 !firefox-cache/
 win-cross/
 docs/superpowers/
+.superpowers/
 
 !firefox-patches/
 target/

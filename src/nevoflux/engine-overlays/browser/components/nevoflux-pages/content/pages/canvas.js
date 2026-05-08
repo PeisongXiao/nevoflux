@@ -1540,13 +1540,26 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(artifa
     // assets actually resolve in the srcdoc iframe. Without this branch,
     // the iframe would render `<img src="assets/hero.png">` against an
     // opaque origin and fail to load (Bug B).
-    if (type === 'html' && this.isComposition() && this._artifactId) {
+    // For composition artifacts the multi-file `type` may surface as
+    // 'project' (ContentStore tags multi-file artifacts that way) but
+    // we want the URL-rewriting render path regardless. `isComposition()`
+    // is the structural truth: it returns true iff the files map carries
+    // a valid `composition.meta.json` with kind === 'composition'.
+    if (this.isComposition() && this._artifactId) {
       try {
         const result = await NevofluxPage.sendQuery('bridge:request', {
           type: 'canvas.video.load_composition_html',
           payload: { composition_id: this._artifactId },
         });
         if (result && result.success && result.data && result.data.html) {
+          // DEBUG: dump first 600 chars so we can see if the html
+          // actually has the rewritten /v1/asset/composition/... URLs.
+          const h = result.data.html;
+          const urls = (h.match(/http:\/\/[^"' ]+/g) || []).slice(0, 5);
+          console.error(
+            `[Canvas DEBUG] preview render: htmlLen=${h.length} hasV1Asset=${h.includes('/v1/asset/composition/')} sampleUrls=`,
+            urls
+          );
           this._renderSrcdoc(viewport, result.data.html);
           return;
         }
@@ -2120,20 +2133,58 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(markdo
       }
     };
 
+    // Re-render the preview pane. For compositions, prefer URL-rewritten
+    // HTML from the asset plane bridge so binary assets resolve in the
+    // srcdoc iframe. Falls back to CanvasRuntime for non-compositions
+    // and on bridge failure.
+    //
+    // NOTE: when called after an edit, persistNow() must run first so
+    // the daemon's stored HTML reflects the user's edits before we ask
+    // the bridge to rewrite it. Otherwise bridge would return a slightly
+    // stale view (~one debounce window).
+    const renderPreview = async () => {
+      if (this.isComposition() && this._artifactId) {
+        try {
+          const result = await NevofluxPage.sendQuery('bridge:request', {
+            type: 'canvas.video.load_composition_html',
+            payload: { composition_id: this._artifactId },
+          });
+          if (result && result.success && result.data && result.data.html) {
+            previewPane.innerHTML = '';
+            const iframe = document.createElement('iframe');
+            iframe.setAttribute(
+              'sandbox',
+              'allow-scripts allow-forms allow-same-origin'
+            );
+            iframe.srcdoc = result.data.html;
+            previewPane.appendChild(iframe);
+            return;
+          }
+        } catch (e) {
+          console.warn(
+            '[Canvas] edit-mode preview re-render via bridge failed, falling back:',
+            e
+          );
+        }
+      }
+      await CanvasRuntime.render(
+        previewPane,
+        { files: this._artifact.files, entry: this._artifact.entry },
+        this._SDK_SCRIPT
+      );
+    };
+
     let debounceTimer = null;
     const onEdit = (value) => {
       editorDirty = true;
       this._artifact.files[currentPath] = value;
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
-        await CanvasRuntime.render(
-          previewPane,
-          { files: this._artifact.files, entry: this._artifact.entry },
-          this._SDK_SCRIPT
-        );
-        // Auto-save on edit pause — write-through to daemon SQLite so
-        // canvas_apply_design_md / canvas_render_video pick up the edit.
+        // Auto-save on edit pause first — write-through to daemon SQLite
+        // so canvas_apply_design_md / canvas_render_video pick up the
+        // edit AND so the bridge call below sees the latest stored HTML.
         persistNow();
+        await renderPreview();
         editorDirty = false;
       }, 500);
       // Debounced lint on every edit (500ms coalesces rapid keystrokes).
@@ -2216,12 +2267,10 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(markdo
       editorPane.appendChild(textarea);
     }
 
-    // Initial preview render
-    CanvasRuntime.render(
-      previewPane,
-      { files: this._artifact.files, entry: this._artifact.entry },
-      this._SDK_SCRIPT
-    );
+    // Initial preview render — same path as onEdit's debounced reflow,
+    // routed through renderPreview() so compositions hit the URL-rewriting
+    // bridge instead of CanvasRuntime's relative-ref srcdoc.
+    renderPreview();
   },
 
   _exitEditMode() {
@@ -2307,7 +2356,48 @@ document.getElementById('content').innerHTML = md.render(${JSON.stringify(markdo
 
   _updateEditPreview(artifact) {
     // External update while editing -- don't overwrite user edits,
-    // just update the preview pane
+    // just update the preview pane.
+    //
+    // For compositions, route through the URL-rewriting bridge
+    // (canvas.video.load_composition_html) so binary assets resolve in
+    // the srcdoc iframe. Without this, an external update (e.g.
+    // contentStore subscription firing because of a canvas_attach_asset
+    // broadcast) would call _updateEditPreviewFromCode → srcdoc the
+    // raw artifact.content (with relative `assets/X` refs that the
+    // sandbox iframe can't resolve) and clobber the previously-correct
+    // preview.
+    if (this.isComposition() && this._artifactId) {
+      const previewPane = document.getElementById('edit-preview');
+      if (!previewPane) return;
+      (async () => {
+        try {
+          const result = await NevofluxPage.sendQuery('bridge:request', {
+            type: 'canvas.video.load_composition_html',
+            payload: { composition_id: this._artifactId },
+          });
+          if (result && result.success && result.data && result.data.html) {
+            const oldIframe = previewPane.querySelector('iframe');
+            if (oldIframe) oldIframe.remove();
+            const iframe = document.createElement('iframe');
+            iframe.setAttribute(
+              'sandbox',
+              'allow-scripts allow-forms allow-same-origin'
+            );
+            iframe.srcdoc = result.data.html;
+            previewPane.appendChild(iframe);
+            return;
+          }
+        } catch (e) {
+          console.warn(
+            '[Canvas] _updateEditPreview bridge failed, falling back:',
+            e
+          );
+        }
+        // Fallback: legacy raw-content path.
+        this._updateEditPreviewFromCode(artifact.content);
+      })();
+      return;
+    }
     this._updateEditPreviewFromCode(artifact.content);
   },
 

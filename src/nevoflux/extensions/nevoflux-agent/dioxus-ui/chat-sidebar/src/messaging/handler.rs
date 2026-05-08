@@ -138,6 +138,17 @@ fn handle_chat_message(ctx: AppContext, message: ChatMessage) {
             tracing::warn!("[Sidebar] Received EventsRequest (unexpected direction)");
         }
 
+        ChatMessage::CanvasVideoRevealPathResponse(payload) => {
+            // Fire-and-forget reply; nothing to update — just keep the parser
+            // happy.
+            if !payload.success {
+                tracing::warn!(
+                    "[Sidebar] canvas_video_reveal_path failed: {:?}",
+                    payload.error
+                );
+            }
+        }
+
         // ========== Sidebar -> Agent messages (should not be received) ==========
         ChatMessage::ChatMessage(_) |
         ChatMessage::SkillCommand(_) |

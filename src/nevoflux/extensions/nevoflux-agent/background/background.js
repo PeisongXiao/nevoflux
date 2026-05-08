@@ -1269,6 +1269,30 @@ class ChannelManager {
       return;
     }
 
+    // Daemon broadcasts this after canvas_attach_asset finishes. The
+    // composition's artifacts.files / ContentStore didn't change (assets
+    // moved out to composition_assets table per migration 016), so the
+    // chrome page's existing canvas:<id> subscription wouldn't fire on
+    // its own. Re-fetching the artifact via artifact.get triggers the
+    // existing artifact.get response handler (line ~1056) which calls
+    // browser.nevoflux.createArtifact → contentStore:update → canvas
+    // page subscriber → _render → new bridge → fresh URL-rewritten HTML
+    // including the just-attached asset.
+    if (message.type === 'canvas_video_artifact_changed') {
+      const artifactId = message.payload?.artifact_id;
+      if (artifactId) {
+        channelManager.sendToAgent({
+          type: 'system_command',
+          payload: {
+            request_id: `art_get_after_attach_${Date.now()}`,
+            command: 'artifact.get',
+            params: { artifact_id: artifactId },
+          },
+        });
+      }
+      return;
+    }
+
     // Daemon broadcasts this after a successful canvas_create_composition.
     // We respond by opening the canvas editor page for the new artifact.
     // The canvas page self-hydrates from the daemon (content_store.load →

@@ -623,6 +623,12 @@ pub enum ChatMessage {
     EventsResponse(crate::events::EventBusResponse),
     /// EventBus delivery (Agent -> Sidebar)
     EventsDelivery(crate::events::EventBusDelivery),
+
+    // ========== canvas.video ==========
+    /// Reply to `canvas_video_reveal_path` (Agent -> Sidebar). Fire-and-forget
+    /// from the sidebar's POV but still parsed so the IncomingMessage router
+    /// doesn't log a `did not match any variant` warning per click.
+    CanvasVideoRevealPathResponse(crate::canvas_video::RevealPathResponsePayload),
 }
 
 impl ChatMessage {
@@ -656,7 +662,8 @@ impl ChatMessage {
             Self::PickFilesResponse(_) |
             Self::PlanProposal(_) |
             Self::EventsResponse(_) |
-            Self::EventsDelivery(_) => MessageDirection::ToSidebar,
+            Self::EventsDelivery(_) |
+            Self::CanvasVideoRevealPathResponse(_) => MessageDirection::ToSidebar,
         }
     }
 
@@ -688,6 +695,7 @@ impl ChatMessage {
             Self::EventsRequest(_) => None,
             Self::EventsResponse(_) => None,
             Self::EventsDelivery(_) => None,
+            Self::CanvasVideoRevealPathResponse(_) => None,
         }
     }
 }

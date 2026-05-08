@@ -116,3 +116,17 @@ pub struct RenderFailed {
     pub job_id: String,
     pub error: String,
 }
+
+/// `canvas_video_reveal_path_response` payload.
+///
+/// Daemon -> sidebar reply to `canvas_video_reveal_path` (play / reveal an MP4
+/// via the OS shell). The sidebar fires the request fire-and-forget, but the
+/// daemon still ships back a result envelope; without this variant the
+/// IncomingMessage parser logs a `did not match any variant` warning each
+/// time the user clicks Play / Open folder on a finished render card.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevealPathResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
