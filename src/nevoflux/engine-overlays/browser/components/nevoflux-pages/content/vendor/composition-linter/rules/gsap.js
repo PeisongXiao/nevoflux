@@ -17,7 +17,7 @@
 //   parser) accessed via `readAttr(tag.raw, attr)`.  We use DOM element objects
 //   accessible via `ctx.doc.querySelectorAll(...)`.
 
-import { push } from '../utils.js';
+import { push, pushNarrowed } from '../utils.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -228,7 +228,7 @@ function ruleGsapTweenChecks(ctx, report) {
         continue;
       }
       const firstTween = existing.get(shared[0]);
-      push(report, {
+      pushNarrowed(report, ctx, {
         severity: 'warning',
         rule_id: 'comp/overlapping-gsap-tweens',
         message:
@@ -272,7 +272,7 @@ function ruleGsapTweenChecks(ctx, report) {
       if (!isSuspiciousGlobalSelector(tween.selector)) continue;
       const className = getSingleClassSelector(tween.selector);
       if (className && (classUsage.get(className) || 0) < 2) continue;
-      push(report, {
+      pushNarrowed(report, ctx, {
         severity: 'warning',
         rule_id: 'comp/unscoped-gsap-selector',
         message:
@@ -574,6 +574,57 @@ function ruleSceneLayerMissingVisibilityKill(ctx, report) {
   }
 }
 
+// ── rule: timelines_pushed_per_scene (multi-master anti-pattern) ───────────
+//
+// The render driver seeks EVERY entry in window.__timelines with master time
+// `t = frameIdx / fps`. So if a composition registers more than one paused
+// timeline, each entry is independently seeked at master time — there is no
+// per-scene clock. Authoring a scene-local timeline (e.g. tl2 with tweens at
+// positions 0..3.5 expected to play during the scene-2 visibility window
+// 4..8s) silently hits its end-state at master t = tl2.duration, well before
+// scene-2's clip window opens. The most common failure mode is an end-of-
+// scene fade-out tween (e.g. `tl2.to('#scene-2', {opacity: 0}, 3.2)`) running
+// at master t ≈ 3.2 — by t=4 when scene-2 visibility opens, the element is
+// already at opacity:0, so the entire scene-2 window renders blank against
+// render.html's black body background.
+//
+// Contract: ONE master `gsap.timeline({paused:true})`, all scene tweens at
+// master-time positions matching each scene's `data-start`. See the shipped
+// product-intro-{9x16,16x9} templates for the canonical pattern.
+//
+// NARROWED: regex-only count of `__timelines.push(` invocations across all
+// inline scripts. False-positives are possible when a composition legitimately
+// integrates multiple component snippets that each push their own tl — those
+// components are themselves the documented anti-pattern (see CLAUDE.md memory
+// "render-patches seeks every __timelines entry with MASTER time") and need
+// to be inlined into the master timeline. So firing on them is intentional.
+
+const TIMELINE_PUSH_CALL_RE = /window\.__timelines\.push\s*\(/g;
+
+function ruleTimelinesPushedPerScene(ctx, report) {
+  // Only meaningful for compositions.
+  if (!ctx.raw.includes('data-composition-id')) return;
+
+  let pushCount = 0;
+  for (const script of ctx.scripts) {
+    if (script.getAttribute('src')) continue;
+    const content = script.textContent || '';
+    TIMELINE_PUSH_CALL_RE.lastIndex = 0;
+    let m;
+    while ((m = TIMELINE_PUSH_CALL_RE.exec(content)) !== null) pushCount++;
+  }
+  if (pushCount <= 1) return;
+
+  pushNarrowed(report, ctx, {
+    severity: 'warning',
+    rule_id: 'comp/timelines-pushed-per-scene',
+    message:
+      `Composition pushes ${pushCount} timelines to window.__timelines. The render driver seeks every entry with master time, so tweens authored at scene-local positions hold their end-state once master_t exceeds that timeline's duration — typically producing a black frame for the rest of the video after the first sub-timeline ends.`,
+    fix_hint:
+      'Use ONE master `gsap.timeline({paused:true})` and place each scene\'s tweens at master-time positions matching the scene\'s `data-start` (e.g. scene-2 entrance at master t=4.1, exit at master t=7.6). See product-intro-{9x16,16x9}.html for the canonical pattern.',
+  });
+}
+
 // ── Export ─────────────────────────────────────────────────────────────────
 
 export default [
@@ -584,4 +635,5 @@ export default [
   ruleGsapInfiniteRepeat,
   ruleGsapRepeatCeilOvershoot,
   ruleSceneLayerMissingVisibilityKill,
+  ruleTimelinesPushedPerScene,
 ];

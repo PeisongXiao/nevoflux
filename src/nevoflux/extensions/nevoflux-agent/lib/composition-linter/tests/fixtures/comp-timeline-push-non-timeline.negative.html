@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+  <div data-composition-id="hello-kitty" data-width="1080" data-height="1080" data-duration="8" data-fps="30" data-start="0">
+    <div class="clip scene scene-1" data-start="0" data-duration="4" data-track-index="0">
+      <img src="assets/hello-kitty.png" />
+    </div>
+    <div class="clip scene scene-2" data-start="4" data-duration="4" data-track-index="0">
+      <img src="assets/hello-kitty.png" />
+    </div>
+  </div>
+  <script type="module">
+    import gsap from 'https://esm.sh/gsap@3.13';
+    window.__timelines = window.__timelines || [];
+
+    const tl1 = gsap.timeline({ paused: true });
+    tl1.from('.scene-1 img', { scale: 0, duration: 1.0 }, 0);
+    // BAD: wrapper object — render driver calls entry.seek which is undefined.
+    window.__timelines.push({ name: 'scene-1', tl: tl1, start: 0 });
+
+    const tl2 = gsap.timeline({ paused: true });
+    tl2.from('.scene-2 img', { opacity: 0, duration: 0.8 }, 0);
+    window.__timelines.push({ name: 'scene-2', tl: tl2, start: 4 });
+  </script>
+</body>
+</html>

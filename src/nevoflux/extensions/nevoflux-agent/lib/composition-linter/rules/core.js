@@ -143,6 +143,42 @@ function ruleTimelineRegistry(ctx, report) {
   }
 }
 
+// ── core rule: timeline_push_non_timeline ──────────────────────────────────
+//
+// `window.__timelines.push({...})` with an object literal (rather than a bare
+// GSAP Timeline) breaks the render-patches seek loop, which calls
+// `entry.seek(t)` directly. The render driver now unwraps `{tl, …}` defensively
+// so this no longer silently produces a frozen-frame MP4, but the wrapper
+// shape is still a contract violation: it sneaks past the GSAP API surface
+// (e.g. `tl.duration()` calls inside `.gsap.js` rules go to the wrong object)
+// and should be authored as `push(tl)` directly.
+//
+// Detection is regex-only on `ctx.raw`. We deliberately do not flag
+// `push(someIdentifier)` even if that identifier resolves to a wrapper at
+// runtime — static analysis can't see that.
+
+const TIMELINE_PUSH_OBJECT_LITERAL_RE =
+  /window\.__timelines\.push\s*\(\s*\{/g;
+
+function ruleTimelinePushNonTimeline(ctx, report) {
+  // Only meaningful for documents that declare compositions.
+  if (!ctx.raw.includes('data-composition-id')) return;
+
+  TIMELINE_PUSH_OBJECT_LITERAL_RE.lastIndex = 0;
+  let m;
+  while ((m = TIMELINE_PUSH_OBJECT_LITERAL_RE.exec(ctx.raw)) !== null) {
+    push(report, {
+      severity: 'error',
+      rule_id: 'comp/timeline-push-non-timeline',
+      message:
+        '`window.__timelines.push({...})` with an object literal is not a GSAP Timeline. The render driver calls `entry.seek(t)` and will reach a non-timeline target.',
+      fix_hint:
+        'Push the timeline directly: `window.__timelines.push(tl);`. Do not wrap it in `{name, tl, start}` — the runtime infers timing from the parent .clip element\'s data-start/data-duration.',
+      snippet: truncateSnippet(ctx.raw.slice(m.index, m.index + 160)),
+    });
+  }
+}
+
 // ── core rule: timeline_id_mismatch ────────────────────────────────────────
 
 function ruleTimelineIdMismatch(ctx, report) {
@@ -316,6 +352,7 @@ function ruleNonDeterministicCode(ctx, report) {
 export default [
   ruleRootMissingCompositionAttributes,
   ruleTimelineRegistry,
+  ruleTimelinePushNonTimeline,
   ruleTimelineIdMismatch,
   ruleInvalidScriptCloseSyntax,
   ruleInvalidInlineScriptSyntax,
