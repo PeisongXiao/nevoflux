@@ -43,6 +43,10 @@ pub use chat::{
     // Tool events & authorization
     ToolEvent, ToolEventStatus, ToolAuthRequest, AuthOption, AuthScope,
     ToolAuthResponsePayload, ThinkingEvent,
+    // /loop skill payloads (spec §11)
+    LoopCancelCommandPayload, LoopCancelledPayload, LoopCreatedPayload,
+    LoopIterationEndPayload, LoopIterationStartPayload,
+    LoopScratchpadChangedPayload, LoopStateChangedPayload, LoopTriggerDroppedPayload,
 };
 
 // Re-export EventBus types

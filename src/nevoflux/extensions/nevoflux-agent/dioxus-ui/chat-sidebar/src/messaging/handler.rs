@@ -160,7 +160,8 @@ fn handle_chat_message(ctx: AppContext, message: ChatMessage) {
         ChatMessage::BrowserToolResponse(_) |
         ChatMessage::PickFilesRequest(_) |
         ChatMessage::PlanResponse(_) |
-        ChatMessage::ToolAuthResponse(_) => {
+        ChatMessage::ToolAuthResponse(_) |
+        ChatMessage::LoopCancelCommand(_) => {
             tracing::warn!("Received unexpected ToAgent message in sidebar");
         }
     }
