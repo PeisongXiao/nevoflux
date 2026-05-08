@@ -92,6 +92,8 @@ pub struct AppContext {
     /// claims the job_id. Used by `MessageBubble` to render one
     /// `RenderProgressCard` under each `canvas_render_video` tool_use.
     pub message_render_job_ids: Signal<std::collections::HashMap<String, Vec<String>>>,
+    /// Per-loop state, keyed by loop_id, populated from system:loop:* events.
+    pub loops: Signal<std::collections::HashMap<String, crate::state::LoopState>>,
     /// Whether mock mode is enabled
     pub mock_enabled: bool,
 }
@@ -129,6 +131,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
     let event_notifications = use_signal(Vec::new);
     let render_jobs = use_signal(std::collections::HashMap::new);
     let message_render_job_ids = use_signal(std::collections::HashMap::new);
+    let loops = use_signal(std::collections::HashMap::new);
     let mut first_run = use_signal(|| false);
     let mut has_configured_provider = use_signal(|| false);
 
@@ -160,6 +163,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
         event_notifications,
         render_jobs,
         message_render_job_ids,
+        loops,
         first_run,
         has_configured_provider,
         mock_enabled,
