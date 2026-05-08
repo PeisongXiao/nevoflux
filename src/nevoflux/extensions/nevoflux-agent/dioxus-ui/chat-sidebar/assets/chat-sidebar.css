@@ -4443,3 +4443,117 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .render-progress-card .progress-fill { transition: none; }
 }
+
+/* /loop skill (spec §2.6) ─────────────────────────────────── */
+
+.loop-sticky-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--nevo-border);
+  background: var(--nevo-bg);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.loop-sticky-card {
+  border: 1px solid var(--nevo-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--nevo-surface);
+}
+
+.loop-sticky-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.loop-state {
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.loop-state.state-pending   { background: color-mix(in srgb, var(--nevo-accent) 15%, transparent); }
+.loop-state.state-running   { background: color-mix(in srgb, var(--nevo-accent) 30%, transparent); }
+.loop-state.state-idle      { background: color-mix(in srgb, var(--nevo-accent) 10%, transparent); }
+.loop-state.state-failed    { background: color-mix(in srgb, #f33 25%, transparent); }
+.loop-state.state-cancelled { opacity: 0.5; }
+
+.loop-trigger {
+  font-family: var(--nevo-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--nevo-text-muted);
+}
+
+.loop-counts {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--nevo-text-muted);
+}
+
+.loop-cancel-btn {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--nevo-border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+.loop-cancel-btn:hover {
+  background: color-mix(in srgb, var(--nevo-accent) 15%, transparent);
+}
+
+.loop-scratchpad-preview {
+  font-family: var(--nevo-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  margin-top: 6px;
+  opacity: 0.75;
+}
+
+/* iteration cards inline in the message stream */
+
+.loop-iter-card {
+  border-left: 3px solid var(--nevo-accent);
+  padding: 6px 10px;
+  margin: 6px 0;
+  border-radius: 4px;
+  background: var(--nevo-surface);
+}
+.loop-iter-card.status-error   { border-left-color: #f33; }
+.loop-iter-card.status-running { border-left-color: var(--nevo-accent); animation: nevo-loop-pulse 1.2s infinite; }
+
+.loop-iter-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+}
+.iter-seq      { font-weight: 600; }
+.iter-trigger  { font-family: var(--nevo-font-mono, ui-monospace, monospace); font-size: 12px; color: var(--nevo-text-muted); }
+.iter-status   { color: var(--nevo-text-muted); font-size: 12px; }
+.iter-duration { margin-left: auto; font-size: 12px; }
+
+.iter-tool-trace {
+  margin-top: 6px;
+  padding-left: 8px;
+}
+.iter-tool-row {
+  display: flex;
+  gap: 8px;
+  font-family: var(--nevo-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+@keyframes nevo-loop-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loop-iter-card.status-running { animation: none; }
+}
