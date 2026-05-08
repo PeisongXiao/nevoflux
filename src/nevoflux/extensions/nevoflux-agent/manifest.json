@@ -41,6 +41,11 @@
       "matches": ["<all_urls>"],
       "js": ["content/content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/dom-watcher.js"],
+      "run_at": "document_idle"
     }
   ],
   "icons": {
