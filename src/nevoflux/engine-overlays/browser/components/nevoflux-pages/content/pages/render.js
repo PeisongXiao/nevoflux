@@ -3,14 +3,32 @@
 // Post-actor-rework (2026-04-20) the page is the driver: it fetches the
 // composition via NevofluxBridge.canvasVideo.getComposition, iterates each
 // frame locally, asks the parent JSActor to drawSnapshot the composition
-// iframe, and forwards PNG bytes back to the daemon in 1 MB chunks.
+// iframe, and uploads PNG bytes back to the daemon.
+//
+// Frame upload transport (preferred): HTTP POST to
+// `/v1/render/<job_id>/frame` on the daemon's Asset & Stream Plane HTTP
+// server. The daemon advertises `port` + `bearer_token` on the
+// `canvas_video_get_composition` response (`asset_plane` field). Each
+// frame is one POST with the raw PNG body — no JSON expansion, no native-
+// messaging size limits, no chunking dance.
+//
+// Fallback transport: native messaging via
+// `NevofluxBridge.canvasVideo.forwardFrameChunk`. Only used when the
+// daemon couldn't bring up its AssetServer (test mode, partial bring-up)
+// and `asset_plane` came back null. The fallback is lossy on large PNGs:
+// background.js's `chunkMessage` envelope (`{__chunk:{id,index,total,data}}`)
+// has no daemon-side reassembler, so the daemon proxy silently drops any
+// outer-chunked envelope. To stay inside the safe direct-send window the
+// fallback uses CHUNK_SIZE = 250 KB so each PNG slice's JSON encoding
+// (Array.from expansion ~3.57×) lands at ~890 KB, just under the 900 KB
+// `needsChunking` threshold in background.js's chat.send.
 
 import {
   withPatches,
   setRenderTime,
 } from 'chrome://nevoflux/content/pages/render-patches.js';
 
-const CHUNK_SIZE = 1024 * 1024; // 1 MB PNG chunks
+const CHUNK_SIZE = 250 * 1024;
 
 // window.location keeps the original nevoflux:// URL (because the protocol
 // handler sets channel.originalURI); query strings on non-http schemes are
@@ -116,8 +134,31 @@ async function seekFrame(t) {
   await new Promise((r) => window.requestAnimationFrame(r));
 }
 
-async function forwardPng(frameIdx, pngBytes) {
-  const u8 = pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes);
+// HTTP fast path: POST one PNG body to /v1/render/<job>/frame on the
+// asset plane. Returns true on success, false on any failure so the
+// caller can fall back to the legacy NM path for that frame.
+async function uploadPngHttp(assetPlane, frameIdx, u8) {
+  const url = `http://127.0.0.1:${assetPlane.port}/v1/render/${encodeURIComponent(jobId)}/frame`;
+  // PNG body must be a typed array view backed by a non-shared buffer for
+  // Firefox's fetch to accept it as a Body. u8 satisfies that.
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + assetPlane.bearer_token,
+      'Content-Type': 'image/png',
+      'X-NF-Frame-Index': String(frameIdx),
+    },
+    body: u8,
+  });
+  if (!resp.ok) {
+    throw new Error('asset_plane POST ' + resp.status + ' for frame ' + frameIdx);
+  }
+}
+
+// Fallback NM path: chunked into ≤ 250 KB binary slices so each chunk's
+// JSON encoding stays under background.js's chunkMessage threshold (which
+// has no daemon-side reassembler).
+async function forwardPngNm(frameIdx, u8) {
   const total = Math.max(1, Math.ceil(u8.length / CHUNK_SIZE));
   for (let i = 0; i < total; i++) {
     const start = i * CHUNK_SIZE;
@@ -132,6 +173,15 @@ async function forwardPng(frameIdx, pngBytes) {
       bytes: Array.from(slice),
     });
   }
+}
+
+async function forwardPng(assetPlane, frameIdx, pngBytes) {
+  const u8 = pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes);
+  if (assetPlane && assetPlane.port && assetPlane.bearer_token) {
+    await uploadPngHttp(assetPlane, frameIdx, u8);
+    return;
+  }
+  await forwardPngNm(frameIdx, u8);
 }
 
 async function runRenderLoop() {
@@ -183,6 +233,18 @@ async function runRenderLoop() {
     return;
   }
 
+  // Daemon advertises asset_plane (port + bearer) for /v1/render/<job>/frame
+  // POSTs. Absent in test mode / partial bring-up — we then fall back to the
+  // legacy NM frame_chunk path (lossy on >250 KB PNGs but fine for fixtures).
+  const assetPlane = comp.asset_plane || null;
+  if (assetPlane && assetPlane.port) {
+    console.log(
+      '[render.js] frame upload: asset_plane HTTP port=' + assetPlane.port
+    );
+  } else {
+    console.warn('[render.js] frame upload: asset_plane unavailable, falling back to NM frame_chunk');
+  }
+
   setStatus(`loading composition (${comp.width}×${comp.height}, ${comp.duration_sec}s @ ${comp.fps}fps)`);
   await loadComposition(comp.html, comp.width, comp.height);
 
@@ -216,7 +278,7 @@ async function runRenderLoop() {
     if (typeof res.drawMs === 'number') {
       drawMsSamples.push(res.drawMs);
     }
-    await forwardPng(frameIdx, res.bytes);
+    await forwardPng(assetPlane, frameIdx, res.bytes);
 
     if (frameIdx % 10 === 0 || frameIdx === totalFrames - 1) {
       setStatus(`rendered ${frameIdx + 1}/${totalFrames}`);

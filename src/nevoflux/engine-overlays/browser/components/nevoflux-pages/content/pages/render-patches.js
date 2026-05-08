@@ -110,8 +110,38 @@ export const PATCHES_SOURCE = `
         el.style.visibility = (d.seconds >= s && d.seconds < s + du) ? 'visible' : 'hidden';
       }
 
+      // Accept both shapes:
+      //   bare    — window.__timelines.push(tl)            (tl.seek exists)
+      //   wrapped — window.__timelines.push({tl, name, …}) (entry.tl.seek exists)
+      // The wrapped shape is a contract violation that LLM-authored
+      // compositions occasionally emit. Older code did
+      //   try { tls[i].seek(...) } catch (_) {}
+      // which silently swallowed the TypeError on every frame and produced
+      // a video stuck at the GSAP from-state (e.g. all .from images at
+      // scale:0 → "single solid background-color MP4"). Recover by
+      // unwrapping when needed and warn once so the violation surfaces.
       for (var i = 0; i < tls.length; i++) {
-        try { tls[i].seek(d.seconds); } catch (_) {}
+        var entry = tls[i];
+        var target = entry && typeof entry.seek === 'function'
+          ? entry
+          : (entry && entry.tl && typeof entry.tl.seek === 'function' ? entry.tl : null);
+        if (!target) {
+          if (!window.__nfTlShapeWarned) {
+            window.__nfTlShapeWarned = true;
+            try {
+              var keys = entry && typeof entry === 'object'
+                ? Object.keys(entry).join(',') : typeof entry;
+              console.warn('[render-patches] __timelines[' + i + '] has no .seek (keys=' + keys + '); contract violation');
+            } catch (_) {}
+          }
+          continue;
+        }
+        try { target.seek(d.seconds); } catch (e) {
+          if (!window.__nfTlSeekWarned) {
+            window.__nfTlSeekWarned = true;
+            try { console.warn('[render-patches] tl.seek threw:', e && e.message); } catch (_) {}
+          }
+        }
       }
       // Ack back to parent so render.js can verify delivery + capture state.
       try {
@@ -152,6 +182,33 @@ export const PATCHES_SOURCE = `
       }, '*');
     } catch (_) {}
   }
+  // Wait for every <img> element's bitmap to be decoded + ready for
+  // paint. window.load only fires after the HTTP fetch resolves; for
+  // assets coming from the loopback Asset Plane (Phase 2), decode runs
+  // in a separate async pipeline and the first drawSnapshot() can fire
+  // before the image is actually painted — yielding "MP4 is missing the
+  // hero image even though Canvas Editor shows it". img.decode() returns
+  // a Promise that resolves once the bitmap is decoded; we await it for
+  // every image (parallel) before signaling ready. Errors are swallowed
+  // so a broken asset doesn't block render forever.
+  async function _waitForImages() {
+    var imgs = Array.prototype.slice.call(document.querySelectorAll('img'));
+    if (imgs.length === 0) return;
+    await Promise.all(imgs.map(function (img) {
+      var p1 = (img.complete && img.naturalWidth > 0)
+        ? Promise.resolve()
+        : new Promise(function (resolve) {
+            img.addEventListener('load', resolve, { once: true });
+            img.addEventListener('error', resolve, { once: true });
+          });
+      return p1.then(function () {
+        // decode() forces synchronous bitmap decode; falls back gracefully
+        // when the image already failed to load.
+        return img.decode ? img.decode().catch(function () {}) : null;
+      });
+    }));
+  }
+
   function _waitForTimelines() {
     // Use a setTimeout-counted budget instead of performance.now() because
     // we just patched performance.now() to return __nfRenderTime * 1000
@@ -161,7 +218,11 @@ export const PATCHES_SOURCE = `
     function poll() {
       var tls = window.__timelines || [];
       if (tls.length > 0 || ticks++ >= maxTicks) {
-        _signalReady();
+        // Block on every image being decoded before signaling ready.
+        // Without this, the parent's first drawSnapshot can fire while
+        // images are still pending paint (esp. for assets fetched over
+        // the Asset Plane HTTP route).
+        _waitForImages().then(_signalReady, _signalReady);
         return;
       }
       setTimeout(poll, 50);
