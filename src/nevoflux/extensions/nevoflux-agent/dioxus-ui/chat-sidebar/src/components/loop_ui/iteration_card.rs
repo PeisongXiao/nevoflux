@@ -40,22 +40,29 @@ pub fn IterationCard(loop_id: String, row: IterationRow) -> Element {
                     span { class: "iter-duration", "{ms}ms" }
                 }
             }
-            if expanded() && !trace.is_empty() {
-                div { class: "iter-tool-trace",
-                    for call in trace.iter() {
-                        div { class: "iter-tool-row",
-                            span { class: "tool-name",
-                                "{call.get(\"name\").and_then(|v| v.as_str()).unwrap_or(\"?\")}"
-                            }
-                            span { class: "tool-ok",
-                                if call.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                    "ok"
-                                } else {
-                                    "fail"
+            if expanded() {
+                if let Some(text) = row.final_text.as_deref() {
+                    if !text.is_empty() {
+                        div { class: "iter-final-text", "{text}" }
+                    }
+                }
+                if !trace.is_empty() {
+                    div { class: "iter-tool-trace",
+                        for call in trace.iter() {
+                            div { class: "iter-tool-row",
+                                span { class: "tool-name",
+                                    "{call.get(\"name\").and_then(|v| v.as_str()).unwrap_or(\"?\")}"
                                 }
-                            }
-                            span { class: "tool-ms",
-                                "{call.get(\"ms\").and_then(|v| v.as_i64()).unwrap_or(0)}ms"
+                                span { class: "tool-ok",
+                                    if call.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                        "ok"
+                                    } else {
+                                        "fail"
+                                    }
+                                }
+                                span { class: "tool-ms",
+                                    "{call.get(\"ms\").and_then(|v| v.as_i64()).unwrap_or(0)}ms"
+                                }
                             }
                         }
                     }

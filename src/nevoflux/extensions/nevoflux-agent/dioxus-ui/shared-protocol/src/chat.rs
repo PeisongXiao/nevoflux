@@ -757,6 +757,10 @@ pub struct LoopIterationEndPayload {
     pub status: String,
     #[serde(default)]
     pub tool_calls_summary: serde_json::Value,
+    /// LLM's final text output for this iteration. Capped at 4KB by the
+    /// publisher. `None` for error iterations.
+    #[serde(default)]
+    pub final_text: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

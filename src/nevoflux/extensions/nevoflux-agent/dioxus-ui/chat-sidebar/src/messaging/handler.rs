@@ -1922,6 +1922,7 @@ fn apply_loop_event(mut ctx: crate::context::AppContext, topic: &str, payload: &
                         status: "running".into(),
                         fire_reason: p.fire_reason,
                         tool_calls_summary: serde_json::Value::Null,
+                        final_text: None,
                     });
                 }
             }
@@ -1939,6 +1940,7 @@ fn apply_loop_event(mut ctx: crate::context::AppContext, topic: &str, payload: &
                         row.ended_at = Some(p.ended_at);
                         row.status = p.status;
                         row.tool_calls_summary = p.tool_calls_summary;
+                        row.final_text = p.final_text;
                     } else {
                         // No matching start row (start was missed) — push a fresh one.
                         s.push_or_update_iteration(IterationRow {
@@ -1948,6 +1950,7 @@ fn apply_loop_event(mut ctx: crate::context::AppContext, topic: &str, payload: &
                             status: p.status,
                             fire_reason: String::new(),
                             tool_calls_summary: p.tool_calls_summary,
+                            final_text: p.final_text,
                         });
                     }
                 }

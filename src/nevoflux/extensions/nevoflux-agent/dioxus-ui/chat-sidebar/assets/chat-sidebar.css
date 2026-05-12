@@ -4558,6 +4558,19 @@ body {
 .iter-status   { color: var(--nevo-text-muted); font-size: 12px; }
 .iter-duration { margin-left: auto; font-size: 12px; }
 
+.iter-final-text {
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--nevo-text);
+  background: color-mix(in srgb, var(--nevo-accent) 6%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--nevo-accent) 40%, transparent);
+  border-radius: 0 4px 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .iter-tool-trace {
   margin-top: 6px;
   padding-left: 8px;

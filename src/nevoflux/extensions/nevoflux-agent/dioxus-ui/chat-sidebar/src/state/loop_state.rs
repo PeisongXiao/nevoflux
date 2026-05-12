@@ -31,6 +31,10 @@ pub struct IterationRow {
     pub status: String, // running|ok|error
     pub fire_reason: String,
     pub tool_calls_summary: serde_json::Value,
+    /// LLM's final text response for this iteration. Set on iteration_end;
+    /// `None` while running or for error iterations. In-memory only — not
+    /// persisted across sidebar reload.
+    pub final_text: Option<String>,
 }
 
 impl LoopState {
