@@ -71,6 +71,10 @@ pub struct ChatMessagePayload {
 pub struct SkillCommandPayload {
     pub session_id: String,
     pub skill_name: String,
+    /// Chat mode at command-issue time. The /loop skill uses this to
+    /// pick the iteration's tool catalog (chat/browser/agent).
+    #[serde(default)]
+    pub mode: ChatMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<serde_json::Value>,
 }
@@ -591,6 +595,10 @@ pub enum ChatMessage {
     PlanResponse(PlanResponsePayload),
     /// Tool authorization response
     ToolAuthResponse(ToolAuthResponsePayload),
+    /// Cancel a /loop (Sidebar → Agent). Force=true is the second-click
+    /// hard-cancel per spec §8.3; false is the soft cancel that lets the
+    /// current iteration finish.
+    LoopCancelCommand(LoopCancelCommandPayload),
 
     // ========== Agent → Sidebar ==========
     /// Stream chunk
@@ -647,6 +655,7 @@ impl ChatMessage {
             Self::PickFilesRequest(_) |
             Self::PlanResponse(_) |
             Self::ToolAuthResponse(_) |
+            Self::LoopCancelCommand(_) |
             Self::EventsRequest(_) => MessageDirection::ToAgent,
 
             // Agent → Sidebar
@@ -681,6 +690,7 @@ impl ChatMessage {
             Self::PickFilesRequest(_) => None,
             Self::PlanResponse(p) => Some(&p.session_id),
             Self::ToolAuthResponse(_) => None,
+            Self::LoopCancelCommand(p) => Some(&p.session_id),
             Self::StreamChunk(_) => None, // New protocol doesn't include session_id
             Self::StreamEnd(p) => Some(&p.session_id),
             Self::ContentBlock(p) => Some(&p.session_id),
@@ -698,6 +708,91 @@ impl ChatMessage {
             Self::CanvasVideoRevealPathResponse(_) => None,
         }
     }
+}
+
+// =============================================================================
+// /loop skill payloads (spec §11)
+// =============================================================================
+//
+// system:loop:* event payloads — typed deserializers for the JSON content
+// arriving via `EventsDelivery`. Sidebar's event-listener routes by topic
+// and uses these structs to parse the payload.
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoopCreatedPayload {
+    pub session_id: String,
+    pub loop_id: String,
+    pub trigger_expr: String,
+    #[serde(default)]
+    pub prompt_text: Option<String>,
+    #[serde(default)]
+    pub wrapped_skill: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoopStateChangedPayload {
+    pub session_id: String,
+    pub loop_id: String,
+    pub new_state: String,
+    pub prev_state: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoopIterationStartPayload {
+    pub session_id: String,
+    pub loop_id: String,
+    pub sequence_number: i64,
+    pub started_at: i64,
+    pub fire_reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoopIterationEndPayload {
+    pub session_id: String,
+    pub loop_id: String,
+    pub sequence_number: i64,
+    pub ended_at: i64,
+    pub status: String,
+    #[serde(default)]
+    pub tool_calls_summary: serde_json::Value,
+    /// LLM's final text output for this iteration. Capped at 4KB by the
+    /// publisher. `None` for error iterations.
+    #[serde(default)]
+    pub final_text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoopScratchpadChangedPayload {
+    pub session_id: String,
+    pub loop_id: String,
+    pub preview: String,
+    pub bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoopTriggerDroppedPayload {
+    pub session_id: String,
+    pub loop_id: String,
+    pub skipped_count: i64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoopCancelledPayload {
+    pub session_id: String,
+    pub loop_id: String,
+    pub cancelled_by: String,
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoopCancelCommandPayload {
+    pub session_id: String,
+    pub loop_id: String,
+    #[serde(default)]
+    pub force: bool,
 }
 
 // =============================================================================

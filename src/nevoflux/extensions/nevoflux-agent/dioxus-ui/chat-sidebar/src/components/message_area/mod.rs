@@ -106,6 +106,9 @@ pub fn MessageArea() -> Element {
 
     rsx! {
         div { class: "message-area",
+            // Sticky stack of /loop cards (spec §2.6).
+            // Renders nothing when no active loops exist for this session.
+            crate::components::loop_ui::StickyLoopCards {}
             if is_empty {
                 WelcomeScreen {}
             } else {

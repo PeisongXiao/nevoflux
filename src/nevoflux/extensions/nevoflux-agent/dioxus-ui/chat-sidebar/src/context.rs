@@ -92,6 +92,8 @@ pub struct AppContext {
     /// claims the job_id. Used by `MessageBubble` to render one
     /// `RenderProgressCard` under each `canvas_render_video` tool_use.
     pub message_render_job_ids: Signal<std::collections::HashMap<String, Vec<String>>>,
+    /// Per-loop state, keyed by loop_id, populated from system:loop:* events.
+    pub loops: Signal<std::collections::HashMap<String, crate::state::LoopState>>,
     /// Whether mock mode is enabled
     pub mock_enabled: bool,
 }
@@ -129,6 +131,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
     let event_notifications = use_signal(Vec::new);
     let render_jobs = use_signal(std::collections::HashMap::new);
     let message_render_job_ids = use_signal(std::collections::HashMap::new);
+    let loops = use_signal(std::collections::HashMap::new);
     let mut first_run = use_signal(|| false);
     let mut has_configured_provider = use_signal(|| false);
 
@@ -160,6 +163,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
         event_notifications,
         render_jobs,
         message_render_job_ids,
+        loops,
         first_run,
         has_configured_provider,
         mock_enabled,
@@ -229,10 +233,13 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
                 // handler::handle_event_delivery. Also subscribe to
                 // `jobs:render:*` so render job progress/complete events
                 // flow into `ctx.render_jobs` via the same handler.
+                // And `system:loop:*` so /loop sticky cards + iteration
+                // cards populate ctx.loops via handler::apply_loop_event.
                 if let Err(e) = crate::messaging::send_events_subscribe(
                     vec![
                         "ui:notification:*".to_string(),
                         "jobs:render:*".to_string(),
+                        "system:loop:*".to_string(),
                     ],
                     false,
                     256,
@@ -240,7 +247,7 @@ pub fn ContextProvider(#[props(default = false)] mock_enabled: bool, children: E
                 .await
                 {
                     tracing::warn!(
-                        "EventBus subscribe to ui:notification:*, jobs:render:* failed: {}",
+                        "EventBus subscribe to ui:notification:*, jobs:render:*, system:loop:* failed: {}",
                         e
                     );
                 }
