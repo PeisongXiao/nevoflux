@@ -25,6 +25,17 @@ on:
         default: 'release'
         options:
           - 'release'
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version without v prefix (e.g. 0.1.2)'
+        required: true
+        type: string
+      release_branch:
+        description: 'Release branch (for release notes generation)'
+        required: false
+        type: string
+        default: 'release'
 
 jobs:
   finalize:

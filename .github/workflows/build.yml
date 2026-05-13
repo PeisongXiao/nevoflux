@@ -30,6 +30,16 @@ on:
         required: true
         type: 'boolean'
         default: false
+      auto_finalize:
+        description: 'After build completes, automatically chain into finalize-release.yml (publishes the draft release)'
+        required: false
+        type: 'boolean'
+        default: false
+      create_release:
+        description: 'On release branch: have build.yml create a v-tag DRAFT GitHub Release with GHA artifacts. Required when GHA self-host is the build source. Leave false when GCB created the release elsewhere.'
+        required: false
+        type: 'boolean'
+        default: false
   workflow_call:
     inputs:
       update_version:
@@ -55,6 +65,16 @@ on:
       use-sccache:
         description: 'Use sccache'
         required: true
+        type: 'boolean'
+        default: false
+      auto_finalize:
+        description: 'After build completes, automatically chain into finalize-release.yml (publishes the draft release)'
+        required: false
+        type: 'boolean'
+        default: false
+      create_release:
+        description: 'On release branch: have build.yml create a v-tag DRAFT GitHub Release with GHA artifacts. Required when GHA self-host is the build source. Leave false when GCB created the release elsewhere.'
+        required: false
         type: 'boolean'
         default: false
 
@@ -457,7 +477,7 @@ jobs:
 
   stop-self-hosted:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    needs: [windows-step-3, linux]
+    needs: [linux]
     if: always()
     steps:
       - name: Download aws-cli
@@ -489,7 +509,6 @@ jobs:
       [
         build-data,
         linux,
-        windows-step-3,
         check-release,
         mac-uni,
         appimage,
@@ -561,9 +580,9 @@ jobs:
         with:
           body_path: release_notes.md
           files: |
-            ./zen.source.tar.zst/*
-            ./zen.linux-x86_64.tar.xz/*
-            ./zen.linux-aarch64.tar.xz/*
+            ./nevoflux.source.tar.zst/*
+            ./nevoflux.linux-x86_64.tar.xz/*
+            ./nevoflux.linux-aarch64.tar.xz/*
             ./zen-x86_64.AppImage/*
             ./zen-x86_64.AppImage.zsync/*
             ./zen-aarch64.AppImage/*
@@ -577,7 +596,7 @@ jobs:
             ./macos.mar/*
             ./zen.installer.exe/*
             ./zen.installer-arm64.exe/*
-            ./zen.macos-universal.dmg/*
+            ./nevoflux.macos-universal.dmg/*
           tag_name: "twilight-1"
           name: "Twilight build - ${{ needs.build-data.outputs.version }} (${{ needs.build-data.outputs.build_date }} at ${{ needs.build-data.outputs.build_time }})"
           draft: false
@@ -593,16 +612,17 @@ jobs:
         if: ${{ inputs.update_branch == 'release' }}
         with:
           token: ${{ secrets.DEPLOY_KEY }}
-          tag_name: ${{ needs.build-data.outputs.version }}
+          tag_name: v${{ needs.build-data.outputs.version }}
+          draft: true
           prerelease: false
           fail_on_unmatched_files: false
           generate_release_notes: false
-          name: "Release build - ${{ needs.build-data.outputs.version }} (${{ needs.build-data.outputs.build_date }})"
+          name: "Release build - v${{ needs.build-data.outputs.version }} (${{ needs.build-data.outputs.build_date }})"
           body_path: release_notes.md
           files: |
-            ./zen.source.tar.zst/*
-            ./zen.linux-x86_64.tar.xz/*
-            ./zen.linux-aarch64.tar.xz/*
+            ./nevoflux.source.tar.zst/*
+            ./nevoflux.linux-x86_64.tar.xz/*
+            ./nevoflux.linux-aarch64.tar.xz/*
             ./zen-x86_64.AppImage/*
             ./zen-x86_64.AppImage.zsync/*
             ./zen-aarch64.AppImage/*
@@ -616,7 +636,7 @@ jobs:
             ./macos.mar/*
             ./.github/workflows/object/windows-x64-signed-x86_64/zen.installer.exe
             ./.github/workflows/object/windows-x64-signed-arm64/zen.installer-arm64.exe
-            ./zen.macos-universal.dmg/*
+            ./nevoflux.macos-universal.dmg/*
 
   prepare-flatpak:
     if: ${{ inputs.create_release && inputs.update_branch == 'release' }}
@@ -762,3 +782,14 @@ jobs:
           base: master
           git-token: ${{ secrets.DEPLOY_KEY }}
           delete-branch: true
+
+  finalize:
+    name: Finalize Release
+    if: ${{ inputs.auto_finalize && inputs.update_branch == 'release' }}
+    needs: [build-data, release]
+    uses: ./.github/workflows/finalize-release.yml
+    permissions: write-all
+    secrets: inherit
+    with:
+      version: ${{ needs.build-data.outputs.version }}
+      release_branch: ${{ inputs.update_branch }}
