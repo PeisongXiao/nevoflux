@@ -134,7 +134,7 @@ default_model = "claude-sonnet-4-20250514"
 
 ## Getting Started
 
-Nevoflux consists of two components: **the browser** (this repository) and the **Rust native agent** ([nevoflux-agent](https://github.com/dorisgyl/nevoflux-agent)). Both are needed for full functionality.
+Nevoflux consists of two components in this monorepo: **the browser** and the **Rust native agent** (`native/nevoflux-agent`). Both are needed for full functionality.
 
 ### Browser
 
@@ -152,15 +152,17 @@ npm run build
 npm run start
 ```
 
+For a full local test build that includes the browser, native agent, and agent panel extension:
+
+```bash
+npm run start:full
+```
+
 ### Native Agent
 
 ```bash
 # Prerequisites: Rust 1.75+
-
-git clone https://github.com/dorisgyl/nevoflux-agent.git
-cd nevoflux-agent
-
-cargo build --release
+cargo build --release --manifest-path native/nevoflux-agent/Cargo.toml --bin nevoflux-agent
 ```
 
 Then register the native messaging host:
@@ -413,6 +415,7 @@ git commit -m "patch(feature): description"
 | `npm run build`      | Full browser build              |
 | `npm run build:ui`   | UI-only rebuild (faster)        |
 | `npm run start`      | Launch the browser              |
+| `npm run start:full` | Build browser, agent, panel, then launch |
 | `npm run reload-ext` | Reload extension + clear caches |
 | `npm run test`       | Run tests                       |
 | `npm run lint`       | Run ESLint/Prettier             |
