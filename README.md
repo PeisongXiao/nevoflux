@@ -158,6 +158,24 @@ For a full local test build that includes the browser, native agent, and agent p
 npm run start:full
 ```
 
+As a backup for SSH X11 forwarding, run:
+
+```bash
+./scripts/launch-nevoflux.sh --ssh
+# or: npm run start:full -- --ssh
+```
+
+SSH X11 forwarding has poor browser UI performance and is less reliable than a remote desktop/VNC-style session. Prefer remote desktop for interactive testing when available.
+
+For local testing without launcher-provided environment or graphics preference overrides, run:
+
+```bash
+./scripts/launch-nevoflux.sh --raw
+# or: npm run start:full -- --raw
+```
+
+`--raw` still builds and stages the browser, native agent, and panel. It only skips the launch-time env/pref defaults. `--raw` and `--ssh` are mutually exclusive.
+
 ### Native Agent
 
 ```bash

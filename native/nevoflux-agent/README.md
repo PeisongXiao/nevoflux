@@ -13,6 +13,10 @@ npm run start:full
 
 The binary will be available at `native/nevoflux-agent/target/release/nevoflux-agent`. `npm run start:full` builds the browser, the agent, and the WASM chat panel before launching NevoFlux.
 
+For SSH X11 forwarding fallback, use `./scripts/launch-nevoflux.sh --ssh` from the monorepo root. This mode is a backup only because raw SSH X11 forwarding has poor browser UI performance.
+
+For local testing without launcher-provided runtime environment or graphics preference overrides, use `./scripts/launch-nevoflux.sh --raw`. It still builds and stages the browser, native agent, and panel, and cannot be combined with `--ssh`.
+
 ## Features
 
 - **Browser Automation**: Full browser control via extension - navigate, click, type, fill, screenshot, JavaScript execution, accessibility tree snapshots

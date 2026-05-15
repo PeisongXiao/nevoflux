@@ -6,6 +6,38 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
 
+SSH_MODE=false
+RAW_MODE=false
+MACH_RUN_ARGS=()
+
+while (($#)); do
+  case "$1" in
+    --ssh)
+      SSH_MODE=true
+      shift
+      ;;
+    --raw)
+      RAW_MODE=true
+      shift
+      ;;
+    --)
+      shift
+      MACH_RUN_ARGS+=("$@")
+      break
+      ;;
+    *)
+      MACH_RUN_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ "$SSH_MODE" == true && "$RAW_MODE" == true ]]; then
+  echo "Error: --ssh and --raw cannot be used together." >&2
+  echo "--ssh forces remote-display runtime overrides; --raw disables launcher runtime overrides." >&2
+  exit 1
+fi
+
 require_command() {
   local cmd="$1"
   local hint="$2"
@@ -77,6 +109,44 @@ write_native_host_manifest() {
   done
 }
 
+configure_ssh_display() {
+  echo "SSH remote display mode enabled."
+
+  if [[ -z "${DISPLAY:-}" ]]; then
+    echo "Error: DISPLAY is not set. Start SSH with X forwarding, for example: ssh -Y <host>" >&2
+    exit 1
+  fi
+
+  if [[ "$DISPLAY" =~ ^localhost(:[0-9]+(\.[0-9]+)?)$ ]]; then
+    DISPLAY="127.0.0.1${BASH_REMATCH[1]}"
+    export DISPLAY
+    echo "Normalized SSH display to: $DISPLAY"
+  else
+    echo "Using remote display: $DISPLAY"
+  fi
+
+  if [[ "$DISPLAY" =~ ^([^:]+):([0-9]+)(\.[0-9]+)?$ ]]; then
+    local display_host="${BASH_REMATCH[1]}"
+    local display_num="${BASH_REMATCH[2]}"
+    local display_port=$((6000 + display_num))
+
+    if command -v timeout >/dev/null 2>&1; then
+      if ! timeout 3 bash -c ":</dev/tcp/$display_host/$display_port" 2>/dev/null; then
+        echo "Error: cannot reach X11 forwarding at $display_host:$display_port for DISPLAY=$DISPLAY" >&2
+        echo "Check that you connected with ssh -Y or ssh -X and that X11 forwarding is enabled on the SSH server." >&2
+        exit 1
+      fi
+      echo "Verified X11 forwarding endpoint: $display_host:$display_port"
+    else
+      echo "Warning: timeout is not installed; skipping X11 forwarding port preflight." >&2
+    fi
+  fi
+}
+
+if [[ "$SSH_MODE" == true ]]; then
+  configure_ssh_display
+fi
+
 check_dependencies
 
 echo "Building NevoFlux browser from current source..."
@@ -134,13 +204,43 @@ fi
 install -m 0755 "$AGENT_BUILD" "$DIST_BUNDLE/bin/$AGENT_NAME"
 write_native_host_manifest "$DIST_BUNDLE/bin/$AGENT_NAME"
 
-export LANG="${LANG:-en_US.UTF-8}"
-export LANGUAGE="${LANGUAGE:-en_US:en}"
-export GDK_BACKEND="${GDK_BACKEND:-x11}"
-export MOZ_ENABLE_WAYLAND="${MOZ_ENABLE_WAYLAND:-0}"
-export MOZ_WEBRENDER_SOFTWARE="${MOZ_WEBRENDER_SOFTWARE:-1}"
-export MOZ_DISABLE_GFX_SANITY_TEST="${MOZ_DISABLE_GFX_SANITY_TEST:-1}"
-export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
+RUN_PREFS=(
+  --setpref intl.locale.requested=en-US
+  --setpref intl.locale.matchOS=false
+  --setpref app.update.disabledForTesting=true
+  --setpref app.update.auto=false
+  --setpref app.update.enabled=false
+  --setpref app.update.background.enabled=false
+)
+
+if [[ "$RAW_MODE" == true ]]; then
+  echo "Raw launch mode enabled. Skipping launcher runtime env and graphics pref overrides."
+  RUN_PREFS=()
+else
+  export LANG="${LANG:-en_US.UTF-8}"
+  export LANGUAGE="${LANGUAGE:-en_US:en}"
+  export GDK_BACKEND="${GDK_BACKEND:-x11}"
+  export MOZ_ENABLE_WAYLAND="${MOZ_ENABLE_WAYLAND:-0}"
+  export MOZ_WEBRENDER_SOFTWARE="${MOZ_WEBRENDER_SOFTWARE:-1}"
+  export MOZ_DISABLE_GFX_SANITY_TEST="${MOZ_DISABLE_GFX_SANITY_TEST:-1}"
+  export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
+fi
+
+if [[ "$SSH_MODE" == true ]]; then
+  export MOZ_X11_EGL=0
+  export MOZ_DISABLE_RDD_SANDBOX="${MOZ_DISABLE_RDD_SANDBOX:-1}"
+  export MOZ_DISABLE_GPU_SANDBOX="${MOZ_DISABLE_GPU_SANDBOX:-1}"
+
+  RUN_PREFS+=(
+    --setpref layers.acceleration.disabled=true
+    --setpref gfx.webrender.all=false
+    --setpref gfx.webrender.software=true
+    --setpref gfx.x11-egl.force-disabled=true
+    --setpref media.ffmpeg.vaapi.enabled=false
+    --setpref widget.dmabuf.force-enabled=false
+    --setpref widget.dmabuf.force-disabled=true
+  )
+fi
 
 echo "Using build: $APP_BIN"
 echo "Staged extension: $DIST_BUNDLE/extensions/agent@nevoflux.com.xpi"
@@ -149,10 +249,5 @@ echo "Staged native agent: $DIST_BUNDLE/bin/$AGENT_NAME"
 exec npm run start -- \
   --new-instance \
   --temp-profile \
-  --setpref intl.locale.requested=en-US \
-  --setpref intl.locale.matchOS=false \
-  --setpref app.update.disabledForTesting=true \
-  --setpref app.update.auto=false \
-  --setpref app.update.enabled=false \
-  --setpref app.update.background.enabled=false \
-  "$@"
+  "${RUN_PREFS[@]}" \
+  "${MACH_RUN_ARGS[@]}"

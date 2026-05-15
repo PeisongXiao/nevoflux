@@ -341,6 +341,22 @@ The full local launcher builds the browser, native agent, WASM chat panel, packa
 npm run start:full
 ```
 
+For SSH X11 forwarding fallback:
+
+```bash
+./scripts/launch-nevoflux.sh --ssh
+```
+
+This mode is intended as a backup only. Raw SSH X11 forwarding is slow for full browser UI testing; remote desktop, VNC, or xpra-style sessions are preferred when available.
+
+For local testing without launcher-provided runtime environment or graphics preference overrides:
+
+```bash
+./scripts/launch-nevoflux.sh --raw
+```
+
+`--raw` still builds and stages the browser, native agent, and panel. It only changes launch-time environment and preference handling, and cannot be combined with `--ssh`.
+
 ## Configuration
 
 ### Native Messaging Manifest
